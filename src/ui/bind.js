@@ -45,6 +45,15 @@ import {
   toggleDiarySchemaEditor,
   updateDiarySchemaField
 } from './diary-ui.js';
+import {
+  confirmRpeAwarenessNo,
+  confirmRpeAwarenessYes,
+  dismissRpeAwareness,
+  finishRpeGuideAndContinue,
+  maybePromptRpeAwareness,
+  openRpeGuidanceTab
+} from './rpe-guidance-ui.js';
+import { renderRpeGuidancePanel } from '../domain/rpe-guidance.js';
 import { renderMonthlySummaryBanner, toggleMonthlySummaryDropdown } from '../domain/monthly-summary.js';
 import { openMealDetail, closeMealDetail, generateDailyFoodLog, openLoggedMealDetail } from '../domain/meal-planner.js';
 import { addNetworkFriendDemo, applyNetworkKillSwitch, filterNetworkFriends, networkCreateSquadDemo, networkInviteSquadDemo, renderSharePreview, saveNetworkProfile, shareActiveRouteCard, shareNetworkMeal, shareNetworkWorkout, toggleNetworkEnabled, toggleSquadDetail } from './network.js';
@@ -237,6 +246,13 @@ export function bindUi() {
   window.removeDiarySchemaField = removeDiarySchemaField;
   window.updateDiarySchemaField = updateDiarySchemaField;
   window.resetDiarySchemaFields = resetDiarySchemaFields;
+  window.renderRpeGuidancePanel = renderRpeGuidancePanel;
+  window.openRpeGuidanceTab = openRpeGuidanceTab;
+  window.maybePromptRpeAwareness = maybePromptRpeAwareness;
+  window.confirmRpeAwarenessYes = confirmRpeAwarenessYes;
+  window.confirmRpeAwarenessNo = confirmRpeAwarenessNo;
+  window.dismissRpeAwareness = dismissRpeAwareness;
+  window.finishRpeGuideAndContinue = finishRpeGuideAndContinue;
   window.renderMonthlySummaryBanner = renderMonthlySummaryBanner;
   window.toggleMonthlySummaryDropdown = toggleMonthlySummaryDropdown;
   window.filterCardioTypeList = filterCardioTypeList;

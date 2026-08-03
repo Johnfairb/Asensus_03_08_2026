@@ -1277,8 +1277,12 @@ export function showBreakdown(type) {
             <p style="font-size:12px; color:var(--text-muted); line-height:1.5; margin:10px 0 0;">
                 Rule: RPE 10 → 8.5 h; each extra RPE point → +5 min.
                 Gym: 45 min = 5 RPE (+1 per extra 15 min). Steady = 2 RPE. Lactate/HIT = your RPE.
-            </p>`;
+            </p>
+            <button type="button" class="btn-primary is-secondary" style="margin:14px 0 0; width:100%;" onclick="closeMacroBreakdown(); openRpeGuidanceTab()">View RPE guidance</button>`;
         sheet.classList.remove('hidden');
+        try {
+            if (typeof window.maybePromptRpeAwareness === 'function') window.maybePromptRpeAwareness();
+        } catch (e) { /* ignore */ }
         return;
     }
 

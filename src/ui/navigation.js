@@ -146,7 +146,7 @@ export function switchFuelSubTab(panel, btn) {
 }
 
 export function switchDriveSubTab(panel, btn) {
-    const panels = ['goals', 'workout', 'log'];
+    const panels = ['goals', 'workout', 'log', 'guidance'];
     panels.forEach(id => {
         document.getElementById(`drive-panel-${id}`)?.classList.toggle('hidden', id !== panel);
     });
@@ -158,6 +158,11 @@ export function switchDriveSubTab(panel, btn) {
     if (panel === 'log') {
         try {
             if (typeof window.generateDailyExerciseLog === 'function') window.generateDailyExerciseLog();
+        } catch (e) { /* ignore */ }
+    }
+    if (panel === 'guidance') {
+        try {
+            if (typeof window.renderRpeGuidancePanel === 'function') window.renderRpeGuidancePanel();
         } catch (e) { /* ignore */ }
     }
     document.getElementById('app-container')?.scrollTo(0, 0);

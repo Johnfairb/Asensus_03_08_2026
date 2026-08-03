@@ -13,6 +13,7 @@ import {
   resetDiarySchemaMode,
   updateDiaryField
 } from '../domain/diary-schema.js';
+import { maybePromptRpeAwareness } from './rpe-guidance-ui.js';
 
 let _editorOpen = false;
 
@@ -77,6 +78,11 @@ export function renderDiaryFields(mode, prefillEntry = null) {
   });
 
   if (prefillEntry) applyDiaryFieldValues(prefillEntry);
+
+  // First time an RPE field appears — ask if they know the scale
+  if (fields.some(f => String(f.id || '').toLowerCase() === 'rpe' || /rpe/i.test(f.label || ''))) {
+    try { maybePromptRpeAwareness(); } catch (e) { /* ignore */ }
+  }
 
   const avgEl = document.getElementById('journal-weekly-averages');
   if (avgEl) {

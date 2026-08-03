@@ -402,6 +402,7 @@
             <button type="button" class="btn-primary catalogue-sub-btn is-primary active" data-drive="goals" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchDriveSubTab('goals', this)">Goals</button>
             <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-drive="workout" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchDriveSubTab('workout', this)">Plan</button>
             <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-drive="log" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchDriveSubTab('log', this)">Log</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-drive="guidance" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchDriveSubTab('guidance', this)">Guidance</button>
         </div>
 
         <div id="drive-dashboard">
@@ -500,6 +501,12 @@
             <div id="drive-panel-log" class="hidden">
                 <button type="button" id="log-manual-workout-btn" class="btn-primary is-secondary" style="display:flex; justify-content:center; align-items:center; margin-top:0; margin-bottom:16px;" onclick="startManualWorkout(this)">▶ Log manual workout</button>
                 <div id="daily-exercise-log"></div>
+            </div>
+
+            <div id="drive-panel-guidance" class="hidden">
+                <div class="card" style="padding:18px 16px 20px;">
+                    <div id="rpe-guidance-content"></div>
+                </div>
             </div>
         </div>
         <!-- Execution Zone anchors here during workouts -->
