@@ -1,23 +1,169 @@
 /**
  * Lactate / HIT session engine.
- * - ~45 min total (warmup + 10 min HIT block + stretch)
- * - Per-set random work:rest (multiples of 5s, each ≥ 20s), summing to 10 min
- * - Multi-select HIT modalities; mixed sessions alternate sets
+ * Baselines → RPE-scaled intensity targets; HIT block duration from desired RPE.
  */
 
-export const LACTATE_WORK_BLOCK_SEC = 10 * 60; // 10 minutes of HIT block
+const BASELINE_STORAGE_KEY = 'ascensus_lactate_baselines_v1';
+
+/** HIT work block minutes from initial desired RPE (excludes warmup + stretch). */
+export const LACTATE_DURATION_BY_RPE = {
+    7: 20,
+    8: 15,
+    9: 10,
+    10: 5
+};
+
+/** @deprecated Prefer lactateWorkBlockSec(rpe) — kept for older imports. */
+export const LACTATE_WORK_BLOCK_SEC = 10 * 60;
+
+export function lactateWorkBlockMinutes(rpe) {
+    const r = clampDesiredRpe(rpe);
+    return LACTATE_DURATION_BY_RPE[r] || 20;
+}
+
+export function lactateWorkBlockSec(rpe) {
+    return lactateWorkBlockMinutes(rpe) * 60;
+}
+
+export function clampDesiredRpe(rpe) {
+    const n = Math.round(Number(rpe) || 7);
+    return Math.max(7, Math.min(10, n));
+}
+
+export function clampSessionRpe(rpe) {
+    const n = Math.round(Number(rpe) || 7);
+    return Math.max(1, Math.min(10, n));
+}
+
+/**
+ * Per-modality baseline tests + how intensity is displayed.
+ * Machine modalities use resistance 7 (disclaimer in UI).
+ */
+export const HIT_MODALITY_META = {
+    treadmill_sprints: {
+        label: 'Treadmill sprints',
+        intensityKind: 'speed',
+        unitLabel: 'km/h',
+        machineResistance: null,
+        tests: [
+            { id: 'm400', label: '400 m time (track preferred)', unit: 'sec', distanceM: 400, hint: 'Advise a track for the 400 m to reduce injury risk.' },
+            { id: 'm100', label: '100 m time', unit: 'sec', distanceM: 100 },
+            { id: 'm200', label: '200 m time', unit: 'sec', distanceM: 200 }
+        ]
+    },
+    incline_treadmill: {
+        label: 'Incline treadmill sprints',
+        intensityKind: 'speed',
+        unitLabel: 'km/h',
+        machineResistance: null,
+        tests: [
+            { id: 'm400', label: '400 m time (track preferred)', unit: 'sec', distanceM: 400 },
+            { id: 'm100', label: '100 m time', unit: 'sec', distanceM: 100 },
+            { id: 'm200', label: '200 m time', unit: 'sec', distanceM: 200 }
+        ]
+    },
+    swimming: {
+        label: 'Swimming intervals',
+        intensityKind: 'time',
+        unitLabel: 'sec',
+        machineResistance: null,
+        tests: [
+            { id: 'len50', label: '1 length (50 m) time', unit: 'sec', distanceM: 50 },
+            { id: 'len100', label: '2 lengths (100 m) time', unit: 'sec', distanceM: 100 }
+        ]
+    },
+    attack_bike: {
+        label: 'Attack bike intervals',
+        intensityKind: 'split',
+        unitLabel: 'split',
+        machineResistance: 7,
+        tests: [
+            { id: 'd20', label: 'Max distance in 20 s', unit: 'm', durationSec: 20 },
+            { id: 'd40', label: 'Max distance in 40 s', unit: 'm', durationSec: 40 }
+        ]
+    },
+    rower: {
+        label: 'Rower intervals',
+        intensityKind: 'split',
+        unitLabel: 'split',
+        machineResistance: 7,
+        tests: [
+            { id: 'd20', label: 'Max distance in 20 s', unit: 'm', durationSec: 20 },
+            { id: 'd40', label: 'Max distance in 40 s', unit: 'm', durationSec: 40 }
+        ]
+    },
+    skier: {
+        label: 'SkiErg intervals',
+        intensityKind: 'split',
+        unitLabel: 'split',
+        machineResistance: 7,
+        tests: [
+            { id: 'd20', label: 'Max distance in 20 s', unit: 'm', durationSec: 20 },
+            { id: 'd40', label: 'Max distance in 40 s', unit: 'm', durationSec: 40 }
+        ]
+    },
+    battle_rope: {
+        label: 'Battle rope',
+        intensityKind: 'chops',
+        unitLabel: 'chops',
+        machineResistance: null,
+        tests: [
+            { id: 'c20', label: 'Max rope chops in 20 s', unit: 'count', durationSec: 20 },
+            { id: 'c40', label: 'Max rope chops in 40 s', unit: 'count', durationSec: 40 }
+        ]
+    },
+    cycling: {
+        label: 'Cycling',
+        intensityKind: 'speed',
+        unitLabel: 'km/h',
+        machineResistance: 7,
+        tests: [
+            { id: 'd20', label: 'Max distance in 20 s', unit: 'm', durationSec: 20 },
+            { id: 'd40', label: 'Max distance in 40 s', unit: 'm', durationSec: 40 }
+        ]
+    },
+    elliptical: {
+        label: 'Elliptical',
+        intensityKind: 'speed',
+        unitLabel: 'km/h',
+        machineResistance: 7,
+        tests: [
+            { id: 'd20', label: 'Max distance in 20 s', unit: 'm', durationSec: 20 },
+            { id: 'd40', label: 'Max distance in 40 s', unit: 'm', durationSec: 40 }
+        ]
+    }
+};
+
+/** Legacy id aliases → current modality ids. */
+const TYPE_ALIASES = {
+    interval_sprints: 'treadmill_sprints',
+    hill_sprint: 'incline_treadmill',
+    spinning: 'cycling'
+};
+
+export function normalizeHitTypeId(id) {
+    if (!id || id === 'hit_class') return id;
+    return TYPE_ALIASES[id] || id;
+}
 
 export const HIT_TYPE_OPTIONS = [
-    { id: 'interval_sprints', label: 'Interval sprints' },
-    { id: 'attack_bike', label: 'Attack bike intervals' },
-    { id: 'skier', label: 'Skier intervals' },
-    { id: 'swimming', label: 'Swimming intervals' },
-    { id: 'battle_rope', label: 'Battle rope intervals' },
-    { id: 'rower', label: 'Rower intervals' },
-    { id: 'hill_sprint', label: 'Hill sprint intervals' },
-    { id: 'spinning', label: 'Spinning' },
+    ...Object.entries(HIT_MODALITY_META).map(([id, meta]) => ({ id, label: meta.label })),
     { id: 'hit_class', label: 'HIT class' }
 ];
+
+/** RPE rule table from Ascensus lactate spec. */
+export const LACTATE_RPE_RULES = {
+    10: { firstFactor: 1.0, workStep: 0.92, minRestRatio: 2.0, refRestSec: 60, restRecovery: 0.9, restStep: 0.95, maxRestSec: null },
+    9:  { firstFactor: 0.9, workStep: 0.94, minRestRatio: 1.5, refRestSec: 60, restRecovery: 0.94, restStep: 0.96, maxRestSec: null },
+    8:  { firstFactor: 0.8, workStep: 0.96, minRestRatio: 1.0, refRestSec: 60, restRecovery: 0.98, restStep: 0.97, maxRestSec: null },
+    7:  { firstFactor: 0.7, workStep: 0.98, minRestRatio: 0.5, refRestSec: 60, restRecovery: 1.0, restStep: 0.98, maxRestSec: 60 },
+    6:  { firstFactor: 0.6, workStep: 0.99, minRestRatio: 0.25, refRestSec: 30, restRecovery: 1.0, restStep: 0.99, maxRestSec: 30 },
+    5:  { firstFactor: 0.5, workStep: 0.99, minRestRatio: 0.25, refRestSec: 30, restRecovery: 1.0, restStep: 0.99, maxRestSec: 30 },
+    4:  { firstFactor: 0.4, workStep: 0.99, minRestRatio: 0.25, refRestSec: 30, restRecovery: 1.0, restStep: 0.99, maxRestSec: 30 },
+    3:  { firstFactor: 0.3, workStep: 0.99, minRestRatio: 0.25, refRestSec: 30, restRecovery: 1.0, restStep: 0.99, maxRestSec: 30 },
+    2:  { firstFactor: 0.2, workStep: 0.99, minRestRatio: 0.25, refRestSec: 30, restRecovery: 1.0, restStep: 0.99, maxRestSec: 30 },
+    1:  { firstFactor: 0.1, workStep: 0.99, minRestRatio: 0.25, refRestSec: 30, restRecovery: 1.0, restStep: 0.99, maxRestSec: 30 }
+};
 
 function mulberry32(seed) {
     let t = seed >>> 0;
@@ -34,35 +180,261 @@ export function getLactateMonthKey(date = new Date()) {
     return d.getFullYear() * 100 + (d.getMonth() + 1);
 }
 
-function shuffleCopy(arr, rng) {
-    const out = arr.slice();
-    for (let i = out.length - 1; i > 0; i--) {
-        const j = Math.floor(rng() * (i + 1));
-        [out[i], out[j]] = [out[j], out[i]];
-    }
-    return out;
-}
-
 function formatSec(sec) {
-    if (sec % 60 === 0) return `${sec / 60}m`;
-    if (sec > 60) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
-    return `${sec}s`;
+    const s = Math.max(0, Math.round(Number(sec) || 0));
+    if (s % 60 === 0) return `${s / 60}m`;
+    if (s > 60) return `${Math.floor(s / 60)}m ${s % 60}s`;
+    return `${s}s`;
 }
 
 export function formatWorkRestLabel(workSec, restSec) {
     return `${formatSec(workSec)} work / ${formatSec(restSec)} rest`;
 }
 
+export function getRpeRules(rpe) {
+    const r = clampSessionRpe(rpe);
+    return LACTATE_RPE_RULES[r] || LACTATE_RPE_RULES[7];
+}
+
+export function needsLowRpeDisclaimer(rpe) {
+    return clampSessionRpe(rpe) <= 5;
+}
+
+/* ─── Baselines persistence ─────────────────────────────────────────────── */
+
+export function loadLactateBaselines() {
+    try {
+        const raw = localStorage.getItem(BASELINE_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+export function saveLactateBaselines(all) {
+    try {
+        localStorage.setItem(BASELINE_STORAGE_KEY, JSON.stringify(all || {}));
+    } catch (e) { /* ignore */ }
+}
+
+export function getModalityBaselines(typeId) {
+    const id = normalizeHitTypeId(typeId);
+    const all = loadLactateBaselines();
+    return all[id] || null;
+}
+
+export function hasAnyBaseline(typeId) {
+    const b = getModalityBaselines(typeId);
+    if (!b || !b.tests) return false;
+    return Object.values(b.tests).some(v => Number(v) > 0);
+}
+
+export function modalitiesNeedingBaseline(typeIds) {
+    return (typeIds || [])
+        .map(normalizeHitTypeId)
+        .filter(id => id && id !== 'hit_class' && HIT_MODALITY_META[id] && !hasAnyBaseline(id));
+}
+
+export function saveModalityBaselines(typeId, testsObj) {
+    const id = normalizeHitTypeId(typeId);
+    const all = loadLactateBaselines();
+    const cleaned = {};
+    Object.entries(testsObj || {}).forEach(([k, v]) => {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) cleaned[k] = n;
+    });
+    all[id] = { tests: cleaned, updatedAt: new Date().toISOString() };
+    saveLactateBaselines(all);
+    return all[id];
+}
+
+export function clearModalityBaselines(typeId) {
+    const id = normalizeHitTypeId(typeId);
+    const all = loadLactateBaselines();
+    delete all[id];
+    saveLactateBaselines(all);
+}
+
+/* ─── Rate / intensity math ─────────────────────────────────────────────── */
+
+/** Convert a filled baseline test into a comparable rate (higher = harder). */
+export function baselineTestToRate(typeId, testId, rawValue) {
+    const meta = HIT_MODALITY_META[normalizeHitTypeId(typeId)];
+    if (!meta) return 0;
+    const test = meta.tests.find(t => t.id === testId);
+    const v = Number(rawValue);
+    if (!test || !(v > 0)) return 0;
+
+    if (test.distanceM && test.unit === 'sec') {
+        return test.distanceM / v;
+    }
+    if (test.durationSec && (test.unit === 'm' || test.unit === 'count')) {
+        return v / test.durationSec;
+    }
+    return v;
+}
+
 /**
- * Random work/rest pairs for a HIT block.
- * - Each work and rest ≥ 20s, multiples of 5
- * - Sum of (work + rest) across sets = totalSec (default 10 min)
- * - Ratios vary set-to-set
+ * Build weighted baseline rate + reference duration from saved tests.
  */
-export function generateVariableIntervalSets(totalSec = LACTATE_WORK_BLOCK_SEC, rng = Math.random) {
+export function resolveBaselineRate(typeId, workSec, baselinesOverride = null) {
+    const id = normalizeHitTypeId(typeId);
+    const meta = HIT_MODALITY_META[id];
+    const stored = baselinesOverride || getModalityBaselines(id);
+    if (!meta || !stored?.tests) return { rate: 0, refDurationSec: 20, points: [] };
+
+    const points = [];
+    meta.tests.forEach(test => {
+        const raw = Number(stored.tests[test.id]);
+        if (!(raw > 0)) return;
+        const rate = baselineTestToRate(id, test.id, raw);
+        let dur;
+        if (test.durationSec) dur = test.durationSec;
+        else if (test.distanceM && test.unit === 'sec') dur = raw;
+        else dur = 20;
+        if (rate > 0) points.push({ testId: test.id, rate, durationSec: dur, raw });
+    });
+
+    if (!points.length) return { rate: 0, refDurationSec: 20, points: [] };
+
+    const W = Math.max(5, Number(workSec) || 20);
+    let wSum = 0;
+    let rateSum = 0;
+    let durSum = 0;
+    points.forEach(p => {
+        const w = 1 / (Math.abs(W - p.durationSec) + 1);
+        wSum += w;
+        rateSum += p.rate * w;
+        durSum += p.durationSec * w;
+    });
+    return {
+        rate: rateSum / wSum,
+        refDurationSec: durSum / wSum,
+        points
+    };
+}
+
+/** Scale rate for work duration vs reference (every ±5s of work). */
+export function scaleRateForWorkDuration(rate, workSec, refDurationSec, workStep) {
+    const steps = (Number(workSec) - Number(refDurationSec)) / 5;
+    if (!Number.isFinite(steps) || !Number.isFinite(rate) || rate <= 0) return rate;
+    return rate * Math.pow(workStep, steps);
+}
+
+export function computeSetIntensity({
+    typeId,
+    workSec,
+    restSec,
+    rpe,
+    setIndex = 1,
+    prevRate = null,
+    prevWorkSec = null,
+    baselinesOverride = null
+} = {}) {
+    const rules = getRpeRules(rpe);
+    const resolved = resolveBaselineRate(typeId, workSec, baselinesOverride);
+    if (!(resolved.rate > 0)) {
+        return {
+            rate: 0,
+            display: '—',
+            displayUnit: HIT_MODALITY_META[normalizeHitTypeId(typeId)]?.unitLabel || '',
+            notes: 'Complete a baseline test to unlock intensity targets.'
+        };
+    }
+
+    let rate;
+    if (setIndex <= 1 || !(prevRate > 0)) {
+        const atRef = resolved.rate * rules.firstFactor;
+        rate = scaleRateForWorkDuration(atRef, workSec, resolved.refDurationSec, rules.workStep);
+    } else {
+        const afterRefRest = prevRate * rules.restRecovery;
+        const scaledForWork = scaleRateForWorkDuration(
+            afterRefRest,
+            workSec,
+            prevWorkSec > 0 ? prevWorkSec : resolved.refDurationSec,
+            rules.workStep
+        );
+        const restDeltaSteps = (rules.refRestSec - Number(restSec || 0)) / 5;
+        let withRest = scaledForWork * Math.pow(rules.restStep, restDeltaSteps);
+        const prevWorkScaled = scaleRateForWorkDuration(
+            prevRate,
+            workSec,
+            prevWorkSec > 0 ? prevWorkSec : workSec,
+            rules.workStep
+        );
+        rate = Math.min(withRest, prevWorkScaled);
+    }
+
+    const formatted = formatIntensityDisplay(typeId, rate, workSec);
+    return {
+        rate,
+        ...formatted,
+        refDurationSec: resolved.refDurationSec,
+        notes: null
+    };
+}
+
+export function formatIntensityDisplay(typeId, rate, workSec = 20) {
+    const id = normalizeHitTypeId(typeId);
+    const meta = HIT_MODALITY_META[id];
+    if (!(rate > 0) || !meta) {
+        return { display: '—', displayUnit: '', targetValue: 0 };
+    }
+    const kind = meta.intensityKind;
+    if (kind === 'speed') {
+        const kmh = rate * 3.6;
+        return { display: `${kmh.toFixed(1)} km/h`, displayUnit: 'km/h', targetValue: Math.round(kmh * 10) / 10 };
+    }
+    if (kind === 'time') {
+        const dist = rate * Math.max(5, Number(workSec) || 20);
+        const timeFor50 = 50 / rate;
+        return {
+            display: `${timeFor50.toFixed(1)}s / 50m · ~${Math.round(dist)}m in ${formatSec(workSec)}`,
+            displayUnit: 'sec/50m',
+            targetValue: Math.round(timeFor50 * 10) / 10
+        };
+    }
+    if (kind === 'split') {
+        const split = 500 / rate;
+        const dist = rate * Math.max(5, Number(workSec) || 20);
+        return {
+            display: `${formatSplit(split)} /500m · ~${Math.round(dist)}m`,
+            displayUnit: '/500m',
+            targetValue: Math.round(split * 10) / 10
+        };
+    }
+    if (kind === 'chops') {
+        const chops = Math.round(rate * Math.max(5, Number(workSec) || 20));
+        return {
+            display: `${chops} chops`,
+            displayUnit: 'chops',
+            targetValue: chops
+        };
+    }
+    return { display: String(Math.round(rate * 100) / 100), displayUnit: meta.unitLabel, targetValue: rate };
+}
+
+function formatSplit(sec) {
+    const s = Math.max(0, Number(sec) || 0);
+    const m = Math.floor(s / 60);
+    const rem = (s - m * 60).toFixed(1);
+    return m > 0 ? `${m}:${String(rem).padStart(4, '0')}` : `${Number(rem).toFixed(1)}s`;
+}
+
+/* ─── Interval generation ───────────────────────────────────────────────── */
+
+/**
+ * Build work/rest pairs filling totalSec, honouring RPE min rest:work and max rest.
+ */
+export function generateVariableIntervalSets(totalSec = LACTATE_WORK_BLOCK_SEC, rng = Math.random, rpe = 7) {
     const rand = typeof rng === 'function' ? rng : Math.random;
+    const rules = getRpeRules(rpe);
     const sets = [];
     let remaining = Math.max(40, Math.round(totalSec / 5) * 5);
+    const minRatio = rules.minRestRatio;
+    const maxRest = rules.maxRestSec;
 
     while (remaining >= 40) {
         const leaveRoom = remaining - 40;
@@ -71,51 +443,67 @@ export function generateVariableIntervalSets(totalSec = LACTATE_WORK_BLOCK_SEC, 
         if (forceLast) {
             cycle = remaining;
         } else {
-            const maxCycle = Math.min(150, remaining - 40);
+            const maxCycle = Math.min(180, remaining - 40);
             const choices = [];
             for (let c = 40; c <= maxCycle; c += 5) choices.push(c);
             cycle = choices[Math.floor(rand() * choices.length)] || 40;
         }
 
-        // Split cycle into work + rest (both ≥ 20, multiples of 5)
         const workChoices = [];
-        for (let w = 20; w <= cycle - 20; w += 5) workChoices.push(w);
-        const workSec = workChoices[Math.floor(rand() * workChoices.length)] || 20;
+        for (let w = 20; w <= cycle - 20; w += 5) {
+            let rest = cycle - w;
+            if (rest < w * minRatio - 0.01) continue;
+            if (maxRest != null && rest > maxRest) continue;
+            workChoices.push(w);
+        }
+        let workSec;
+        if (workChoices.length) {
+            workSec = workChoices[Math.floor(rand() * workChoices.length)];
+        } else {
+            workSec = Math.min(40, Math.max(20, Math.round((cycle / (1 + minRatio)) / 5) * 5));
+            let restSec = Math.max(20, Math.ceil((workSec * minRatio) / 5) * 5);
+            if (maxRest != null) restSec = Math.min(restSec, maxRest);
+            const newCycle = workSec + restSec;
+            sets.push({ workSec, restSec, cycleSec: newCycle });
+            remaining -= newCycle;
+            if (remaining < 0) remaining = 0;
+            continue;
+        }
         const restSec = cycle - workSec;
         sets.push({ workSec, restSec, cycleSec: cycle });
         remaining -= cycle;
     }
 
-    // Fold any leftover seconds into the last rest (keep multiples of 5 / ≥20)
     if (remaining > 0 && sets.length) {
-        sets[sets.length - 1].restSec += remaining;
-        sets[sets.length - 1].cycleSec += remaining;
-        remaining = 0;
+        const last = sets[sets.length - 1];
+        if (maxRest == null || last.restSec + remaining <= maxRest) {
+            last.restSec += remaining;
+            last.cycleSec += remaining;
+        } else {
+            last.workSec += remaining;
+            last.cycleSec += remaining;
+        }
     }
 
     return sets;
 }
 
-/**
- * Two distinct “session flavours” for the month (A/B labels for the week).
- * Actual per-set ratios are generated fresh each workout.
- */
 export function getMonthlyLactateProtocols(date = new Date()) {
     const monthKey = getLactateMonthKey(date);
     const rng = mulberry32(monthKey * 9973 + 42);
     const wrap = (slot) => {
-        const sample = generateVariableIntervalSets(LACTATE_WORK_BLOCK_SEC, rng);
-        const avgWork = Math.round(sample.reduce((s, x) => s + x.workSec, 0) / sample.length);
-        const avgRest = Math.round(sample.reduce((s, x) => s + x.restSec, 0) / sample.length);
+        const sample = generateVariableIntervalSets(lactateWorkBlockSec(8), rng, 8);
+        const avgWork = Math.round(sample.reduce((s, x) => s + x.workSec, 0) / Math.max(1, sample.length));
+        const avgRest = Math.round(sample.reduce((s, x) => s + x.restSec, 0) / Math.max(1, sample.length));
         return {
             slot,
             monthKey,
             sets: sample.length,
             workSec: avgWork,
             restSec: avgRest,
-            blockMinutes: LACTATE_WORK_BLOCK_SEC / 60,
+            blockMinutes: 15,
             label: `variable intervals (~${formatSec(avgWork)} / ${formatSec(avgRest)} avg)`,
-            summary: `${sample.length}× variable work/rest · 10 min HIT (ratios reshuffle each session)`
+            summary: `${sample.length}× variable work/rest · duration from desired RPE`
         };
     };
     return { A: wrap('A'), B: wrap('B'), monthKey };
@@ -127,17 +515,66 @@ export function getLactateProtocolForSlot(slot = 'A', date = new Date()) {
 }
 
 export function hitTypeLabel(id) {
-    return HIT_TYPE_OPTIONS.find(t => t.id === id)?.label || id;
+    const nid = normalizeHitTypeId(id);
+    if (nid === 'hit_class') return 'HIT class';
+    return HIT_MODALITY_META[nid]?.label || HIT_TYPE_OPTIONS.find(t => t.id === nid)?.label || id;
+}
+
+export function applyIntensityToRows(rows, sessionRpe, baselinesByType = null) {
+    let prevByType = Object.create(null);
+    return (rows || []).map((row) => {
+        const typeId = normalizeHitTypeId(row.typeId);
+        const prev = prevByType[typeId] || null;
+        const baselines = baselinesByType?.[typeId] || null;
+        const intensity = computeSetIntensity({
+            typeId,
+            workSec: row.workSec,
+            restSec: row.restSec,
+            rpe: sessionRpe,
+            setIndex: prev ? (prev.setIndex + 1) : 1,
+            prevRate: prev?.rate,
+            prevWorkSec: prev?.workSec,
+            baselinesOverride: baselines
+        });
+        prevByType[typeId] = {
+            rate: intensity.rate,
+            workSec: row.workSec,
+            setIndex: (prev?.setIndex || 0) + 1
+        };
+        const intensityNote = intensity.display && intensity.display !== '—'
+            ? `Target ${intensity.display}`
+            : (intensity.notes || '');
+        const baseNotes = row._baseNotes || (row.notes || '').split(' · Target')[0];
+        return {
+            ...row,
+            typeId,
+            _baseNotes: baseNotes,
+            targetRate: intensity.rate,
+            targetDisplay: intensity.display,
+            targetUnit: intensity.displayUnit,
+            targetValue: intensity.targetValue,
+            notes: [baseNotes, intensityNote].filter(Boolean).join(' · ')
+        };
+    });
 }
 
 /**
  * Build ordered interval rows for selected HIT types.
- * Mixed types → alternate modalities; each set gets its own work/rest.
  */
-export function buildLactateIntervalPlan({ types = [], slot = 'A', date = new Date() } = {}) {
-    const selected = (types || []).filter(Boolean);
+export function buildLactateIntervalPlan({
+    types = [],
+    slot = 'A',
+    date = new Date(),
+    desiredRpe = 7,
+    sessionRpe = null
+} = {}) {
+    const selected = (types || []).map(normalizeHitTypeId).filter(Boolean);
     const isHitClass = selected.length === 1 && selected[0] === 'hit_class';
     const intervalTypes = selected.filter(t => t !== 'hit_class');
+    const initialRpe = clampDesiredRpe(desiredRpe);
+    const liveRpe = sessionRpe != null ? clampSessionRpe(sessionRpe) : initialRpe;
+    const blockSec = lactateWorkBlockSec(initialRpe);
+    const blockMin = lactateWorkBlockMinutes(initialRpe);
 
     if (isHitClass || (!intervalTypes.length && selected.includes('hit_class'))) {
         return {
@@ -145,31 +582,34 @@ export function buildLactateIntervalPlan({ types = [], slot = 'A', date = new Da
             slot,
             protocol: null,
             types: ['hit_class'],
+            desiredRpe: initialRpe,
+            sessionRpe: liveRpe,
+            blockMinutes: null,
             rows: [{
                 typeId: 'hit_class',
                 name: 'HIT class',
                 setIndex: 1,
-                workSec: LACTATE_WORK_BLOCK_SEC,
+                workSec: 0,
                 restSec: 0,
-                repsLabel: '~20–45 min class',
-                durationSec: LACTATE_WORK_BLOCK_SEC,
-                notes: 'Log the class as your Lactate/HIT session. Recovery is based on your RPE.'
+                repsLabel: 'Class — diary RPE only',
+                durationSec: 0,
+                notes: 'No intervals to log. Rate the class RPE in the diary.'
             }],
-            summary: 'HIT class · recovery from session RPE'
+            summary: 'HIT class · diary RPE only'
         };
     }
 
-    const seed = Date.now() ^ (getLactateMonthKey(date) * 1009) ^ (slot === 'B' ? 77 : 13);
+    const seed = Date.now() ^ (getLactateMonthKey(date) * 1009) ^ (slot === 'B' ? 77 : 13) ^ (initialRpe * 17);
     const rng = mulberry32(seed);
-    const intervals = generateVariableIntervalSets(LACTATE_WORK_BLOCK_SEC, rng);
-    const modalities = intervalTypes.length ? intervalTypes : ['interval_sprints'];
+    const intervals = generateVariableIntervalSets(blockSec, rng, liveRpe);
+    const modalities = intervalTypes.length ? intervalTypes : ['treadmill_sprints'];
     const totalSets = intervals.length;
-    const rows = [];
+    const rawRows = [];
 
     if (modalities.length === 1) {
         for (let i = 0; i < totalSets; i++) {
             const iv = intervals[i];
-            rows.push({
+            rawRows.push({
                 typeId: modalities[0],
                 name: hitTypeLabel(modalities[0]),
                 setIndex: i + 1,
@@ -177,7 +617,7 @@ export function buildLactateIntervalPlan({ types = [], slot = 'A', date = new Da
                 restSec: iv.restSec,
                 repsLabel: `${formatSec(iv.workSec)} work`,
                 durationSec: iv.workSec,
-                notes: `${formatWorkRestLabel(iv.workSec, iv.restSec)} · set ${i + 1}/${totalSets}`
+                _baseNotes: `${formatWorkRestLabel(iv.workSec, iv.restSec)} · set ${i + 1}/${totalSets}`
             });
         }
     } else {
@@ -201,7 +641,7 @@ export function buildLactateIntervalPlan({ types = [], slot = 'A', date = new Da
             const typeId = modalities[mi];
             counts[typeId] += 1;
             const iv = intervals[i];
-            rows.push({
+            rawRows.push({
                 typeId,
                 name: hitTypeLabel(typeId),
                 setIndex: counts[typeId],
@@ -209,31 +649,53 @@ export function buildLactateIntervalPlan({ types = [], slot = 'A', date = new Da
                 restSec: iv.restSec,
                 repsLabel: `${formatSec(iv.workSec)} work`,
                 durationSec: iv.workSec,
-                notes: `${formatWorkRestLabel(iv.workSec, iv.restSec)} · ${hitTypeLabel(typeId)} set ${counts[typeId]}`
+                _baseNotes: `${formatWorkRestLabel(iv.workSec, iv.restSec)} · ${hitTypeLabel(typeId)} set ${counts[typeId]}`
             });
             mi = (mi + 1) % modalities.length;
         }
     }
 
+    const rows = applyIntensityToRows(rawRows, liveRpe);
     const typeNames = modalities.map(hitTypeLabel).join(' + ');
     const protocol = {
         slot,
         sets: totalSets,
-        blockMinutes: LACTATE_WORK_BLOCK_SEC / 60,
+        blockMinutes: blockMin,
+        desiredRpe: initialRpe,
         label: 'variable work/rest',
-        summary: `${totalSets}× variable work/rest · 10 min HIT`
+        summary: `${totalSets}× variable · ${blockMin} min HIT @ RPE ${initialRpe}`
     };
     return {
         isHitClass: false,
         slot,
         protocol,
         types: modalities,
+        desiredRpe: initialRpe,
+        sessionRpe: liveRpe,
+        blockMinutes: blockMin,
         rows,
         summary: `Session ${slot}: ${protocol.summary} · ${typeNames}`
     };
 }
 
-/** Compact warmup so session lands near ~45 min with 10 min HIT + stretch. */
+/** Rebuild intensity targets when live session RPE changes (duration unchanged). */
+export function recalculateLactatePlanIntensities(selection, newSessionRpe) {
+    if (!selection || selection.isHitClass) return selection;
+    const rpe = clampSessionRpe(newSessionRpe);
+    const baseRows = (selection.rows || []).map(r => ({
+        ...r,
+        _baseNotes: r._baseNotes || (r.notes || '').split(' · Target')[0]
+    }));
+    const rows = applyIntensityToRows(baseRows, rpe);
+    const blockMin = selection.blockMinutes || lactateWorkBlockMinutes(selection.desiredRpe || 7);
+    return {
+        ...selection,
+        sessionRpe: rpe,
+        rows,
+        summary: `Session ${selection.slot || 'A'}: ${rows.length}× variable · ${blockMin} min HIT @ RPE ${selection.desiredRpe || rpe} (live ${rpe}) · ${(selection.types || []).map(hitTypeLabel).join(' + ')}`
+    };
+}
+
 export function getLactateWarmupParts() {
     return [
         { name: 'Pulse Raising', reps: '3–5 Mins', notes: 'Light jog, skip, bike, or skip rope.' },
@@ -242,10 +704,6 @@ export function getLactateWarmupParts() {
     ];
 }
 
-/**
- * Recovery after a HIT class, driven by logged RPE.
- * Returns { nextDayOverride, message } or null.
- */
 export function resolveHitClassRecovery(rpe) {
     const r = Number(rpe);
     if (!Number.isFinite(r)) return null;

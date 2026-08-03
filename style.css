@@ -696,6 +696,9 @@ label { display: block; font-size: 11px; color: #bbb; margin-bottom: 8px; margin
     padding: 4px 16px 12px;
 }
 .grocery-aisle-panel.hidden { display: none; }
+
+/* RPE Guidance accordion — last row has no divider */
+.rpe-guidance-card .rpe-guide-row:last-child { border-bottom: none; }
 .inventory-row.is-banned {
     opacity: 0.55;
 }

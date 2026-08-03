@@ -10,10 +10,11 @@ const HIT_TYPE_LABELS_RE = new RegExp(
     'i'
 );
 import { commitMatchSession, commitPracticeSession, dateToISO, generateFutureTimeline, getWorkoutSessionSnapshot, invalidateWeekPlanCache, isAuxEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isSteadyCardio, isStrengthEvent, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, setRouteOverride, addDaysISO } from '../domain/route-planner.js';
-import { openLactateHitPicker, shouldPromptLactateHitTypes } from './lactate-ui.js';
+import { lactateSessionRpeBarHtml, openLactateHitPicker, shouldPromptLactateHitTypes } from './lactate-ui.js';
 import { applyDailyModifiers, saveSettings } from '../domain/thermodynamics.js';
 import { addDropSetToExercise, addExerciseToActiveLog, addSetToExercise, addSupersetWithNext } from '../domain/workout-generator.js';
 import { applyHypertrophyFatigueFromSession, hypertrophyRestSeconds, isHypertrophyPhase } from '../domain/hypertrophy-engine.js';
+import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry } from './journey.js';
@@ -160,6 +161,9 @@ export function renderWorkoutLog() {
         html += `</div>`;
     }
 
+    // Lactate/HIT: live session RPE adjuster at top of the workout log
+    html += lactateSessionRpeBarHtml();
+
     store.activeLog.items.forEach((item, exIdx) => {
         const isCardio = (item.exercise.domain || '').toLowerCase() === 'cardio';
         if (isSteadyCardioLogItem(item) && Array.isArray(item.sets) && item.sets.length > 1) {
@@ -234,6 +238,8 @@ export function openExerciseSetsModal(exIdx) {
         item.isWarmupGroup || isStaticStretchingLogItem(item) || isSteadyCardioLogItem(item) || isLactateHitLogItem(item)
     );
     document.getElementById('exercise-sets-modal').classList.remove('hidden');
+    // First hypertrophy session: ask known weight or run 10@5 RIR finder
+    maybePromptWeightFinder(exIdx);
 }
 
 /** Steady duration always comes from the session timer (minutes, floored by rounding). */
@@ -706,11 +712,11 @@ export function renderExerciseSets() {
         if (isHitClass || (item.sets || []).every(s => s.isText)) {
             const set = item.sets[0] || { completed: false, reps: '~20–45 min' };
             const html = `
-                <div style="font-size:11px; color:var(--text-muted); margin-bottom:16px; line-height:1.45;">Lactate/HIT class — mark when finished. Session RPE is collected after Complete log.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:16px; line-height:1.45;">HIT class — no intervals to log here. Session RPE is collected in the diary.</div>
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; padding:18px 16px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-surface-elevated);">
                     <div style="min-width:0; flex:1;">
-                        <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:6px;">Duration</div>
-                        <div style="font-size:22px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${set.reps || '~20–45 min'}</div>
+                        <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:6px;">Session</div>
+                        <div style="font-size:22px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${set.reps || 'Diary RPE only'}</div>
                         ${item.note ? `<div style="font-size:11px; color:var(--text-silver); margin-top:8px; line-height:1.4;">${item.note}</div>` : ''}
                     </div>
                     <div style="flex-shrink:0; text-align:center;">
@@ -722,11 +728,13 @@ export function renderExerciseSets() {
             return;
         }
 
-        let html = `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">Log each interval’s <strong style="color:var(--text-main);">duration</strong>. Rest starts automatically and shows on the workout card.</div>`;
-        html += `<div class="set-header" style="margin-top:8px;"><div style="width:25px;">SET</div><div style="flex:1;text-align:center;">DURATION</div><div style="flex:1;text-align:center; color:var(--text-muted);">REST</div><div style="width:48px;"></div></div>`;
+        let html = `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">Hit each interval’s <strong style="color:var(--text-main);">target intensity</strong> for the work time. Rest starts automatically.</div>`;
+        html += `<div class="set-header" style="margin-top:8px;"><div style="width:25px;">SET</div><div style="flex:1;text-align:center;">WORK</div><div style="flex:1;text-align:center; color:var(--text-muted);">REST</div><div style="width:48px;"></div></div>`;
         item.sets.forEach((set, setIdx) => {
             const dur = set.duration_sec != null ? set.duration_sec : (parseInt(set.reps, 10) || 30);
             const restLabel = set.restTime > 0 ? formatDurationSecLabel(set.restTime) : '—';
+            const rowMeta = (item.lactateRows && item.lactateRows[setIdx]) || null;
+            const target = set.targetDisplay || rowMeta?.targetDisplay || '';
             let lockOutClass = set.locked ? 'locked disabled' : '';
             let btnText = set.lockTimeLeft ? set.lockTimeLeft + 's' : '✓';
             let overridesHtml = '';
@@ -745,6 +753,7 @@ export function renderExerciseSets() {
                     </div>
                     <div class="set-check"><div class="check-btn ${set.completed ? 'completed' : ''} ${lockOutClass}" id="btn-check-${exIdx}-${setIdx}" onclick="toggleSetComplete(${exIdx}, ${setIdx})">${btnText}</div></div>
                 </div>
+                ${target ? `<div style="font-size:12px; color:var(--gold-accent); margin-top:6px; font-family:'Roboto Mono'; font-weight:700;">Target · ${target}</div>` : ''}
                 ${overridesHtml}
                 ${set.notes ? `<div style="font-size:9px; color:var(--text-muted); margin-top:4px; font-family:'Roboto Mono';">${set.notes}</div>` : ''}
             </div>`;
@@ -1476,7 +1485,9 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
     document.getElementById('log-type-selector').value = type;
     const titleMap = { bodyfat: 'Body fat', weight: 'Weight' };
     const lactateTitle = window._lactateHitSelection?.summary
-        ? `Lactate/HIT · ${window._lactateHitSelection.isHitClass ? 'HIT class' : `Session ${window._lactateHitSelection.slot || 'A'}`}`
+        ? `Lactate/HIT · ${window._lactateHitSelection.isHitClass
+            ? 'HIT class'
+            : `RPE ${window._lactateHitSelection.sessionRpe ?? window._lactateHitSelection.desiredRpe ?? ''} · ${window._lactateHitSelection.blockMinutes || ''} min`}`
         : null;
     document.getElementById('current-route-title').innerText = lactateTitle
         || titleMap[type]
@@ -1541,6 +1552,7 @@ export function discardInProgressWorkout() {
     window.manualSessionKind = null;
     window.editingSessionId = null;
     window._lactateHitSelection = null;
+    window._hitClassDiaryOnly = false;
     if (store.activeLog?.type === 'workout') {
         store.activeLog.items = [];
     }
@@ -2168,6 +2180,7 @@ export async function commitWorkoutSession() {
     window.editingSessionId = null;
     window.manualSessionKind = null;
     window._lactateHitSelection = null;
+    window._hitClassDiaryOnly = false;
     window._workoutSessionConfirmed = false;
     window._loggedSessionDurationMs = 0;
     window._loggedSessionDurationLabel = '';
@@ -2345,6 +2358,14 @@ export function dismissJournalModal() {
     if (modal) modal.classList.add('hidden');
     const zone = document.getElementById('execution-zone');
     if (zone && zone.classList.contains('show')) zone.style.pointerEvents = '';
+    // HIT class diary-only: abandoning the diary clears the synthetic session
+    if (window._hitClassDiaryOnly) {
+        window._hitClassDiaryOnly = false;
+        window._lactateHitSelection = null;
+        window._workoutSessionConfirmed = false;
+        window.manualSessionKind = null;
+        if (store.activeLog) store.activeLog.items = [];
+    }
     window.journalMode = null;
     window.pendingPracticeDate = null;
     window.pendingMatchDate = null;

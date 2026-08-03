@@ -1,5 +1,5 @@
 /**
- * RPE scale guidance + first-time awareness prompt.
+ * Exercise Guidance tab — RPE scale + training term explainers.
  */
 const RPE_AWARE_KEY = 'ascensus_rpe_scale_aware';
 
@@ -15,6 +15,36 @@ export const RPE_SCALE = [
     { score: 3, title: 'Light', body: 'Very slightly out of breath but very comfortable.' },
     { score: 2, title: 'Very light', body: 'Very little difficulty speaking or breathing; very light exercise.' },
     { score: 1, title: 'Rest', body: 'Barely exercising at all.' }
+];
+
+/** Topic cards under Exercise → Guidance (accordion, same pattern as shopping / My Foods). */
+export const GUIDANCE_TOPICS = [
+    {
+        id: 'rpe',
+        label: 'RPE SCALE',
+        intro: 'Rate of Perceived Exertion (1–10) is how hard the work felt. Use breathing and speech as your guide — not ego.',
+        kind: 'rpe'
+    },
+    {
+        id: 'lactate',
+        label: 'LACTATE / HIT',
+        body: 'A Lactate/HIT session is geared around improving the athlete’s anaerobic cardio. Improving anaerobic cardio allows the athlete to perform high-intensity activity for longer periods of time.'
+    },
+    {
+        id: 'steady',
+        label: 'STEADY STATE',
+        body: 'Steady state cardio trains the body’s aerobic cardio. This gives the athlete a better baseline for anaerobic cardio and improves their ability to maintain low intensity for long periods of time.'
+    },
+    {
+        id: 'hypertrophy',
+        label: 'HYPERTROPHY',
+        body: 'This is training based around increasing the size of the muscles. This will also provide strength gains, however not as much as strength training.'
+    },
+    {
+        id: 'rir',
+        label: 'RIR',
+        body: 'This is the reps in reserve — the number of additional reps you could have done after you finished the set.'
+    }
 ];
 
 export function hasAcknowledgedRpeScale() {
@@ -43,16 +73,54 @@ export function buildRpeScaleHtml({ compact = false } = {}) {
     return `<div class="rpe-guide-list">${rows}</div>`;
 }
 
+function escapeHtml(s) {
+    return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function buildTopicAccordionHtml(topic) {
+    const panelBody = topic.kind === 'rpe'
+        ? buildRpeScaleHtml()
+        : `<p style="margin:12px 0 4px; font-size:13px; color:var(--text-silver); line-height:1.55;">${escapeHtml(topic.body)}</p>`;
+    return `
+        <div class="card grocery-aisle-card rpe-guidance-card" style="margin-bottom:12px;">
+            <button type="button" id="guidance-header-${topic.id}" class="grocery-aisle-header" aria-expanded="false" onclick="toggleGuidanceSection('${topic.id}')">
+                <strong>${escapeHtml(topic.label)}</strong>
+                <span id="guidance-chevron-${topic.id}" class="grocery-aisle-chevron">+</span>
+            </button>
+            <div id="guidance-panel-${topic.id}" class="grocery-aisle-panel hidden" style="padding:4px 16px 12px;">
+                ${panelBody}
+            </div>
+        </div>`;
+}
+
+/** Expand / collapse any Guidance accordion section. */
+export function toggleGuidanceSection(id) {
+    const panel = document.getElementById(`guidance-panel-${id}`);
+    const chevron = document.getElementById(`guidance-chevron-${id}`);
+    const header = document.getElementById(`guidance-header-${id}`);
+    if (!panel) return;
+    const opening = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !opening);
+    if (chevron) chevron.textContent = opening ? '−' : '+';
+    if (header) header.setAttribute('aria-expanded', opening ? 'true' : 'false');
+}
+
+/** @deprecated use toggleGuidanceSection('rpe') */
+export function toggleRpeGuidanceSection() {
+    toggleGuidanceSection('rpe');
+}
+
 export function renderRpeGuidancePanel() {
     const host = document.getElementById('rpe-guidance-content');
     if (!host) return;
+    const intro = GUIDANCE_TOPICS.find(t => t.id === 'rpe')?.intro || '';
     host.innerHTML = `
-        <div style="margin-bottom:16px;">
-            <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:8px;">Session effort</div>
-            <h2 style="margin:0 0 8px; font-size:18px; color:var(--text-main);">RPE scale</h2>
-            <p style="margin:0; font-size:13px; color:var(--text-silver); line-height:1.5;">
-                Rate of Perceived Exertion (1–10) is how hard the work felt. Use breathing and speech as your guide — not ego.
-            </p>
-        </div>
-        ${buildRpeScaleHtml()}`;
+        <p style="margin:0 0 16px; font-size:13px; color:var(--text-silver); line-height:1.5;">
+            ${escapeHtml(intro)}
+        </p>
+        ${GUIDANCE_TOPICS.map(buildTopicAccordionHtml).join('')}`;
 }

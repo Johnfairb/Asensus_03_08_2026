@@ -808,6 +808,61 @@ export function hypertrophyRestSeconds(rir) {
     return rest;
 }
 
+/**
+ * First-session finder: weight for ~10 reps @ 5 RIR → work weight ≈ +10%.
+ * Rounds up to the exercise equipment step.
+ */
+export function workWeightFromFinder(finderKg, exName) {
+    const raw = Number(finderKg) || 0;
+    if (raw <= 0) return 0;
+    const eq = equipmentForExercise(exName);
+    return roundUpLoad(raw * 1.10, eq);
+}
+
+/** Round a known work weight to equipment increments. */
+export function roundHypertrophyWorkWeight(kg, exName) {
+    const raw = Number(kg) || 0;
+    if (raw <= 0) return 0;
+    return roundUpLoad(raw, equipmentForExercise(exName));
+}
+
+/**
+ * Apply a hypertrophy work weight to an active-log item:
+ * rebuild warmups and set all non-warmup working sets to that load.
+ */
+export function applyHypertrophyWorkWeight(item, workKg) {
+    if (!item || !item.exercise) return 0;
+    const exName = item.exercise.name || '';
+    const w = roundHypertrophyWorkWeight(workKg, exName);
+    if (w <= 0) return 0;
+
+    const workReps = 10;
+    const isIso = !!(item.isIsolation || HYPERTROPHY_EXERCISE_META[exName]?.role === 'isolation');
+    const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
+    const planned = typeof item.plannedSets === 'number' ? item.plannedSets : Math.max(3, workSets.length || 3);
+    const rest = hypertrophyRestSeconds(4);
+
+    const warmups = buildHypertrophyWarmupSets(exName, w, workReps, isIso);
+    const working = [];
+    for (let i = 0; i < planned; i++) {
+        const prev = workSets[i] || {};
+        working.push({
+            ...prev,
+            weight: w,
+            reps: prev.reps || workReps,
+            rpe: prev.rpe === '' || prev.rpe == null ? 4 : prev.rpe,
+            completed: false,
+            restTime: prev.restTime != null ? prev.restTime : rest,
+            isWarmup: false
+        });
+    }
+    item.sets = [...warmups, ...working];
+    item.weightFinderResolved = true;
+    item.needsWeightFind = false;
+    item.workWeightKg = w;
+    return w;
+}
+
 /** Drop set: 80% of previous set weight, rounded up. */
 export function buildDropSetFromPrevious(prevSet, equipment = 'barbell') {
     const prevW = Number(prevSet?.weight) || 0;

@@ -24,7 +24,7 @@ import {
 import { showShopStyleInfo, toggleFoodHeading } from '../domain/food-catalog.js';
 import { cancelExEdit, cancelFoodEdit, closeLibraryDetail, deleteItem, editExercise, editFood, editFromLibraryDetail, filterBoot, loadExercises, loadInventory, openExerciseDetail, openFoodDetail, saveExerciseToCloud, saveFoodToCloud, syncPackSizeFieldMode, toggleBanFromLibraryDetail, toggleExForm, togglePantryForm } from './fuel.js';
 import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, resumeInProgressWorkout, selectCardioTypeInLog, showConstraintInfo, startExecution, startManualWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, toggleConstraint, toggleSetComplete, toggleToolsMenu, updateWorkoutSet } from './drive.js';
-import { closeLactateHitPicker, confirmLactateHitPicker, filterLactateHitOptions, openLactateHitPicker, toggleLactateHitType } from './lactate-ui.js';
+import { closeLactateHitPicker, confirmLactateHitPicker, filterLactateHitOptions, openLactateHitPicker, toggleLactateHitType, selectLactateDesiredRpe, confirmLactateDesiredRpe, lactateWizardBackToTypes, lactateWizardBackToRpe, openLactateBaselineRedo, toggleLactateRedoType, confirmLactateRedoSelection, submitLactateBaselineStep, adjustLactateSessionRpe, openLactateBaselineRedoFromSession, redoLactateBaselineForType } from './lactate-ui.js';
 import { clearWorkoutDraft, hasWorkoutDraft } from '../domain/workout-draft.js';
 import { exportData, injectPitchData } from './demos.js';
 import { drawExerciseChart, drawMacroChart, drawUnifiedChart, executeSundayForecast, filterExerciseChartList, onProgressRangeChange, selectExerciseForChart } from './charts.js';
@@ -53,7 +53,15 @@ import {
   maybePromptRpeAwareness,
   openRpeGuidanceTab
 } from './rpe-guidance-ui.js';
-import { renderRpeGuidancePanel } from '../domain/rpe-guidance.js';
+import {
+  maybePromptWeightFinder,
+  confirmWeightFinderKnowsYes,
+  confirmWeightFinderKnowsNo,
+  submitKnownWorkWeight,
+  submitFinderWorkWeight,
+  dismissWeightFinder
+} from './weight-finder-ui.js';
+import { renderRpeGuidancePanel, toggleRpeGuidanceSection, toggleGuidanceSection } from '../domain/rpe-guidance.js';
 import { renderMonthlySummaryBanner, toggleMonthlySummaryDropdown } from '../domain/monthly-summary.js';
 import { openMealDetail, closeMealDetail, generateDailyFoodLog, openLoggedMealDetail } from '../domain/meal-planner.js';
 import { addNetworkFriendDemo, applyNetworkKillSwitch, filterNetworkFriends, networkCreateSquadDemo, networkInviteSquadDemo, renderSharePreview, saveNetworkProfile, shareActiveRouteCard, shareNetworkMeal, shareNetworkWorkout, toggleNetworkEnabled, toggleSquadDetail } from './network.js';
@@ -229,6 +237,17 @@ export function bindUi() {
   window.confirmLactateHitPicker = confirmLactateHitPicker;
   window.filterLactateHitOptions = filterLactateHitOptions;
   window.toggleLactateHitType = toggleLactateHitType;
+  window.selectLactateDesiredRpe = selectLactateDesiredRpe;
+  window.confirmLactateDesiredRpe = confirmLactateDesiredRpe;
+  window.lactateWizardBackToTypes = lactateWizardBackToTypes;
+  window.lactateWizardBackToRpe = lactateWizardBackToRpe;
+  window.openLactateBaselineRedo = openLactateBaselineRedo;
+  window.redoLactateBaselineForType = redoLactateBaselineForType;
+  window.toggleLactateRedoType = toggleLactateRedoType;
+  window.confirmLactateRedoSelection = confirmLactateRedoSelection;
+  window.submitLactateBaselineStep = submitLactateBaselineStep;
+  window.adjustLactateSessionRpe = adjustLactateSessionRpe;
+  window.openLactateBaselineRedoFromSession = openLactateBaselineRedoFromSession;
   window.toggleJournalVoiceNote = toggleJournalVoiceNote;
   window.submitBlindReroute = submitBlindReroute;
   window.submitLog = submitLog;
@@ -247,12 +266,20 @@ export function bindUi() {
   window.updateDiarySchemaField = updateDiarySchemaField;
   window.resetDiarySchemaFields = resetDiarySchemaFields;
   window.renderRpeGuidancePanel = renderRpeGuidancePanel;
+  window.toggleRpeGuidanceSection = toggleRpeGuidanceSection;
+  window.toggleGuidanceSection = toggleGuidanceSection;
   window.openRpeGuidanceTab = openRpeGuidanceTab;
   window.maybePromptRpeAwareness = maybePromptRpeAwareness;
   window.confirmRpeAwarenessYes = confirmRpeAwarenessYes;
   window.confirmRpeAwarenessNo = confirmRpeAwarenessNo;
   window.dismissRpeAwareness = dismissRpeAwareness;
   window.finishRpeGuideAndContinue = finishRpeGuideAndContinue;
+  window.maybePromptWeightFinder = maybePromptWeightFinder;
+  window.confirmWeightFinderKnowsYes = confirmWeightFinderKnowsYes;
+  window.confirmWeightFinderKnowsNo = confirmWeightFinderKnowsNo;
+  window.submitKnownWorkWeight = submitKnownWorkWeight;
+  window.submitFinderWorkWeight = submitFinderWorkWeight;
+  window.dismissWeightFinder = dismissWeightFinder;
   window.renderMonthlySummaryBanner = renderMonthlySummaryBanner;
   window.toggleMonthlySummaryDropdown = toggleMonthlySummaryDropdown;
   window.filterCardioTypeList = filterCardioTypeList;

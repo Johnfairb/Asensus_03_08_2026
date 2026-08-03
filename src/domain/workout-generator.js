@@ -275,9 +275,11 @@ export async function generateWorkoutTemplate() {
         const plan = (sel && Array.isArray(sel.rows) && sel.rows.length)
             ? sel
             : buildLactateIntervalPlan({
-                types: sel?.types || ['interval_sprints'],
+                types: sel?.types || ['treadmill_sprints'],
                 slot,
-                date: new Date()
+                date: new Date(),
+                desiredRpe: sel?.desiredRpe || 8,
+                sessionRpe: sel?.sessionRpe || sel?.desiredRpe || 8
             });
 
         if (plan.isHitClass) {
@@ -285,16 +287,16 @@ export async function generateWorkoutTemplate() {
                 name: 'HIT Class',
                 isText: true,
                 isLactateHit: true,
-                reps: '~20–45 min',
-                notes: plan.summary || 'Log class effort. Recovery is based on your RPE.',
+                reps: 'Diary RPE only',
+                notes: plan.summary || 'No intervals — rate the class in the diary.',
                 sets: 1
             });
         } else if ((plan.types || []).length <= 1) {
             const rows = plan.rows || [];
             mainRoutine.push({
-                name: rows[0]?.name || 'Interval sprints',
+                name: rows[0]?.name || 'Treadmill sprints',
                 isLactateHit: true,
-                notes: plan.summary || 'Variable work:rest · 10 min HIT block',
+                notes: plan.summary || `Variable work:rest · ${plan.blockMinutes || 10} min HIT block`,
                 sets: rows.length || 1,
                 lactateRows: rows
             });
@@ -317,6 +319,9 @@ export async function generateWorkoutTemplate() {
             ...(sel || {}),
             ...plan,
             slot,
+            desiredRpe: plan.desiredRpe,
+            sessionRpe: plan.sessionRpe,
+            blockMinutes: plan.blockMinutes,
             summary: plan.summary
         };
     }
@@ -394,9 +399,11 @@ export async function generateWorkoutTemplate() {
         const eqType = equipmentForExercise(exObj.name);
         let itemNoteExtra = '';
 
-        // First hypertrophy session cue when no history
-        if (useHypertrophy && !latestLog && !item.isText) {
-            itemNoteExtra = ' First session: choose a weight you can do for ~10 reps with 4–5 RIR.';
+        // First hypertrophy session: prompt for known load or 10@5 RIR finder
+        let needsWeightFind = false;
+        if (useHypertrophy && !latestLog && !item.isText && !isCardioEx) {
+            needsWeightFind = true;
+            itemNoteExtra = ' First session: we will ask if you know your work weight. If not, find a load for 10 reps with 5 RIR — work weight starts 10% heavier.';
         }
 
         // REPAIR MODE THROTTLING
@@ -480,7 +487,10 @@ export async function generateWorkoutTemplate() {
                     completed: false,
                     isLactateHit: true,
                     restTime: restSec,
-                    notes: row?.notes || item.notes || undefined
+                    notes: row?.notes || item.notes || undefined,
+                    targetDisplay: row?.targetDisplay || undefined,
+                    targetRate: row?.targetRate || undefined,
+                    targetValue: row?.targetValue || undefined
                 });
             } else if (item.isText) {
                 setsArray.push({
@@ -528,7 +538,9 @@ export async function generateWorkoutTemplate() {
             slotLabel: item.slotLabel || null,
             isIsolation: !!item.isIsolation,
             role: item.role || null,
-            isLactateHit: !!item.isLactateHit
+            isLactateHit: !!item.isLactateHit,
+            needsWeightFind: !!needsWeightFind,
+            weightFinderResolved: false
         });
     });
 
