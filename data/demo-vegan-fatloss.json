@@ -1,0 +1,157 @@
+{
+  "settings": {
+    "weight": 79.2,
+    "targetWeight": 74.0,
+    "height": 188,
+    "age": 24,
+    "sex": "Male",
+    "activity": 1.55,
+    "goal": "Fat_Loss",
+    "mealsPerDay": 3,
+    "budget": 85.0,
+    "volume": {
+      "push": 1,
+      "pull": 1,
+      "legs": 2,
+      "cardio": 2,
+      "rest": 1
+    },
+    "baselineTargets": {
+      "cals": 2450,
+      "pro": 160,
+      "carb": 270,
+      "fat": 70
+    },
+    "targets": {
+      "cals": 2450,
+      "pro": 160,
+      "carb": 270,
+      "fat": 70
+    },
+    "diet": "Vegan",
+    "injury": "None",
+    "sport": "Volleyball"
+  },
+  "food_inventory": [
+    {
+      "name": "[PRO] Extra Firm Tofu",
+      "price_per_100g": 0.6,
+      "protein_per_100g": 16,
+      "carbs_per_100g": 2,
+      "fat_per_100g": 9,
+      "water_per_100g": 80.0
+    },
+    {
+      "name": "[PRO] Vegan Protein Powder",
+      "price_per_100g": 2.5,
+      "protein_per_100g": 75,
+      "carbs_per_100g": 5,
+      "fat_per_100g": 6,
+      "water_per_100g": 5.0
+    },
+    {
+      "name": "[CARB] White Potatoes",
+      "price_per_100g": 0.12,
+      "protein_per_100g": 2,
+      "carbs_per_100g": 17,
+      "fat_per_100g": 0,
+      "water_per_100g": 79.0
+    }
+  ],
+  "exercise_inventory": [
+    {
+      "name": "Back Squat",
+      "domain": "legs",
+      "muscle_group": "quads"
+    },
+    {
+      "name": "Box Jumps",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Overhead Press",
+      "domain": "push",
+      "muscle_group": "shoulders"
+    }
+  ],
+  "base_metrics": {
+    "start_weight": 82.0,
+    "end_weight": 79.2
+  },
+  "base_workouts": [
+    {
+      "day": 2,
+      "exercise": "Back Squat",
+      "type": "legs",
+      "sets": 3,
+      "reps": 5,
+      "base_weight": 100,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 8
+    },
+    {
+      "day": 2,
+      "exercise": "Box Jumps",
+      "type": "cardio",
+      "sets": 3,
+      "reps": 5,
+      "base_weight": 0,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 7
+    },
+    {
+      "day": 4,
+      "exercise": "Overhead Press",
+      "type": "push",
+      "sets": 3,
+      "reps": 5,
+      "base_weight": 45,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 8
+    },
+    {
+      "day": 6,
+      "exercise": "Box Jumps",
+      "type": "cardio",
+      "sets": 4,
+      "reps": 3,
+      "base_weight": 0,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 9
+    }
+  ],
+  "base_meals": [
+    {
+      "day": 0,
+      "meal_name": "BREAKFAST",
+      "cals": 620,
+      "pro": 45,
+      "carb": 80,
+      "fat": 15,
+      "cost": 2.2
+    },
+    {
+      "day": 0,
+      "meal_name": "LUNCH",
+      "cals": 780,
+      "pro": 52,
+      "carb": 95,
+      "fat": 25,
+      "cost": 3.4
+    },
+    {
+      "day": 0,
+      "meal_name": "DINNER",
+      "cals": 1050,
+      "pro": 63,
+      "carb": 95,
+      "fat": 30,
+      "cost": 4.1
+    }
+  ]
+}

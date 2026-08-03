@@ -1,0 +1,188 @@
+{
+  "settings": {
+    "weight": 85.0,
+    "targetWeight": 78.0,
+    "height": 180,
+    "age": 25,
+    "sex": "Male",
+    "activity": 1.55,
+    "goal": "Fat_Loss",
+    "mealsPerDay": 3,
+    "budget": 60.0,
+    "baselineTargets": {
+      "cals": 2400,
+      "pro": 180,
+      "carb": 240,
+      "fat": 80
+    },
+    "targets": {
+      "cals": 2400,
+      "pro": 180,
+      "carb": 240,
+      "fat": 80
+    },
+    "diet": "Standard",
+    "injury": "None",
+    "sport": "Rugby",
+    "seasonPhase": "OffSeason_Strength"
+  },
+  "food_inventory": [
+    {
+      "name": "[PRO] Chicken Breast",
+      "price_per_100g": 0.85,
+      "protein_per_100g": 31,
+      "carbs_per_100g": 0,
+      "fat_per_100g": 3,
+      "water_per_100g": 68.0
+    },
+    {
+      "name": "[PRO] Whey Protein Isolate",
+      "price_per_100g": 1.5,
+      "protein_per_100g": 80,
+      "carbs_per_100g": 3,
+      "fat_per_100g": 1,
+      "water_per_100g": 5.0
+    },
+    {
+      "name": "[CARB] Basmati Rice",
+      "price_per_100g": 0.15,
+      "protein_per_100g": 3,
+      "carbs_per_100g": 28,
+      "fat_per_100g": 0,
+      "water_per_100g": 12.0
+    },
+    {
+      "name": "[CARB] Rolled Oats",
+      "price_per_100g": 0.12,
+      "protein_per_100g": 13,
+      "carbs_per_100g": 60,
+      "fat_per_100g": 7,
+      "water_per_100g": 10.0
+    },
+    {
+      "name": "[FAT] Peanut Butter",
+      "price_per_100g": 0.6,
+      "protein_per_100g": 25,
+      "carbs_per_100g": 10,
+      "fat_per_100g": 50,
+      "water_per_100g": 16.0
+    }
+  ],
+  "exercise_inventory": [
+    {
+      "name": "Back Squat",
+      "domain": "strength",
+      "muscle_group": "quads"
+    },
+    {
+      "name": "Bench Press",
+      "domain": "strength",
+      "muscle_group": "push"
+    },
+    {
+      "name": "Deadlift",
+      "domain": "strength",
+      "muscle_group": "posterior_chain"
+    },
+    {
+      "name": "Sprint Intervals",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Squat Jumps",
+      "domain": "power",
+      "muscle_group": "quads"
+    }
+  ],
+  "base_metrics": {
+    "start_weight": 89.5,
+    "end_weight": 85.0
+  },
+  "base_workouts": [
+    {
+      "day": 1,
+      "exercise": "Back Squat",
+      "type": "strength",
+      "sets": 4,
+      "reps": 5,
+      "base_weight": 120,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 8
+    },
+    {
+      "day": 2,
+      "exercise": "Bench Press",
+      "type": "strength",
+      "sets": 4,
+      "reps": 5,
+      "base_weight": 90,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 8
+    },
+    {
+      "day": 3,
+      "exercise": "Sprint Intervals",
+      "type": "cardio",
+      "sets": 1,
+      "reps": 1,
+      "base_weight": 0,
+      "base_distance": 3,
+      "time_minutes": 15,
+      "base_rpe": 9
+    },
+    {
+      "day": 4,
+      "exercise": "Deadlift",
+      "type": "strength",
+      "sets": 3,
+      "reps": 5,
+      "base_weight": 160,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 8
+    },
+    {
+      "day": 5,
+      "exercise": "Squat Jumps",
+      "type": "power",
+      "sets": 3,
+      "reps": 3,
+      "base_weight": 0,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 9
+    }
+  ],
+  "base_meals": [
+    {
+      "day": 0,
+      "meal_name": "BREAKFAST",
+      "cals": 600,
+      "pro": 40,
+      "carb": 60,
+      "fat": 20,
+      "cost": 1.5
+    },
+    {
+      "day": 0,
+      "meal_name": "LUNCH",
+      "cals": 800,
+      "pro": 60,
+      "carb": 80,
+      "fat": 25,
+      "cost": 3.0
+    },
+    {
+      "day": 0,
+      "meal_name": "DINNER",
+      "cals": 1000,
+      "pro": 80,
+      "carb": 100,
+      "fat": 35,
+      "cost": 4.5
+    }
+  ]
+}

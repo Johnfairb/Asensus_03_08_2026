@@ -1,0 +1,179 @@
+{
+  "settings": {
+    "weight": 88.0,
+    "targetWeight": 88.0,
+    "height": 190,
+    "age": 25,
+    "sex": "Male",
+    "activity": 1.725,
+    "goal": "Maintenance",
+    "mealsPerDay": 4,
+    "budget": 100.0,
+    "volume": {
+      "push": 1,
+      "pull": 3,
+      "legs": 2,
+      "cardio": 1,
+      "rest": 0
+    },
+    "baselineTargets": {
+      "cals": 3850,
+      "pro": 176,
+      "carb": 580,
+      "fat": 88
+    },
+    "targets": {
+      "cals": 3850,
+      "pro": 176,
+      "carb": 580,
+      "fat": 88
+    },
+    "diet": "Standard",
+    "injury": "None",
+    "sport": "Rowing"
+  },
+  "food_inventory": [
+    {
+      "name": "[PRO] Chicken Breast",
+      "price_per_100g": 0.85,
+      "protein_per_100g": 31,
+      "carbs_per_100g": 0,
+      "fat_per_100g": 3.6,
+      "water_per_100g": 68.0
+    },
+    {
+      "name": "[CARB] White Pasta",
+      "price_per_100g": 0.15,
+      "protein_per_100g": 12,
+      "carbs_per_100g": 75,
+      "fat_per_100g": 1.5,
+      "water_per_100g": 12.0
+    },
+    {
+      "name": "[CARB] Bananas",
+      "price_per_100g": 0.1,
+      "protein_per_100g": 1,
+      "carbs_per_100g": 23,
+      "fat_per_100g": 0,
+      "water_per_100g": 75.0
+    },
+    {
+      "name": "[PRO] Whey Protein",
+      "price_per_100g": 2.2,
+      "protein_per_100g": 80,
+      "carbs_per_100g": 4,
+      "fat_per_100g": 5,
+      "water_per_100g": 5.0
+    }
+  ],
+  "exercise_inventory": [
+    {
+      "name": "Barbell Row",
+      "domain": "pull",
+      "muscle_group": "back"
+    },
+    {
+      "name": "Pull Ups",
+      "domain": "pull",
+      "muscle_group": "back"
+    },
+    {
+      "name": "5000m Ergometer",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Front Squat",
+      "domain": "legs",
+      "muscle_group": "quads"
+    }
+  ],
+  "base_metrics": {
+    "start_weight": 88.0,
+    "end_weight": 88.0
+  },
+  "base_workouts": [
+    {
+      "day": 1,
+      "exercise": "5000m Ergometer",
+      "type": "cardio",
+      "sets": 1,
+      "reps": 1,
+      "base_weight": 0,
+      "base_distance": 5,
+      "time_minutes": 18,
+      "base_rpe": 8
+    },
+    {
+      "day": 2,
+      "exercise": "Barbell Row",
+      "type": "pull",
+      "sets": 3,
+      "reps": 8,
+      "base_weight": 70,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 7
+    },
+    {
+      "day": 4,
+      "exercise": "Pull Ups",
+      "type": "pull",
+      "sets": 3,
+      "reps": 10,
+      "base_weight": 0,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 8
+    },
+    {
+      "day": 5,
+      "exercise": "Front Squat",
+      "type": "legs",
+      "sets": 3,
+      "reps": 5,
+      "base_weight": 90,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 7
+    }
+  ],
+  "base_meals": [
+    {
+      "day": 0,
+      "meal_name": "BREAKFAST",
+      "cals": 900,
+      "pro": 40,
+      "carb": 150,
+      "fat": 20,
+      "cost": 2.5
+    },
+    {
+      "day": 0,
+      "meal_name": "LUNCH",
+      "cals": 1450,
+      "pro": 80,
+      "carb": 220,
+      "fat": 15,
+      "cost": 4.1
+    },
+    {
+      "day": 0,
+      "meal_name": "SNACK",
+      "cals": 600,
+      "pro": 45,
+      "carb": 90,
+      "fat": 5,
+      "cost": 1.5
+    },
+    {
+      "day": 0,
+      "meal_name": "DINNER",
+      "cals": 900,
+      "pro": 60,
+      "carb": 120,
+      "fat": 25,
+      "cost": 3.8
+    }
+  ]
+}

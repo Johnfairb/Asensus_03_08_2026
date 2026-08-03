@@ -1,0 +1,1266 @@
+{
+  "foods": [
+    {
+      "name": "[PRO] 12% beef mince (500g)",
+      "price_per_100g": 0.95,
+      "protein_per_100g": 20.3,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 11.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Beef burger (340g)",
+      "price_per_100g": 1.3235,
+      "protein_per_100g": 24.35,
+      "carbs_per_100g": 3.47,
+      "fat_per_100g": 19.59,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Beef burger (450g)",
+      "price_per_100g": 0.8889,
+      "protein_per_100g": 24.2,
+      "carbs_per_100g": 3.2,
+      "fat_per_100g": 19.6,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Rump Steak (220g)",
+      "price_per_100g": 1.8182,
+      "protein_per_100g": 18.91,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 13.5,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Beef Meatballs (300g)",
+      "price_per_100g": 1.1667,
+      "protein_per_100g": 24.2,
+      "carbs_per_100g": 3.2,
+      "fat_per_100g": 20.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Chicken Breast (400g)",
+      "price_per_100g": 1.0,
+      "protein_per_100g": 23.4,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 1.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 68.0
+    },
+    {
+      "name": "[PRO] Chicken livers (400g)",
+      "price_per_100g": 0.4375,
+      "protein_per_100g": 19.7,
+      "carbs_per_100g": 2.8,
+      "fat_per_100g": 0.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 68.0
+    },
+    {
+      "name": "[PRO] Chicken Thigh (Bought in 4)",
+      "price_per_100g": 1.9,
+      "protein_per_100g": 25.8,
+      "carbs_per_100g": 1.05,
+      "fat_per_100g": 17.1,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 68.0
+    },
+    {
+      "name": "[PRO] Chicken Thigh (bought in 1kg)",
+      "price_per_100g": 0.042,
+      "protein_per_100g": 2.58,
+      "carbs_per_100g": 0.11,
+      "fat_per_100g": 1.71,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 68.0
+    },
+    {
+      "name": "[PRO] 5% Pork mince (500g)",
+      "price_per_100g": 0.5,
+      "protein_per_100g": 28.2,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 3.4,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Pork loin Steak (400g)",
+      "price_per_100g": 0.9375,
+      "protein_per_100g": 21.4,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 11.2,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Pork Sausages (500g)",
+      "price_per_100g": 0.46,
+      "protein_per_100g": 14.8,
+      "carbs_per_100g": 2.96,
+      "fat_per_100g": 13.6,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Pork Bacon (200g)",
+      "price_per_100g": 2.0,
+      "protein_per_100g": 19.6,
+      "carbs_per_100g": 1.0,
+      "fat_per_100g": 15.3,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Pork Bacon (300g)",
+      "price_per_100g": 0.5,
+      "protein_per_100g": 19.53,
+      "carbs_per_100g": 1.0,
+      "fat_per_100g": 15.67,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[PRO] Lamb mince (400g)",
+      "price_per_100g": 1.375,
+      "protein_per_100g": 17.1,
+      "carbs_per_100g": 0.8,
+      "fat_per_100g": 16.4,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[CARB] Banana (bought in 6)",
+      "price_per_100g": 0.14,
+      "protein_per_100g": 1.8,
+      "carbs_per_100g": 30.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 75.0
+    },
+    {
+      "name": "[CARB] Blueberries (100g)",
+      "price_per_100g": 1.0,
+      "protein_per_100g": 0.9,
+      "carbs_per_100g": 9.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[CARB] Whole Avocado",
+      "price_per_100g": 0.7,
+      "protein_per_100g": 1.9,
+      "carbs_per_100g": 3.8,
+      "fat_per_100g": 39.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[CARB] Gala Apple (bought in 4)",
+      "price_per_100g": 0.27,
+      "protein_per_100g": 1.0,
+      "carbs_per_100g": 23.2,
+      "fat_per_100g": 1.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 86.0
+    },
+    {
+      "name": "[CARB] Grapes (400g)",
+      "price_per_100g": 0.45,
+      "protein_per_100g": 0.7,
+      "carbs_per_100g": 17.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 86.0
+    },
+    {
+      "name": "[CARB] Raspberries (250g)",
+      "price_per_100g": 1.4,
+      "protein_per_100g": 0.8,
+      "carbs_per_100g": 5.1,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[CARB] Lemon (bought in 3)",
+      "price_per_100g": 0.73,
+      "protein_per_100g": 0.8,
+      "carbs_per_100g": 2.6,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[CARB] Lemon (bought in 4)",
+      "price_per_100g": 0.35,
+      "protein_per_100g": 0.8,
+      "carbs_per_100g": 2.6,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[CARB] Orange (Bought in 4)",
+      "price_per_100g": 0.4,
+      "protein_per_100g": 1.6,
+      "carbs_per_100g": 16.4,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 86.0
+    },
+    {
+      "name": "[CARB] Strawberries(225g)",
+      "price_per_100g": 1.7778,
+      "protein_per_100g": 0.8,
+      "carbs_per_100g": 6.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[CARB] Strawberries (400g)",
+      "price_per_100g": 0.625,
+      "protein_per_100g": 0.6,
+      "carbs_per_100g": 6.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[CARB] Nectarine (bought in 4 pack)",
+      "price_per_100g": 0.56,
+      "protein_per_100g": 2.2,
+      "carbs_per_100g": 14.2,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[VEG_C] Tomatoes (250g)",
+      "price_per_100g": 0.32,
+      "protein_per_100g": 1.1,
+      "carbs_per_100g": 3.6,
+      "fat_per_100g": 0.5,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 88.0
+    },
+    {
+      "name": "[CARB] Pineapple (500g)",
+      "price_per_100g": 0.6,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 9.8,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[CARB] Mango (450g)",
+      "price_per_100g": 0.9444,
+      "protein_per_100g": 0.7,
+      "carbs_per_100g": 13.6,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 86.0
+    },
+    {
+      "name": "[CARB] Watermelon (300g)",
+      "price_per_100g": 0.6667,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 6.9,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 86.0
+    },
+    {
+      "name": "[VEG_G] Cucumber",
+      "price_per_100g": 1.15,
+      "protein_per_100g": 2.4,
+      "carbs_per_100g": 3.6,
+      "fat_per_100g": 1.8,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Spinach (200g)",
+      "price_per_100g": 0.6,
+      "protein_per_100g": 2.8,
+      "carbs_per_100g": 1.6,
+      "fat_per_100g": 0.8,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Tenderstem Broccoli (200g)",
+      "price_per_100g": 0.8,
+      "protein_per_100g": 4.3,
+      "carbs_per_100g": 3.2,
+      "fat_per_100g": 0.6,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Broccoli (350g)",
+      "price_per_100g": 0.2286,
+      "protein_per_100g": 4.3,
+      "carbs_per_100g": 3.2,
+      "fat_per_100g": 0.6,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Kale (180g)",
+      "price_per_100g": 0.4444,
+      "protein_per_100g": 3.4,
+      "carbs_per_100g": 1.4,
+      "fat_per_100g": 1.6,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Cabbage",
+      "price_per_100g": 0.8,
+      "protein_per_100g": 7.6,
+      "carbs_per_100g": 13.2,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Brussel Sprouts (300g)",
+      "price_per_100g": 0.4,
+      "protein_per_100g": 1.3,
+      "carbs_per_100g": 3.5,
+      "fat_per_100g": 2.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Courgettes (300g)",
+      "price_per_100g": 0.5,
+      "protein_per_100g": 1.8,
+      "carbs_per_100g": 1.8,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Rocket (60g)",
+      "price_per_100g": 1.25,
+      "protein_per_100g": 3.6,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Baby gem lettuce (bought in 2)",
+      "price_per_100g": 0.4,
+      "protein_per_100g": 1.0,
+      "carbs_per_100g": 1.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Peas (500g)",
+      "price_per_100g": 0.3,
+      "protein_per_100g": 5.7,
+      "carbs_per_100g": 10.1,
+      "fat_per_100g": 0.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_C] Onion (750g)",
+      "price_per_100g": 0.1467,
+      "protein_per_100g": 1.07,
+      "carbs_per_100g": 8.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 88.0
+    },
+    {
+      "name": "[VEG_G] Garlic (Bought in 3)",
+      "price_per_100g": 0.3,
+      "protein_per_100g": 2.6,
+      "carbs_per_100g": 5.4,
+      "fat_per_100g": 0.2,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_C] Carrots (700g)",
+      "price_per_100g": 0.0857,
+      "protein_per_100g": 0.6,
+      "carbs_per_100g": 7.9,
+      "fat_per_100g": 0.3,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 88.0
+    },
+    {
+      "name": "[VEG_G] Green beans (225g)",
+      "price_per_100g": 0.6222,
+      "protein_per_100g": 2.09,
+      "carbs_per_100g": 3.11,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_G] Olives (150g)",
+      "price_per_100g": 0.8667,
+      "protein_per_100g": 1.2,
+      "carbs_per_100g": 0.8,
+      "fat_per_100g": 14.4,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[VEG_C] Sweetcorn (Bought in 2)",
+      "price_per_100g": 1.3,
+      "protein_per_100g": 7.4,
+      "carbs_per_100g": 25.8,
+      "fat_per_100g": 4.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 88.0
+    },
+    {
+      "name": "[CARB] Sweet potatoes 250g",
+      "price_per_100g": 0.132,
+      "protein_per_100g": 1.2,
+      "carbs_per_100g": 21.28,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 79.0
+    },
+    {
+      "name": "[CARB] Potatoes (1.5 kg)",
+      "price_per_100g": 0.0667,
+      "protein_per_100g": 1.9,
+      "carbs_per_100g": 19.6,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 79.0
+    },
+    {
+      "name": "[CARB] Basmati Rice (500g)",
+      "price_per_100g": 0.2,
+      "protein_per_100g": 7.2,
+      "carbs_per_100g": 71.0,
+      "fat_per_100g": 2.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 12.0
+    },
+    {
+      "name": "[CARB] Pasta (500g)",
+      "price_per_100g": 0.2,
+      "protein_per_100g": 14.0,
+      "carbs_per_100g": 69.0,
+      "fat_per_100g": 1.5,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 12.0
+    },
+    {
+      "name": "[CARB] Bread (400g)",
+      "price_per_100g": 0.25,
+      "protein_per_100g": 8.7,
+      "carbs_per_100g": 40.0,
+      "fat_per_100g": 1.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 35.0
+    },
+    {
+      "name": "[LIQUID] Milk (whole) (2 pints/ 1.16 litres)",
+      "price_per_100g": 0.1034,
+      "protein_per_100g": 3.45,
+      "carbs_per_100g": 4.48,
+      "fat_per_100g": 3.53,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 87.0
+    },
+    {
+      "name": "[LIQUID] Milk (semi-skimmed) (2 pints/ 1.16 litres)",
+      "price_per_100g": 0.1034,
+      "protein_per_100g": 3.53,
+      "carbs_per_100g": 4.57,
+      "fat_per_100g": 1.72,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 90.0
+    },
+    {
+      "name": "[PRO] Large Egg (bought in 6 pack)",
+      "price_per_100g": 0.35,
+      "protein_per_100g": 8.2,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 5.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 76.0
+    },
+    {
+      "name": "[PRO] Kefir (350g)",
+      "price_per_100g": 0.4286,
+      "protein_per_100g": 4.7,
+      "carbs_per_100g": 5.4,
+      "fat_per_100g": 2.1,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 65.0
+    },
+    {
+      "name": "[PRO] Cheddar cheese (350g)",
+      "price_per_100g": 0.8571,
+      "protein_per_100g": 25.4,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 34.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[PRO] Cottage cheese (300g)",
+      "price_per_100g": 0.4333,
+      "protein_per_100g": 10.3,
+      "carbs_per_100g": 3.1,
+      "fat_per_100g": 5.4,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[PRO] Greek Yoghurt (450g)",
+      "price_per_100g": 0.2444,
+      "protein_per_100g": 4.9,
+      "carbs_per_100g": 4.5,
+      "fat_per_100g": 8.31,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 85.0
+    },
+    {
+      "name": "[FAT] Honey (340g)",
+      "price_per_100g": 0.5147,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 76.41,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 18.0
+    },
+    {
+      "name": "[PRO] Parmesan Cheese (200g)",
+      "price_per_100g": 2.0,
+      "protein_per_100g": 32.4,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 19.6,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[FAT] Unsalted Butter (250G)",
+      "price_per_100g": 0.8,
+      "protein_per_100g": 0.6,
+      "carbs_per_100g": 0.6,
+      "fat_per_100g": 82.2,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 16.0
+    },
+    {
+      "name": "[PRO] Mozzarella (125g)",
+      "price_per_100g": 1.04,
+      "protein_per_100g": 17.2,
+      "carbs_per_100g": 0.7,
+      "fat_per_100g": 17.2,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 40.0
+    },
+    {
+      "name": "[PRO] Feta (200g)",
+      "price_per_100g": 1.075,
+      "protein_per_100g": 15.4,
+      "carbs_per_100g": 1.9,
+      "fat_per_100g": 24.2,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 65.0
+    },
+    {
+      "name": "[PRO] Halloumi (250g)",
+      "price_per_100g": 0.8,
+      "protein_per_100g": 18.9,
+      "carbs_per_100g": 2.0,
+      "fat_per_100g": 23.3,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 65.0
+    },
+    {
+      "name": "[PRO] Farmed Salmon (250g)",
+      "price_per_100g": 1.98,
+      "protein_per_100g": 22.8,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 11.2,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 72.0
+    },
+    {
+      "name": "[PRO] Wild Salmon (220g)",
+      "price_per_100g": 1.8182,
+      "protein_per_100g": 25.45,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 7.5,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 72.0
+    },
+    {
+      "name": "[PRO] Sea bass (180g)",
+      "price_per_100g": 2.7778,
+      "protein_per_100g": 21.3,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 10.1,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 65.0
+    },
+    {
+      "name": "[PRO] Canned Tuna (120g)",
+      "price_per_100g": 0.5417,
+      "protein_per_100g": 20.83,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 0.58,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 72.0
+    },
+    {
+      "name": "[PRO] Cod (240g)",
+      "price_per_100g": 2.0833,
+      "protein_per_100g": 22.71,
+      "carbs_per_100g": 0.9,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 72.0
+    },
+    {
+      "name": "[PRO] Canned Sardines (100g)",
+      "price_per_100g": 0.75,
+      "protein_per_100g": 22.2,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 10.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 65.0
+    },
+    {
+      "name": "[PRO] Prawns (150g)",
+      "price_per_100g": 2.3333,
+      "protein_per_100g": 17.1,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 65.0
+    },
+    {
+      "name": "[PRO] Canned anchovies (100g)",
+      "price_per_100g": 3.0,
+      "protein_per_100g": 23.7,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 10.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 65.0
+    },
+    {
+      "name": "[FAT] Almonds (150g)",
+      "price_per_100g": 2.3333,
+      "protein_per_100g": 5.2,
+      "carbs_per_100g": 5.3,
+      "fat_per_100g": 49.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[FAT] Almonds (100g)",
+      "price_per_100g": 1.35,
+      "protein_per_100g": 5.2,
+      "carbs_per_100g": 5.3,
+      "fat_per_100g": 49.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[FAT] Peanuts (250g)",
+      "price_per_100g": 1.14,
+      "protein_per_100g": 24.7,
+      "carbs_per_100g": 7.5,
+      "fat_per_100g": 53.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[FAT] Peanuts (200g)",
+      "price_per_100g": 0.3,
+      "protein_per_100g": 25.9,
+      "carbs_per_100g": 11.9,
+      "fat_per_100g": 49.9,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[FAT] Cashews (150g)",
+      "price_per_100g": 1.9,
+      "protein_per_100g": 17.7,
+      "carbs_per_100g": 18.1,
+      "fat_per_100g": 48.2,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[FAT] Walnuts (150g)",
+      "price_per_100g": 1.4667,
+      "protein_per_100g": 14.7,
+      "carbs_per_100g": 3.3,
+      "fat_per_100g": 68.5,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[FAT] Brazil nuts (150g)",
+      "price_per_100g": 1.8667,
+      "protein_per_100g": 14.3,
+      "carbs_per_100g": 3.1,
+      "fat_per_100g": 68.2,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[FAT] Pecan nuts (150g)",
+      "price_per_100g": 2.1,
+      "protein_per_100g": 9.2,
+      "carbs_per_100g": 5.8,
+      "fat_per_100g": 70.1,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[FAT] Pecan nuts (200g)",
+      "price_per_100g": 1.75,
+      "protein_per_100g": 9.2,
+      "carbs_per_100g": 5.8,
+      "fat_per_100g": 70.1,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[FAT] Peanut Butter (340g)",
+      "price_per_100g": 0.2794,
+      "protein_per_100g": 24.0,
+      "carbs_per_100g": 11.0,
+      "fat_per_100g": 52.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 16.0
+    },
+    {
+      "name": "[FAT] Pistachios (150g)",
+      "price_per_100g": 1.6333,
+      "protein_per_100g": 25.7,
+      "carbs_per_100g": 8.2,
+      "fat_per_100g": 52.8,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 5.0
+    },
+    {
+      "name": "[FAT] Pine nuts (100g)",
+      "price_per_100g": 3.95,
+      "protein_per_100g": 14.0,
+      "carbs_per_100g": 4.0,
+      "fat_per_100g": 68.6,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 4.0
+    },
+    {
+      "name": "[LIQUID] Orange Juice (1 litre)",
+      "price_per_100g": 0.09,
+      "protein_per_100g": 1.0,
+      "carbs_per_100g": 10.1,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 88.0
+    },
+    {
+      "name": "[LIQUID] Apple Juice (1 litre)",
+      "price_per_100g": 0.1,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 12.3,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 88.0
+    },
+    {
+      "name": "[LIQUID] Coconut water (1 litre)",
+      "price_per_100g": 0.25,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 4.5,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 95.0
+    },
+    {
+      "name": "[LIQUID] Coffee (227g)",
+      "price_per_100g": 1.5859,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 99.0
+    },
+    {
+      "name": "[FAT] Coconut oil (300ml)",
+      "price_per_100g": 1.2667,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 92.8,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 0.0
+    },
+    {
+      "name": "[CARB] Strawberry Jam (340g)",
+      "price_per_100g": 0.8676,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 65.8,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 18.0
+    },
+    {
+      "name": "[CARB] Strawberry Jam (450g)",
+      "price_per_100g": 0.2,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 61.5,
+      "fat_per_100g": 0.0,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 18.0
+    },
+    {
+      "name": "[FAT] Extra virgin Olive oil (500 ml)",
+      "price_per_100g": 1.15,
+      "protein_per_100g": 0.0,
+      "carbs_per_100g": 0.0,
+      "fat_per_100g": 91.4,
+      "stock_g": 0,
+      "preference_score": 0,
+      "water_per_100g": 0.0
+    }
+  ],
+  "exercises": [
+    {
+      "name": "Back Squat",
+      "domain": "strength",
+      "muscle_group": "quad"
+    },
+    {
+      "name": "Front Squat",
+      "domain": "strength",
+      "muscle_group": "quad"
+    },
+    {
+      "name": "Wide Squat",
+      "domain": "strength",
+      "muscle_group": "quad"
+    },
+    {
+      "name": "Safety Bar Squat",
+      "domain": "strength",
+      "muscle_group": "quad"
+    },
+    {
+      "name": "Bulgarian Split Squat",
+      "domain": "strength",
+      "muscle_group": "quad"
+    },
+    {
+      "name": "Split Squat",
+      "domain": "strength",
+      "muscle_group": "quad"
+    },
+    {
+      "name": "Deadlift",
+      "domain": "strength",
+      "muscle_group": "hamstrings"
+    },
+    {
+      "name": "Romanian Deadlift",
+      "domain": "strength",
+      "muscle_group": "hamstrings"
+    },
+    {
+      "name": "Single Leg Deadlift",
+      "domain": "strength",
+      "muscle_group": "hamstrings"
+    },
+    {
+      "name": "Trap Bar Deadlift",
+      "domain": "strength",
+      "muscle_group": "hamstrings"
+    },
+    {
+      "name": "Bench Press",
+      "domain": "strength",
+      "muscle_group": "lower_chest"
+    },
+    {
+      "name": "DB Bench Press",
+      "domain": "strength",
+      "muscle_group": "lower_chest"
+    },
+    {
+      "name": "Neutral DB Bench Press",
+      "domain": "strength",
+      "muscle_group": "lower_chest"
+    },
+    {
+      "name": "Dips",
+      "domain": "strength",
+      "muscle_group": "lower_chest"
+    },
+    {
+      "name": "Decline Bench Press",
+      "domain": "strength",
+      "muscle_group": "lower_chest"
+    },
+    {
+      "name": "Military Press",
+      "domain": "strength",
+      "muscle_group": "shoulders"
+    },
+    {
+      "name": "Seated Military Press",
+      "domain": "strength",
+      "muscle_group": "shoulders"
+    },
+    {
+      "name": "Seated DB Press",
+      "domain": "strength",
+      "muscle_group": "shoulders"
+    },
+    {
+      "name": "Neutral DB Press",
+      "domain": "strength",
+      "muscle_group": "shoulders"
+    },
+    {
+      "name": "Barbell Row",
+      "domain": "strength",
+      "muscle_group": "lats"
+    },
+    {
+      "name": "Single Arm DB Row",
+      "domain": "strength",
+      "muscle_group": "lats"
+    },
+    {
+      "name": "Chest-Supported Row",
+      "domain": "strength",
+      "muscle_group": "lats"
+    },
+    {
+      "name": "Cable Row",
+      "domain": "strength",
+      "muscle_group": "lats"
+    },
+    {
+      "name": "Pull Ups",
+      "domain": "strength",
+      "muscle_group": "lats"
+    },
+    {
+      "name": "Chin Ups",
+      "domain": "strength",
+      "muscle_group": "lats"
+    },
+    {
+      "name": "Neutral Chin Ups",
+      "domain": "strength",
+      "muscle_group": "lats"
+    },
+    {
+      "name": "Lat Pulldown",
+      "domain": "strength",
+      "muscle_group": "lats"
+    },
+    {
+      "name": "Squat Jumps",
+      "domain": "power",
+      "muscle_group": "quad"
+    },
+    {
+      "name": "Single Leg Broad Jumps",
+      "domain": "power",
+      "muscle_group": "quad"
+    },
+    {
+      "name": "Med Ball Throws",
+      "domain": "power",
+      "muscle_group": "core"
+    },
+    {
+      "name": "Clap Pushups",
+      "domain": "power",
+      "muscle_group": "upper_chest"
+    },
+    {
+      "name": "Side-to-Side Shuffle",
+      "domain": "power",
+      "muscle_group": "groin"
+    },
+    {
+      "name": "Face Pulls",
+      "domain": "lifting",
+      "muscle_group": "rotator_cuff"
+    },
+    {
+      "name": "Lateral Raises",
+      "domain": "lifting",
+      "muscle_group": "shoulders"
+    },
+    {
+      "name": "Cable Abduction/Adduction",
+      "domain": "lifting",
+      "muscle_group": "rotator_cuff"
+    },
+    {
+      "name": "Tricep Pushdown",
+      "domain": "lifting",
+      "muscle_group": "triceps"
+    },
+    {
+      "name": "Bicep Curls",
+      "domain": "lifting",
+      "muscle_group": "biceps"
+    },
+    {
+      "name": "Reverse Curls",
+      "domain": "lifting",
+      "muscle_group": "grip"
+    },
+    {
+      "name": "DB Wrist Flexion",
+      "domain": "lifting",
+      "muscle_group": "grip"
+    },
+    {
+      "name": "Cable Adductor",
+      "domain": "lifting",
+      "muscle_group": "groin"
+    },
+    {
+      "name": "Glute Abduction Machine",
+      "domain": "lifting",
+      "muscle_group": "glute"
+    },
+    {
+      "name": "Cable Abduction",
+      "domain": "lifting",
+      "muscle_group": "glute"
+    },
+    {
+      "name": "Hamstring Curls",
+      "domain": "lifting",
+      "muscle_group": "hamstrings"
+    },
+    {
+      "name": "Calf Raises",
+      "domain": "lifting",
+      "muscle_group": "calf"
+    },
+    {
+      "name": "3-Way Ankle (Controlled Eccentric)",
+      "domain": "lifting",
+      "muscle_group": "ankle"
+    },
+    {
+      "name": "Wobble Board Proprioception",
+      "domain": "lifting",
+      "muscle_group": "ankle"
+    },
+    {
+      "name": "DB Pullovers",
+      "domain": "lifting",
+      "muscle_group": "lower_lats"
+    },
+    {
+      "name": "Marcasciano Crunch",
+      "domain": "lifting",
+      "muscle_group": "core"
+    },
+    {
+      "name": "Roman Chair",
+      "domain": "lifting",
+      "muscle_group": "core"
+    },
+    {
+      "name": "Sidesit",
+      "domain": "strength",
+      "muscle_group": "ql"
+    },
+    {
+      "name": "Back Extension",
+      "domain": "strength",
+      "muscle_group": "core"
+    },
+    {
+      "name": "Neck Resistance (Isometric)",
+      "domain": "lifting",
+      "muscle_group": "neck"
+    },
+    {
+      "name": "Steady State Cardio",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Easy Run",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Jog",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Bike",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Spin Bike",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Rowing Machine",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Swim",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Elliptical",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Incline Walk",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Ski Erg",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Cross Trainer",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Sprints (30s on/off)",
+      "domain": "cardio",
+      "muscle_group": "full"
+    }
+  ]
+}

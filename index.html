@@ -1,0 +1,1854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Ascensus | Your Fitness GPS</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#000000">
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('sw.js').catch(err => console.error('SW Failed:', err));
+        });
+      }
+    </script>
+
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<div class="iphone-bezel">
+  <div class="iphone-btn iphone-btn-silent" aria-hidden="true"></div>
+  <div class="iphone-btn iphone-btn-vol-up" aria-hidden="true"></div>
+  <div class="iphone-btn iphone-btn-vol-down" aria-hidden="true"></div>
+  <div class="iphone-btn iphone-btn-power" aria-hidden="true"></div>
+  <div class="iphone-screen">
+    <div class="iphone-island" aria-hidden="true"></div>
+    <div class="iphone-status" aria-hidden="true">
+      <span class="iphone-status-time">9:41</span>
+      <span class="iphone-status-trailing">
+        <svg class="iphone-status-icon" width="19" height="13" viewBox="0 0 18 12" fill="currentColor" aria-hidden="true">
+          <rect x="0" y="8" width="3" height="4" rx="0.6"/>
+          <rect x="5" y="5.5" width="3" height="6.5" rx="0.6"/>
+          <rect x="10" y="3" width="3" height="9" rx="0.6"/>
+          <rect x="15" y="0" width="3" height="12" rx="0.6"/>
+        </svg>
+        <svg class="iphone-status-icon" width="17" height="12" viewBox="0 0 16 12" fill="currentColor" aria-hidden="true">
+          <path d="M8 9.6a1.35 1.35 0 1 1 0 2.7 1.35 1.35 0 0 1 0-2.7zm0-3.35c1.55 0 2.96.58 4.04 1.53l-1.2 1.2A4.1 4.1 0 0 0 8 8.05c-1.1 0-2.1.4-2.84 1.08l-1.2-1.2A5.7 5.7 0 0 1 8 6.25zm0-3.4c2.5 0 4.78.94 6.53 2.5l-1.2 1.2A7.55 7.55 0 0 0 8 4.55c-2.1 0-4 .78-5.43 2.05L1.37 5.4A9.2 9.2 0 0 1 8 2.85z"/>
+        </svg>
+        <svg class="iphone-status-icon iphone-status-battery" width="27" height="12" viewBox="0 0 27 12" fill="currentColor" aria-hidden="true">
+          <rect x="0.75" y="0.75" width="23" height="10.5" rx="2.4" ry="2.4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <rect x="2.6" y="2.5" width="16.5" height="7" rx="1.4"/>
+          <path d="M24.6 3.8h1.1c.7 0 1.05.35 1.05 1v2.4c0 .65-.35 1-1.05 1h-1.1V3.8z" opacity="0.4"/>
+        </svg>
+      </span>
+    </div>
+
+
+<!-- ========================================== -->
+<!-- THE AUTH & ONBOARDING WALL                 -->
+<!-- ========================================== -->
+<div id="auth-layer" class="auth-wrapper">
+    <!-- SPLASH / BOOT SCREEN -->
+    <div id="boot-screen" class="auth-panel">
+        <img src="assets/logo-mark.svg" alt="Ascensus" class="boot-logo">
+        <p style="font-family: 'Roboto Mono'; font-size: 10px; color: var(--text-stealth); margin-top: 18px; letter-spacing: 2px;" id="boot-status">LOADING...</p>
+    </div>
+
+    <!-- LOGIN / REGISTER FORM -->
+    <div id="auth-form-container" class="auth-panel hidden">
+        <div style="text-align: center; margin-bottom: 30px;">
+            <img src="assets/logo-wordmark.svg" alt="Ascensus" class="brand-logo brand-logo-md" style="margin: 0 auto 12px auto;">
+            <h1 style="font-size: 20px;">LOGIN / SIGN UP</h1>
+        </div>
+        
+        <input type="email" id="auth-email" class="input-field" placeholder="Email Address" autocomplete="email">
+        <input type="password" id="auth-password" class="input-field" placeholder="Password" autocomplete="current-password">
+        
+        <button class="btn-primary" style="border-color: var(--gold-accent); color: var(--gold-accent);" onclick="handleAuth('login')">LOGIN</button>
+        <button class="btn-primary" style="margin-top: 10px;" onclick="handleAuth('register')">SIGN UP</button>
+        
+        <p id="auth-status" style="color: var(--gold-accent); font-size: 11px; font-family: 'Roboto Mono'; text-align: center; margin-top: 15px; margin-bottom: 25px;"></p>
+
+        <!-- TACTICAL OVERRIDE (QUICK LOGIN) -->
+        <div style="border-top: 1px dashed #333; padding-top: 20px; text-align: center;">
+            <div style="font-size: 9px; color: var(--text-stealth); font-family: 'Roboto Mono'; margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase;">Development / Demo Override</div>
+            <div style="display: flex; gap: 8px; justify-content: center;">
+                <button class="btn-icon" style="flex: 1; padding: 10px 0; font-size: 10px; font-family: 'Roboto Mono';" onclick="quickLogin('theo@ascensus.com', 'theo1234')">THEO</button>
+                <button class="btn-icon" style="flex: 1; padding: 10px 0; font-size: 10px; font-family: 'Roboto Mono';" onclick="quickLogin('tyler@ascensus.com', 'tyler123')">TYLER</button>
+                <button class="btn-icon" style="flex: 1; padding: 10px 0; font-size: 10px; font-family: 'Roboto Mono';" onclick="quickLogin('john@ascensus.com', 'john1234')">JOHN</button>
+            </div>
+        </div>
+
+        <!-- THEME CHOICE (first-run / sign-up screen) -->
+        <div style="border-top: 1px dashed #333; padding-top: 20px; margin-top: 20px; text-align: center;">
+            <div style="font-size: 9px; color: var(--text-stealth); font-family: 'Roboto Mono'; margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase;">Display Theme</div>
+            <div class="ob-grid" style="grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div class="ob-card" id="auth-theme-dark" onclick="selectAuthTheme(this, 'dark')">DARK MODE</div>
+                <div class="ob-card" id="auth-theme-light" onclick="selectAuthTheme(this, 'light')">LIGHT MODE</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FIRST ASCENT ONBOARDING (ELITE PROGRESSIVE) -->
+    <div id="onboarding-container" class="auth-panel hidden">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <div class="text-gold" id="ob-phase-title">PHASE 1 / 3</div>
+            <h1 style="font-size: 20px;" id="ob-main-title">OPERATOR BIOMETRICS</h1>
+            <div class="progress-bar-bg" style="width: 60%; margin: 15px auto 0 auto;"><div id="ob-progress" class="progress-bar-fill" style="background-color: var(--gold-accent); width: 33%;"></div></div>
+        </div>
+
+        <!-- STEP 1: Basic Biometrics -->
+        <div id="ob-step-1" class="ob-step">
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <div style="flex: 1;"><label style="margin-top:0;">Height (cm)</label><input type="number" id="ob-height" class="input-field" placeholder="180"></div>
+                <div style="flex: 1;"><label style="margin-top:0;">Age</label><input type="number" id="ob-age" class="input-field" placeholder="25"></div>
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="margin-top:0;">Body Fat % (Optional, improves macro accuracy)</label>
+                <input type="number" id="ob-bf" class="input-field" placeholder="e.g. 15">
+            </div>
+            <label style="margin-top:0;">Biological Sex</label>
+            <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 20px;">
+                <div class="ob-card active" onclick="selectObCard(this, 'ob-sex', 'Male')">MALE</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-sex', 'Female')">FEMALE</div>
+                <input type="hidden" id="ob-sex" value="Male">
+            </div>
+            <button class="btn-primary" style="border-color: var(--silver-accent); color: var(--silver-accent);" onclick="nextObStep(2)">NEXT PARAMETERS →</button>
+        </div>
+
+        <!-- STEP 2: The Chassis (Weight & Goal) -->
+        <div id="ob-step-2" class="ob-step hidden">
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <div style="flex: 1;"><label style="margin-top:0;">Current Weight (kg)</label><input type="number" id="ob-weight" class="input-field" placeholder="80"></div>
+                <div style="flex: 1;"><label style="margin-top:0;">Target Weight (kg)</label><input type="number" id="ob-target" class="input-field" placeholder="75"></div>
+            </div>
+            
+            <label style="margin-top:0;">Lifting Experience</label>
+            <select id="ob-experience" class="input-field" onchange="document.getElementById('1rm-container').style.display = this.value === 'Advanced' ? 'block' : 'none'">
+                <option value="Beginner">Beginner (< 1 Year)</option>
+                <option value="Advanced">Advanced (> 1 Year)</option>
+            </select>
+            
+            <div id="1rm-container" style="display:none; background:var(--bg-surface-elevated); padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid var(--border-subtle);">
+                <label style="margin-top:0; color:var(--gold-accent);">Current 1 Rep Max (kg)</label>
+                <div style="display:flex; gap:8px;">
+                    <input type="number" id="ob-1rm-squat" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Squat">
+                    <input type="number" id="ob-1rm-bench" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Bench">
+                    <input type="number" id="ob-1rm-dead" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Deadlift">
+                </div>
+            </div>
+
+            <label style="margin-top:0;">Primary Directive</label>
+            <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 20px; gap: 8px;">
+                <div class="ob-card active" onclick="selectObCard(this, 'ob-goal', 'Fat_Loss')" style="grid-column: span 2;">FAT LOSS (CALORIC DEFICIT)</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Muscle_Gain')" style="grid-column: span 2;">MUSCLE GAIN (SURPLUS)</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Maintenance')" style="grid-column: span 2;">MAINTENANCE (RECOMP)</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Strength')">STRENGTH</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Power')">POWER</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Endurance')" style="grid-column: span 2;">ENDURANCE</div>
+                <input type="hidden" id="ob-goal" value="Fat_Loss">
+            </div>
+
+            <div style="display:flex; gap:10px;">
+                <button class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(1)">← BACK</button>
+                <button class="btn-primary" style="flex:2; border-color: var(--silver-accent); color: var(--silver-accent);" onclick="nextObStep(3)">NEXT PARAMETERS →</button>
+            </div>
+            <div style="display:flex; gap:10px; margin-top: 15px;">
+                <button class="btn-primary" style="flex:1; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">ABORT</button>
+                <button class="btn-primary" style="flex:2; border-color: var(--silver-accent); color: var(--silver-accent); margin-top:0;" onclick="nextObStep(2)">NEXT PARAMETERS →</button>
+            </div>
+        </div>
+
+        <!-- STEP 3: The Engine (Diet & Sport) -->
+        <div id="ob-step-3" class="ob-step hidden">
+            <label style="margin-top:0;">Dietary Matrix</label>
+            <div class="ob-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 15px; gap: 8px;">
+                <div class="ob-card active" onclick="selectObCard(this, 'ob-diet', 'Standard')">STANDARD</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Vegan')">VEGAN</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Vegetarian')">VEGETARIAN</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Halal')">HALAL</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Gluten-Free')">GF</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Dairy-Free')">DAIRY-FREE</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Nut-Free')" style="grid-column: span 3;">NUT-FREE</div>
+                <input type="hidden" id="ob-diet" value="Standard">
+            </div>
+
+            <label style="margin-top:0; display:flex; align-items:center; gap:8px;">
+                How do you shop?
+                <button type="button" class="info-tip-btn" onclick="showShopStyleInfo('ob')" title="What do these options mean?" aria-label="Info about shopping options">ℹ</button>
+            </label>
+            <div id="ob-shop-style-tip" class="hidden" style="font-size:11px; color:var(--text-silver); line-height:1.45; margin:0 0 12px 0; padding:10px 12px; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-surface-elevated); font-family:'Roboto Mono';"></div>
+            <div class="ob-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 15px; gap: 8px;">
+                <div class="ob-card active" onclick="selectObCard(this, 'ob-shop-style', 'Cheap')">CHEAP</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-shop-style', 'Middle')">MIDDLE</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-shop-style', 'Quality')">QUALITY</div>
+                <input type="hidden" id="ob-shop-style" value="Cheap">
+            </div>
+
+            <label style="margin-top:0;">Sport Specificity</label>
+            <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 15px; gap: 8px;">
+                <div class="ob-card active" onclick="selectObCard(this, 'ob-sport', 'None')">NONE / HYPERTROPHY</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Football')">FOOTBALL</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Basketball')">BASKETBALL</div>
+                <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Rugby')">RUGBY / POWER</div>
+                <input type="hidden" id="ob-sport" value="None">
+            </div>
+            
+            <div style="background:var(--bg-surface-elevated); padding:12px; border-radius:8px; border:1px solid var(--border-subtle); margin-bottom:15px;">
+                <label style="margin-top:0;">Injury History (Prehab Injection)</label>
+                <select id="ob-injury" class="input-field" style="margin-bottom:10px; padding:10px; font-size:12px;">
+                    <option value="None">None</option>
+                    <option value="Shoulder">Shoulder / Rotator Cuff</option>
+                    <option value="LowerBack">Lower Back / Disc</option>
+                    <option value="Knee">Knees / Patellar</option>
+                </select>
+                
+                <label style="margin-top:0;">Can you do 5 strict Pull-Ups & Dips?</label>
+                <select id="ob-bodyweight-test" class="input-field" style="margin-bottom:0; padding:10px; font-size:12px;">
+                    <option value="Yes">Yes</option>
+                    <option value="No">No (Use Machine Alternatives)</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom: 20px; border: 1px solid var(--border-highlight); padding: 12px; border-radius: 8px;">
+                <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0 0 10px 0;">
+                    <input type="checkbox" id="ob-req-gym" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have access to a commercial gym.
+                </label>
+                <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0;">
+                    <input type="checkbox" id="ob-req-scale" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have a digital food/body scale.
+                </label>
+            </div>
+
+            <div style="display:flex; gap:10px;">
+                <button class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(2)">← BACK</button>
+                <button class="btn-primary" style="flex:2; background: var(--gold-glow); border-color: var(--gold-accent); color: var(--gold-accent);" onclick="triggerBootSequence()">LOCK & BOOT GPS</button>
+            </div>
+        </div>
+        
+        <!-- STEP 4: Terminal Boot Sequence -->
+        <div id="ob-step-boot" class="ob-step hidden" style="text-align: center; padding: 40px 0;">
+            <img src="assets/logo-mark.svg" alt="Ascensus" class="boot-logo boot-logo-sm" style="margin-bottom: 20px;">
+            <h2 style="color:var(--text-main); font-family:'Roboto Mono'; font-size:14px; margin-bottom:8px;">CALIBRATING ARCHITECTURE</h2>
+            <p id="ob-boot-log" style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono'; text-transform:uppercase;">Calculating Baseline TDEE...</p>
+        </div>
+    </div>
+</div>
+
+<div id="app-container" class="hidden">
+    
+    <!-- ========================================== -->
+    <!-- TOP HEADER: ADMIN CONTROLS -->
+    <!-- ========================================== -->
+    <div class="app-header" id="main-header">
+        <img src="assets/logo-wordmark.svg" alt="Ascensus" class="brand-logo">
+        <div class="app-header-row">
+            <h1 id="header-title" style="margin: 0;">Food</h1>
+            <div class="app-header-actions">
+                <!-- Advice / Coach Rules -->
+                <button class="btn-icon" style="border:none; padding: 4px;" onclick="openCoachesNotesModal()" title="Advice">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                </button>
+
+                <!-- Library (Foods / Recipes / Exercises / Workouts) -->
+                <button class="btn-icon" style="border:none; padding: 4px;" onclick="switchTab(this, 'library', 'Library')" title="Library">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                        <path d="M8 7h8"></path>
+                        <path d="M8 11h6"></path>
+                    </svg>
+                </button>
+
+                <!-- Settings -->
+                <button class="btn-icon" style="border:none; padding: 4px;" onclick="switchTab(this, 'engine', 'Settings')" title="Settings">
+                    <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                </button>
+
+                <!-- Network (shown only when networkEnabled via applyNetworkKillSwitch) -->
+                <button class="btn-icon" data-nav="network" style="border:none; padding: 4px;" onclick="switchTab(this, 'network', 'Network')" title="Network">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M2 12h20"></path>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 1: FUEL (Telemetry & Nutrition) -->
+    <!-- ========================================== -->
+    <div id="tab-fuel" class="tab-content">
+        <div id="fuel-sub-nav" style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
+            <button type="button" class="btn-primary catalogue-sub-btn is-primary active" data-fuel="goals" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchFuelSubTab('goals', this)">Goals</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-fuel="meals" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchFuelSubTab('meals', this)">Plan</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-fuel="log" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchFuelSubTab('log', this)">Log</button>
+        </div>
+
+        <div id="fuel-panel-goals">
+            <div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 12px;">
+                <p id="refund-notice" style="font-size:10px; color:var(--gold-accent); text-align:center; margin-top:-10px; margin-bottom:5px; display:none;">Extra calories from cardio added today</p>
+                <div id="reroute-notice" style="display:none; background: rgba(212, 175, 55, 0.05); border: 1px solid rgba(212, 175, 55, 0.3); padding: 10px; border-radius: var(--radius-sm); margin-top: -10px; margin-bottom: 10px; font-size: 11px; color: var(--gold-accent); text-align: center; font-weight: 600; letter-spacing: 0.2px; line-height: 1.4;">
+                    Over target — today adjusted.
+                </div>
+
+                <div class="macro-bar-row" onclick="showBreakdown('cals')" role="button" tabindex="0">
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                        <span class="hud-label" style="margin:0;">Calories</span>
+                        <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-cals">0 kcal</span>
+                    </div>
+                    <div class="progress-bar-bg macro-bar-track">
+                        <div class="macro-range-band" id="band-cals"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-cals"></div>
+                        <div id="bar-cals" class="progress-bar-fill"></div>
+                    </div>
+                </div>
+                <div class="macro-bar-row" onclick="showBreakdown('pro')" role="button" tabindex="0">
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                        <span class="hud-label" style="margin:0;">Protein</span>
+                        <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-pro">0 g</span>
+                    </div>
+                    <div class="progress-bar-bg macro-bar-track">
+                        <div class="macro-range-band" id="band-pro"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-pro"></div>
+                        <div id="bar-pro" class="progress-bar-fill"></div>
+                    </div>
+                </div>
+                <div class="macro-bar-row" onclick="showBreakdown('carb')" role="button" tabindex="0">
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                        <span class="hud-label" style="margin:0;">Carbs</span>
+                        <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-carb">0 g</span>
+                    </div>
+                    <div class="progress-bar-bg macro-bar-track">
+                        <div class="macro-range-band" id="band-carb"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-carb"></div>
+                        <div id="bar-carb" class="progress-bar-fill"></div>
+                    </div>
+                </div>
+                <div class="macro-bar-row" onclick="showBreakdown('fat')" role="button" tabindex="0">
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                        <span class="hud-label" style="margin:0;">Fat</span>
+                        <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-fat">0 g</span>
+                    </div>
+                    <div class="progress-bar-bg macro-bar-track">
+                        <div class="macro-range-band" id="band-fat"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-fat"></div>
+                        <div id="bar-fat" class="progress-bar-fill"></div>
+                    </div>
+                </div>
+                <div class="macro-bar-row" onclick="showBreakdown('water')" role="button" tabindex="0">
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                        <span class="hud-label" style="margin:0;">Hydration</span>
+                        <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-water">0.0 L</span>
+                    </div>
+                    <div class="progress-bar-bg macro-bar-track">
+                        <div class="macro-range-band" id="band-water"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-water"></div>
+                        <div id="bar-water" class="progress-bar-fill"></div>
+                    </div>
+                </div>
+                <div class="macro-bar-row" onclick="showBreakdown('cost')" role="button" tabindex="0">
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                        <span class="hud-label" style="margin:0;">Cost</span>
+                        <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-cost">£0.00</span>
+                    </div>
+                    <div class="progress-bar-bg macro-bar-track">
+                        <div class="macro-range-band" id="band-cost"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-cost"></div>
+                        <div id="bar-cost" class="progress-bar-fill"></div>
+                    </div>
+                </div>
+                <div class="macro-bar-row" onclick="showBreakdown('sleep')" role="button" tabindex="0">
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                        <span class="hud-label" style="margin:0;">Sleep</span>
+                        <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-sleep">0.0 h</span>
+                    </div>
+                    <div class="progress-bar-bg macro-bar-track">
+                        <div class="macro-range-band" id="band-sleep"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-sleep"></div>
+                        <div id="bar-sleep" class="progress-bar-fill"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="fuel-panel-meals" class="hidden">
+            <div id="daily-meal-plan-dashboard"></div>
+        </div>
+
+        <div id="fuel-panel-log" class="hidden">
+            <div class="completion-row" style="margin-bottom: 25px;">
+                <div id="status-badge-weight" class="status-badge exe-btn" onclick="openWeightModal()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M3 9l9-6 9 6"/><path d="M3 9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2"/><path d="M3 15h18"/></svg> Weight</div>
+                <div id="status-badge-bodyfat" class="status-badge exe-btn" onclick="openBodyFatModal()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> Body fat</div>
+                <div id="status-badge-sleep" class="status-badge exe-btn" onclick="openSleepModal()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> Sleep</div>
+                <div id="status-badge-snack" class="status-badge exe-btn" onclick="startExecution('snack', this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" y1="2" x2="6" y2="4"/><line x1="10" y1="2" x2="10" y2="4"/><line x1="14" y1="2" x2="14" y2="4"/></svg> Snack</div>
+                <div class="status-badge" style="border-style: dashed; justify-content: center;" onclick="document.getElementById('quick-add-modal').classList.remove('hidden')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Something else</div>
+            </div>
+            <div id="daily-food-log"></div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 2: DRIVE (Gym Execution & CNS Readiness) -->
+    <!-- ========================================== -->
+    <div id="tab-drive" class="tab-content hidden">
+        <div id="drive-sub-nav" style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
+            <button type="button" class="btn-primary catalogue-sub-btn is-primary active" data-drive="goals" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchDriveSubTab('goals', this)">Goals</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-drive="workout" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchDriveSubTab('workout', this)">Plan</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-drive="log" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchDriveSubTab('log', this)">Log</button>
+        </div>
+
+        <div id="drive-dashboard">
+            <div id="drive-panel-goals">
+                <!-- 5-BAR FITNESS HUD (today only) -->
+                <div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 12px; margin-top: 10px;">
+                    <div onclick="showBreakdown('str')" style="cursor:pointer;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                            <span class="hud-label" style="margin:0;" id="label-str">Strength</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-str">0 / 0</span>
+                        </div>
+                        <div class="progress-bar-bg macro-bar-track">
+                            <div class="macro-range-band" id="band-str"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-str"></div>
+                            <div id="bar-str" class="progress-bar-fill"></div>
+                        </div>
+                    </div>
+                    <div onclick="showBreakdown('pow')" style="cursor:pointer;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                            <span class="hud-label" style="margin:0;" id="label-pow">Power</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-pow">0 / 0</span>
+                        </div>
+                        <div class="progress-bar-bg macro-bar-track">
+                            <div class="macro-range-band" id="band-pow"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-pow"></div>
+                            <div id="bar-pow" class="progress-bar-fill"></div>
+                        </div>
+                    </div>
+                    <div onclick="showBreakdown('spd')" style="cursor:pointer;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                            <span class="hud-label" style="margin:0;" id="label-spd">Speed</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-spd">0 / 0</span>
+                        </div>
+                        <div class="progress-bar-bg macro-bar-track">
+                            <div class="macro-range-band" id="band-spd"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-spd"></div>
+                            <div id="bar-spd" class="progress-bar-fill"></div>
+                        </div>
+                    </div>
+                    <div onclick="showBreakdown('crd')" style="cursor:pointer;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                            <span class="hud-label" style="margin:0;" id="label-crd">Cardio</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-crd">0 / 0</span>
+                        </div>
+                        <div class="progress-bar-bg macro-bar-track">
+                            <div class="macro-range-band" id="band-crd"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-crd"></div>
+                            <div id="bar-crd" class="progress-bar-fill"></div>
+                        </div>
+                    </div>
+                    <div onclick="showBreakdown('end')" style="cursor:pointer;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                            <span class="hud-label" style="margin:0;" id="label-end">Endurance</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-end">0 / 0</span>
+                        </div>
+                        <div class="progress-bar-bg macro-bar-track">
+                            <div class="macro-range-band" id="band-end"></div>
+                        <div class="macro-aim-tick is-hidden" id="tick-end"></div>
+                            <div id="bar-end" class="progress-bar-fill"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="drive-panel-workout" class="hidden">
+                <input type="hidden" id="today-focus" value="">
+                
+                <div id="daily-workout-preview">
+                    <!-- Injected via JS -->
+                    <div class="card" style="padding: 20px; text-align: center;">
+                        <h2 id="auto-focus-title" style="color: var(--gold-accent); font-size: 22px; margin-bottom: 5px;">Calculating...</h2>
+                        <p id="auto-focus-desc" style="font-size: 12px; color: var(--text-muted); margin-bottom: 20px;"></p>
+                    </div>
+                </div>
+
+                <div style="padding: 12px 0 4px; margin-top: 4px; border-top: 1px solid var(--border-subtle);">
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                        <span class="hud-label" style="margin:0;">Fatigue</span>
+                    </div>
+                    <div style="font-family:'Roboto Mono'; font-size:10px; color:var(--text-muted); font-weight: bold;" id="hud-txt-fatigue">None. All clear.</div>
+                </div>
+
+                <div id="previous-match-entry-wrap" class="hidden" style="margin-top:12px; margin-bottom:4px;">
+                    <button type="button" class="btn-primary is-secondary" style="width:100%; margin:0; padding:12px; font-size:11px; border-color:#0A84FF; color:#0A84FF;" onclick="viewPreviousMatchEntry()">View previous match's entry</button>
+                </div>
+                <div id="gps-route-actions" style="display:flex; align-items:center; gap:8px; margin-top:15px; margin-bottom:10px;">
+                    <button type="button" id="btn-execute-gps-route" class="btn-primary is-primary" style="display:flex; justify-content:center; align-items:center; flex:1; margin:0;" onclick="startExecution('workout', this)">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> Start workout
+                    </button>
+                </div>
+                <button type="button" id="log-practice-btn" class="btn-primary is-secondary" style="display:none; justify-content:center; align-items:center; margin-top:0; margin-bottom:10px; border-color:#0A84FF; color:#0A84FF;">▶ Start practice</button>
+                <button type="button" id="log-match-btn" class="btn-primary is-secondary" style="display:none; justify-content:center; align-items:center; margin-top:0; margin-bottom:30px; border-color:var(--gold-accent); color:var(--gold-accent);">▶ Start match</button>
+                <div id="status-badge-workout" class="status-badge" style="justify-content: center; display:none;">✓ Workout completed</div>
+            </div>
+
+            <div id="drive-panel-log" class="hidden">
+                <button type="button" id="log-manual-workout-btn" class="btn-primary is-secondary" style="display:flex; justify-content:center; align-items:center; margin-top:0; margin-bottom:16px;" onclick="startManualWorkout(this)">▶ Log manual workout</button>
+                <div id="daily-exercise-log"></div>
+            </div>
+        </div>
+        <!-- Execution Zone anchors here during workouts -->
+        <div id="drive-zone-anchor"></div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- LIBRARY (catalogues via header icon) -->
+    <!-- ========================================== -->
+    <div id="tab-library" class="tab-content hidden">
+        <div id="library-sub-nav" style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
+            <button type="button" class="btn-primary catalogue-sub-btn is-primary active" data-library="foods" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLibrarySubTab('foods', this)">Foods</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-library="recipes" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLibrarySubTab('recipes', this)">Recipes</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-library="exercises" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLibrarySubTab('exercises', this)">Exercises</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-library="workouts" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLibrarySubTab('workouts', this)">Workouts</button>
+        </div>
+
+        <div id="library-panel-foods">
+            <div id="station-panel-foods">
+                <button class="btn-icon" style="width: 100%; padding: 16px; font-size: 13px; font-weight:700; border-style: dashed; margin-bottom: 15px; color: var(--silver-accent);" onclick="togglePantryForm()">+ Add food</button>
+
+                <div class="card" style="padding-top: 20px;">
+                    <div id="foods-price-update" style="margin-bottom:16px; text-align:center;">
+                        <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:1px;">Next price update</div>
+                        <div id="foods-price-update-date" style="font-size:15px; color:var(--text-main); font-weight:700; margin-top:4px; font-family:'Roboto Mono', monospace;"></div>
+                    </div>
+                    <div style="position: relative; margin-bottom: 15px;">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="text" id="search-food" class="input-field search-bar" placeholder="Search foods..." onkeyup="filterBoot('food')" style="margin-bottom: 0; padding-left: 42px;">
+                    </div>
+                    <div id="inventory-list" class="db-list" style="padding-right: 4px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="library-panel-recipes" class="hidden">
+            <div id="station-panel-recipes">
+                <p style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:12px; line-height:1.45;">Saved meals from Drive. Open a log, build a plate, then tap <strong style="color:var(--text-main);">Save Recipe</strong>.</p>
+                <div class="card" style="padding-top: 20px;">
+                    <div style="position: relative; margin-bottom: 15px;">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="text" id="search-recipe" class="input-field search-bar" placeholder="Search recipes..." onkeyup="filterSavedLibrary('recipe')" style="margin-bottom: 0; padding-left: 42px;">
+                    </div>
+                    <div id="recipe-list" class="db-list" style="padding-right: 4px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="library-panel-exercises" class="hidden">
+            <div id="mechanics-panel-exercises">
+                <button class="btn-icon" style="width: 100%; padding: 16px; font-size: 13px; font-weight:700; border-style: dashed; margin-bottom: 15px; color: var(--silver-accent);" onclick="toggleExForm()">+ Add exercise</button>
+
+                <div class="card" style="padding-top: 20px;">
+                    <div style="position: relative; margin-bottom: 15px;">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="text" id="search-ex" class="input-field search-bar" placeholder="Search exercises..." onkeyup="filterBoot('ex')" style="margin-bottom: 0; padding-left: 42px;">
+                    </div>
+                    <div id="exercise-list" class="db-list" style="padding-right: 4px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="library-panel-workouts" class="hidden">
+            <div id="mechanics-panel-workouts">
+                <p style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:12px; line-height:1.45;">Saved sessions from Drive. Build a workout, then tap <strong style="color:var(--text-main);">Save Workout</strong>.</p>
+                <div class="card" style="padding-top: 20px;">
+                    <div style="position: relative; margin-bottom: 15px;">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="text" id="search-workout" class="input-field search-bar" placeholder="Search workouts..." onkeyup="filterSavedLibrary('workout')" style="margin-bottom: 0; padding-left: 42px;">
+                    </div>
+                    <div id="workout-library-list" class="db-list" style="padding-right: 4px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 3: PLAN (Unified Logistics Route) -->
+    <!-- ========================================== -->
+    <div id="tab-route" class="tab-content hidden">
+        <div style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
+            <button type="button" class="btn-primary catalogue-sub-btn is-primary active" data-plan="week" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchPlanSubTab('week', this)">Week</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-plan="future" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchPlanSubTab('future', this)">Future</button>
+        </div>
+
+        <div id="plan-panel-week">
+            <div id="future-timeline-container" style="margin-bottom: 20px;"></div>
+            <button type="button" class="btn-primary is-secondary" style="margin:0 0 20px 0; padding:10px; font-size:11px; border-color: var(--gold-accent); color: var(--gold-accent);" onclick="openSpontaneousEventModal()">Log spontaneous event</button>
+        </div>
+
+        <div id="plan-panel-future" class="hidden">
+            <div style="display:flex; gap:8px; margin-bottom:16px;">
+                <button type="button" class="btn-primary is-secondary" style="margin:0; padding:10px 12px; flex:1; font-size:11px;" onclick="document.getElementById('periodization-modal').classList.remove('hidden')">Auto-planner</button>
+                <button type="button" class="btn-primary is-secondary" style="margin:0; padding:10px 12px; flex:1; font-size:11px;" onclick="openFixedScheduleModal()">Edit fixed schedule</button>
+            </div>
+            <div id="calendar-months-container" style="padding-bottom: 40px;"></div>
+        </div>
+    </div>
+
+
+    <!-- ========================================== -->
+    <!-- TAB 4: PROGRESS (Charts & History) -->
+    <!-- ========================================== -->
+    <div id="tab-journey" class="tab-content hidden">
+        <div id="monthly-summary-banner" class="hidden" style="margin-bottom:16px;"></div>
+        <div style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
+            <button type="button" class="btn-primary catalogue-sub-btn is-primary active" data-journey="weight" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchJourneySubTab('weight', this)">Weight</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-journey="exercise" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchJourneySubTab('exercise', this)">Exercise</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-journey="targets" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchJourneySubTab('targets', this)">Targets</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-journey="adherence" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchJourneySubTab('adherence', this)">Adherence</button>
+        </div>
+
+        <div id="journey-panel-weight">
+            <div class="card" style="margin-bottom: 30px;">
+                <div id="unified-eta-readout" style="background: var(--bg-surface-elevated); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 15px; text-align: center; border: 1px solid var(--border-subtle);">
+                    <div class="hud-label" id="unified-eta-label" style="color: var(--gold-accent);">Destination ETA</div>
+                    <div id="unified-eta-value" style="font-size: 16px; color: var(--text-main); font-weight: 800; font-family: 'Roboto Mono'; margin: 4px 0;">Calculating...</div>
+                </div>
+                <div style="position: relative; height: 180px; width: 100%;"><canvas id="unifiedChart"></canvas></div>
+                <div style="font-size:10px; color:var(--text-muted); text-align:center; margin-top:8px;">Tap a point to delete that day’s log</div>
+                <div class="progress-date-range" data-progress-range>
+                    <label>From <input type="date" class="input-field progress-range-from" onchange="onProgressRangeChange()"></label>
+                    <label>To <input type="date" class="input-field progress-range-to" onchange="onProgressRangeChange()"></label>
+                </div>
+            </div>
+        </div>
+
+        <div id="journey-panel-exercise" class="hidden">
+            <div class="card" style="margin-bottom: 30px;">
+                <input type="hidden" id="exercise-chart-select" value="">
+                <div style="position: relative; margin-bottom: 12px;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="text" id="exercise-chart-search" class="input-field search-bar" placeholder="Search exercises..." oninput="filterExerciseChartList()" autocomplete="off" style="margin-bottom: 0; padding-left: 42px;">
+                </div>
+                <div id="exercise-chart-list" style="max-height:160px; overflow-y:auto; margin-bottom:15px; border:1px solid var(--border-subtle); border-radius:8px;"></div>
+                <div style="position: relative; height: 180px; width: 100%;"><canvas id="exerciseChart"></canvas></div>
+                <div style="font-size:10px; color:var(--text-muted); text-align:center; margin-top:8px;">Tap a point to delete that day’s sets</div>
+                <div class="progress-date-range" data-progress-range>
+                    <label>From <input type="date" class="input-field progress-range-from" onchange="onProgressRangeChange()"></label>
+                    <label>To <input type="date" class="input-field progress-range-to" onchange="onProgressRangeChange()"></label>
+                </div>
+            </div>
+        </div>
+
+        <div id="journey-panel-targets" class="hidden">
+            <div class="card" style="margin-bottom: 30px;">
+                <select id="macro-chart-select" class="input-field" style="margin-bottom: 15px;" onchange="drawMacroChart()">
+                    <option value="cals">Calories vs Target</option>
+                    <option value="pro">Protein (G)</option>
+                    <option value="carb">Carbohydrates (G)</option>
+                    <option value="fat">Dietary Fats (G)</option>
+                    <option value="sleep">Sleep Tracker (Hrs)</option>
+                    <option value="cost">Cost (£) vs Budget</option>
+                </select>
+                <div style="position: relative; height: 200px; width: 100%;"><canvas id="macroChart"></canvas></div>
+                <div style="font-size:10px; color:var(--text-muted); text-align:center; margin-top:8px;">Tap a bar to delete that day’s log</div>
+                <div class="progress-date-range" data-progress-range>
+                    <label>From <input type="date" class="input-field progress-range-from" onchange="onProgressRangeChange()"></label>
+                    <label>To <input type="date" class="input-field progress-range-to" onchange="onProgressRangeChange()"></label>
+                </div>
+            </div>
+        </div>
+
+        <div id="journey-panel-adherence" class="hidden">
+            <div class="card" style="margin-bottom: 30px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <button type="button" onclick="switchJourneySubTab('weight')" style="background:none; border:none; color:var(--text-stealth); font-size:28px; cursor:pointer; line-height:1; padding:0 4px;" title="Leave adherence" aria-label="Leave adherence calendar">&times;</button>
+                    <span style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.6px; text-transform:uppercase;">Adherence</span>
+                    <span style="width:28px;"></span>
+                </div>
+                <div style="display: flex; flex-direction: column; font-size: 9px; color: var(--text-muted); margin-bottom: 16px; font-weight: bold;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:8px;">
+                        <button type="button" class="btn-icon" style="padding:6px 10px; font-size:14px; min-width:36px;" onclick="shiftAdherenceMonth(-1)" aria-label="Previous month">‹</button>
+                        <span id="adherence-month-label" style="font-size: 13px; color: var(--text-main); font-family:'Roboto Mono'; letter-spacing:1px;">Month</span>
+                        <button type="button" class="btn-icon" style="padding:6px 10px; font-size:14px; min-width:36px;" onclick="shiftAdherenceMonth(1)" aria-label="Next month">›</button>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; flex-wrap:wrap; gap:6px;">
+                        <span><span style="color:var(--gold-accent); font-size:12px;">■</span> Flawless</span>
+                        <span><span style="color:#A0A0A0; font-size:12px;">■</span> Solid</span>
+                        <span><span style="color:#333333; font-size:12px;">■</span> Missed</span>
+                        <span><span style="border:1px solid #444; border-radius:50%; padding:0 3px; font-size:10px;">○</span> Empty</span>
+                        <span><span style="color:#0A84FF; font-size:12px;">★</span> Diary</span>
+                    </div>
+                </div>
+                <div class="calendar-weekday-row" style="display:grid; grid-template-columns:repeat(7,1fr); gap:8px; margin-bottom:6px; font-size:9px; color:var(--text-stealth); font-family:'Roboto Mono'; text-align:center;">
+                    <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+                </div>
+                <div id="calendar-grid" class="calendar-grid" style="max-height: none; overflow: visible; padding-right: 0;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 5.5: LOGISTICS ENGINE (Live Cart) -->
+    <!-- ========================================== -->
+    <div id="tab-logistics" class="tab-content hidden">
+        <div style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
+            <button type="button" class="btn-primary catalogue-sub-btn is-primary active" data-catalogue="shop" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLogisticsSubTab('shop', this)">Shopping</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-catalogue="pantry" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLogisticsSubTab('pantry', this)">Pantry</button>
+        </div>
+
+        <div id="logistics-panel-shop">
+            <div style="display:flex; justify-content:flex-end; margin-bottom: 12px;">
+                <select id="shopping-timeframe" class="input-field" style="margin:0; width:120px; padding:8px; font-size:11px;" onchange="generateGroceryList()">
+                    <option value="3">Next 3 Days</option>
+                    <option value="7" selected>Next 7 Days</option>
+                </select>
+            </div>
+            <div id="inline-grocery-list">
+                <div style="text-align:center; padding: 20px; font-size:12px; color:var(--text-muted);">Loading shopping list...</div>
+            </div>
+            <div class="shopping-sticky-bar">
+                <div class="shopping-sticky-meta">
+                    <span id="shopping-selected-count" class="hidden"></span>
+                    <button type="button" id="shopping-cart-total" class="shopping-cart-total-btn" onclick="openShoppingCostBreakdown()" aria-label="Selected shopping cost breakdown">£0.00</button>
+                </div>
+                <button type="button" class="btn-primary is-primary" style="margin-top:10px;" onclick="executeCheckout()">Checkout</button>
+                <p id="checkout-status" style="font-size:11px; text-align:center; margin-top:10px; color:var(--text-muted); font-family: 'Roboto Mono', monospace;"></p>
+            </div>
+        </div>
+
+        <div id="logistics-panel-pantry" class="hidden">
+            <div id="inline-pantry-list" style="margin-bottom: 30px;">
+                <div style="text-align:center; padding: 20px; font-size:12px; color:var(--text-muted);">No pantry stock yet.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 7: PERSONALISATION -->
+    <!-- ========================================== -->
+    <div id="tab-engine" class="tab-content hidden">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; margin-bottom: 24px; gap: 8px;">
+            <label class="pill-toggle" style="margin-top:0;"><input type="checkbox" id="toggle-rest-stop" onchange="toggleRestStop()"><span>Rest Stop</span></label>
+            <label class="pill-toggle" style="margin-top:0;" onclick="openTrackerGuidanceModal(); event.preventDefault();"><input type="checkbox" id="toggle-tracker-mode" tabindex="-1"><span>Tracker</span></label>
+            <label class="pill-toggle" style="margin-top:0;"><input type="checkbox" id="toggle-notifications" onchange="saveSettings()"><span>Alerts</span></label>
+            <label class="pill-toggle" style="margin-top:0;"><input type="checkbox" id="toggle-dependent-athlete" onchange="saveSettings()"><span>Visual</span></label>
+            <label class="pill-toggle" style="margin-top:0;"><input type="checkbox" id="toggle-network" checked onchange="toggleNetworkEnabled()"><span>Network</span></label>
+            <label class="pill-toggle" style="margin-top:0;"><input type="checkbox" id="toggle-light-mode" onchange="toggleTheme()"><span>Day</span></label>
+        </div>
+
+        <div style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
+            <button type="button" class="btn-primary catalogue-sub-btn is-primary active" data-engine="algorithms" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchEngineSubTab('algorithms', this)">Algorithms</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-engine="biometrics" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchEngineSubTab('biometrics', this)">Biometrics</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-engine="lifestyle" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchEngineSubTab('lifestyle', this)">Lifestyle</button>
+            <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-engine="system" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchEngineSubTab('system', this)">System</button>
+        </div>
+
+        <div id="engine-panel-algorithms" class="card">
+            <div style="display: flex; gap: 10px;">
+                <div style="flex: 1;"><label>Dietary Matrix</label>
+                    <select id="set-diet" class="input-field" onchange="saveSettings()">
+                        <option value="Standard">Standard</option>
+                        <option value="Vegan">Vegan</option>
+                        <option value="Vegetarian">Vegetarian</option>
+                        <option value="Halal">Halal</option>
+                        <option value="Gluten-Free">Gluten-Free</option>
+                        <option value="Dairy-Free">Dairy-Free</option>
+                        <option value="Nut-Free">Nut-Free</option>
+                    </select>
+                </div>
+                <div style="flex: 1;">
+                    <label>Active Injury</label>
+                    <select id="set-injury" class="input-field" onchange="triggerRepairModeCheck()">
+                        <option value="None">None</option>
+                        <option value="LowerBack">Lower Back</option>
+                        <option value="Shoulder">Shoulder</option>
+                        <option value="Knee">Knee</option>
+                    </select>
+                    <div id="injury-status-panel" style="margin-top:8px; font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; line-height:1.45;"></div>
+                </div>
+            </div>
+
+            <label style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+                How you shop
+                <button type="button" class="info-tip-btn" onclick="showShopStyleInfo('settings')" title="What do these options mean?" aria-label="Info about shopping options">ℹ</button>
+            </label>
+            <select id="set-shop-style" class="input-field" onchange="saveSettings()">
+                <option value="Cheap">Cheap</option>
+                <option value="Middle">Middle</option>
+                <option value="Quality">Quality</option>
+            </select>
+            <div id="set-shop-style-tip" class="hidden" style="font-size:11px; color:var(--text-silver); line-height:1.45; margin:-6px 0 12px 0; padding:10px 12px; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-surface-elevated); font-family:'Roboto Mono';"></div>
+
+            <div style="display: flex; gap: 10px;">
+                <div style="flex: 1;"><label>Can do 5 Pullups/Dips?</label><select id="set-bw-test" class="input-field"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+            </div>
+
+            <label>Sport Specificity</label>
+            <select id="set-sport" class="input-field" onchange="handleSportChange()">
+                <option value="None">None (Standard Hypertrophy)</option><option value="Football">Football / Soccer</option><option value="Basketball">Basketball</option><option value="Rugby">Rugby / Power</option><option value="Volleyball">Volleyball</option><option value="Cricket">Cricket</option><option value="Tennis">Tennis</option><option value="Rowing">Rowing / Endurance</option>
+            </select>
+            
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <label style="margin:0;">Periodization Phase</label>
+                <button onclick="document.getElementById('periodization-modal').classList.remove('hidden')" style="background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:10px; font-weight:bold; cursor:pointer;">[ AUTO-PLANNER ]</button>
+            </div>
+            <select id="set-season-phase" class="input-field" onchange="onSeasonPhaseChange()">
+                <option value="OffSeason_Hypertrophy" selected>Standard: Hypertrophy (default)</option>
+                <option value="OffSeason_Strength">Off-Season: Strength (5x5)</option>
+                <option value="OffSeason_Adaptation">Off-Season: Adaptation</option>
+                <option value="PreSeason_Power">Pre-Season: Power & Plyo</option>
+                <option value="InSeason_Maintenance">In-Season: Maintenance</option>
+            </select>
+            <p id="strength-phase-disclaimer" class="hidden" style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin:-4px 0 12px 0; line-height:1.45;">
+                Strength phase should only be used after ~8 months of consistent training. Hypertrophy is recommended until then.
+            </p>
+
+            <label style="margin-top:14px;">Gym days willing / week</label>
+            <p id="gym-days-hint" style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; margin:-2px 0 8px 0; line-height:1.4;">Hypertrophy ideal: 3–4 days. 1–2 = full body · 3–4 = upper/lower · 5–6 = PPL.</p>
+            <select id="set-gym-willingness" class="input-field" onchange="onGymDaysOrPhaseUiChange()">
+                <option value="1">1 — Full body ×1</option>
+                <option value="2">2 — Full body ×2</option>
+                <option value="3">3 — Upper / Lower (ideal)</option>
+                <option value="4" selected>4 — Upper / Lower (ideal)</option>
+                <option value="5">5 — Push / Pull / Legs</option>
+                <option value="6">6 — Push / Pull / Legs</option>
+            </select>
+
+            <div id="aux-settings-block">
+                <label class="pill-toggle" style="margin: 8px 0 12px 0;">
+                    <input type="checkbox" id="toggle-band-auxiliary" onchange="saveSettings()">
+                    <span>Band auxiliary — always 2 Aux (band work); Strength = gym days (max 4)</span>
+                </label>
+                <p id="band-aux-hint" style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; margin:-4px 0 12px 0; line-height:1.4;">
+                    Off: Aux shares gym-day budget. On: Aux uses bands (can be separate days); every gym day can be Strength.
+                </p>
+            </div>
+
+            <label>Max time in gym</label>
+            <p id="gym-time-hint" style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; margin:-2px 0 8px 0; line-height:1.4;"></p>
+            <select id="set-max-gym-time" class="input-field" onchange="saveSettings()"></select>
+
+            <label style="margin-top:14px;">Dumbbell increment (kg)</label>
+            <select id="set-db-increment" class="input-field" onchange="saveSettings()">
+                <option value="1">1 kg</option>
+                <option value="2" selected>2 kg</option>
+                <option value="2.5">2.5 kg</option>
+                <option value="4">4 kg</option>
+                <option value="5">5 kg</option>
+            </select>
+        </div>
+
+        <div id="engine-panel-biometrics" class="card hidden">
+            <div style="display: flex; gap: 10px;">
+                <div style="flex: 1;"><label>Current (kg)</label><input type="number" step="0.1" id="set-weight" class="input-field" onkeyup="calculateAchievability()"></div>
+                <div style="flex: 1;"><label>Target (kg)</label><input type="number" step="0.1" id="set-target-weight" class="input-field" onkeyup="calculateAchievability()"></div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <div style="flex: 1;"><label>Timeline (Weeks)</label><input type="number" id="set-target-weeks" class="input-field" placeholder="e.g. 8" value="8" onkeyup="calculateAchievability()"></div>
+            </div>
+            <div id="achievability-score" style="background: rgba(255, 255, 255, 0.02); border: 1px dashed var(--border-highlight); padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 11px; text-align: center; color: var(--text-muted); font-family: 'Roboto Mono', monospace;">
+                Enter timeline to view trajectory.
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <div style="flex: 1;"><label>Height (cm)</label><input type="number" id="set-height" class="input-field"></div>
+                <div style="flex: 1;"><label>Age</label><input type="number" id="set-age" class="input-field"></div>
+            </div>
+            <label>Body Fat % (Optional)</label>
+            <input type="number" id="set-bf" class="input-field">
+            <div style="display: flex; gap: 10px;">
+                <div style="flex: 1;"><label>Sex</label><select id="set-sex" class="input-field"><option value="Male">Male</option><option value="Female">Female</option></select></div>
+                <div style="flex: 1;"><label>Goal</label>
+                    <select id="set-goal" class="input-field">
+                        <option value="Fat_Loss">Fat Loss (Deficit)</option>
+                        <option value="Maintenance">Maintenance</option>
+                        <option value="Muscle_Gain">Muscle Gain</option>
+                        <option value="Strength">Strength</option>
+                        <option value="Power">Power</option>
+                        <option value="Endurance">Endurance</option>
+                    </select>
+                </div>
+
+            </div>
+        </div>
+
+        <div id="engine-panel-lifestyle" class="card hidden">
+            <label>Typical Training Window</label>
+            <select id="set-training-window" class="input-field"><option value="Morning">Morning (Pre-Breakfast)</option><option value="Afternoon" selected>Afternoon (Post-Lunch)</option><option value="Evening">Evening (Post-Dinner)</option></select>
+            <label>Meals Per Day</label><select id="set-meals-per-day" class="input-field"><option value="2">2 Meals (IF)</option><option value="3" selected>3 Meals</option><option value="4">4 Meals</option><option value="5">5 Meals</option></select>
+            <label>Daily Budget (£)</label><input type="number" step="0.01" id="set-budget" class="input-field">
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                <div style="flex: 2;"><label style="margin-top:0;">Activity Level</label><select id="set-activity" class="input-field" style="margin-bottom:0;"><option value="1.2">Sedentary</option><option value="1.375">Light</option><option value="1.55">Moderate</option><option value="1.725">Active</option></select></div>
+                <div style="flex: 1;"><label style="margin-top:0;">Days/Wk</label><input type="number" id="set-training-freq" class="input-field" value="4" style="margin-bottom:0;"></div>
+            </div>
+        </div>
+
+        <div id="engine-panel-system" class="card hidden">
+            <button class="btn-primary" style="margin-top: 0; margin-bottom: 24px; border-color: var(--gold-accent); color: var(--gold-accent); display:flex; justify-content:center; align-items:center; gap:8px;" onclick="exportData()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Export Backup (.json)
+            </button>
+            <p id="export-status" style="color: var(--gold-accent); font-size: 11px; text-align: center; margin-bottom: 10px;"></p>
+            <div style="border: 1px solid var(--gold-accent); padding: 16px; border-radius: var(--radius-md); background: rgba(0,0,0,0.5);">
+                <h3 style="color:var(--gold-accent); margin-top:0; margin-bottom:10px; font-size:12px; text-transform:uppercase; display:flex; align-items:center; gap:6px;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> Pitch Demo Injector
+                </h3>
+                <select id="demo-selector" class="input-field" style="margin-bottom:12px; padding: 12px; font-size: 12px;"><option value="demo-master.json">Master 28-Day Demo (All Features)</option><option value="demo-gym-bulk.json">Gym Bro / Muscle Gain (PPL)</option><option value="demo-gym-cut.json">Average Joe / Fat Loss / Budget</option><option value="demo-rugby.json">Rugby / Bulk / Standard</option><option value="demo-vegan-fatloss.json">Volleyball / Cut / Vegan</option></select>
+                <button class="btn-primary" onclick="injectPitchData(document.getElementById('demo-selector').value)" style="margin:0; padding: 14px; font-size: 12px;">INJECT DEMO</button>
+                <p id="demo-status" style="color: var(--gold-accent); font-size: 11px; text-align: center; margin-top: 10px; margin-bottom: 0;"></p>
+            </div>
+            
+            <button class="btn-primary" style="margin-top: 24px; border-color: #FF3B30; color: #FF3B30; display:flex; justify-content:center; align-items:center; gap:8px;" onclick="handleSignOut()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Sign out
+            </button>
+        </div>
+        <button class="btn-primary is-primary" style="margin-top: 24px;" onclick="saveSettings()">Save changes</button>
+        <p id="settings-status" style="color: var(--gold-accent); font-size: 12px; text-align: center; margin-top: 15px;"></p>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 8: NETWORK (Tips, Friends, Squads, Share) -->
+    <!-- ========================================== -->
+    <div id="tab-network" class="tab-content hidden">
+        <div class="hud-header">Network</div>
+        <div id="network-disabled-notice" class="hidden" style="padding:12px; margin-bottom:16px; font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; border:1px dashed var(--border-highlight); border-radius:8px;">
+            Turn on Network in Settings to use this add-on.
+        </div>
+
+        <div id="network-nav" style="display: flex; gap: 8px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none;">
+            <button class="btn-primary network-tab-btn is-primary active" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('tips', this)">Tips</button>
+            <button class="btn-primary network-tab-btn is-secondary" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('friends', this)">Friends</button>
+            <button class="btn-primary network-tab-btn is-secondary" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('squads', this)">Squads</button>
+            <button class="btn-primary network-tab-btn is-secondary" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('share', this)">Share</button>
+        </div>
+
+        <!-- 1. TIPS (default) -->
+        <div id="network-tips" class="network-section">
+            <div class="card" style="padding: 16px; margin-bottom: 16px; border-color: var(--gold-accent);">
+                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; letter-spacing:0.4px; margin-bottom:6px;">Weekly tip</div>
+                <div style="font-size:14px; font-weight:bold; color:var(--text-main); margin-bottom:8px;">Protect the streak, not the perfect day</div>
+                <div style="font-size:12px; color:var(--text-silver); line-height:1.45;">Pete: If life compresses your window, run the minimum viable session and keep the meal on schedule. Adherence compounds — missing once is noise; missing twice becomes the new baseline.</div>
+            </div>
+            <div class="hud-header">Learn</div>
+            <div class="card" style="padding: 16px;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; cursor:pointer;" onclick="openVideoModal('Dr. Eric Berg: Insulin Resistance', 'https://www.youtube.com/embed/placeholder')">
+                        <div style="height:70px; background:var(--bg-surface); border:1px solid var(--border-highlight); border-radius:4px; margin-bottom:8px; display:flex; justify-content:center; align-items:center; color:var(--text-stealth);">▶</div>
+                        <div style="font-size:10px; color:var(--text-main); font-weight:bold; line-height:1.3;">Dr. Eric Berg: Insulin Resistance</div>
+                    </div>
+                    <div style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; cursor:pointer;" onclick="openVideoModal('Squat Mechanics Deep Dive', 'https://www.youtube.com/embed/placeholder')">
+                        <div style="height:70px; background:var(--bg-surface); border:1px solid var(--border-highlight); border-radius:4px; margin-bottom:8px; display:flex; justify-content:center; align-items:center; color:var(--text-stealth);">▶</div>
+                        <div style="font-size:10px; color:var(--text-main); font-weight:bold; line-height:1.3;">Squat Mechanics Deep Dive</div>
+                    </div>
+                    <div style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; cursor:pointer;" onclick="openVideoModal('Sleep Science for Hypertrophy', 'https://www.youtube.com/embed/placeholder')">
+                        <div style="height:70px; background:var(--bg-surface); border:1px solid var(--border-highlight); border-radius:4px; margin-bottom:8px; display:flex; justify-content:center; align-items:center; color:var(--text-stealth);">▶</div>
+                        <div style="font-size:10px; color:var(--text-main); font-weight:bold; line-height:1.3;">Sleep Science for Hypertrophy</div>
+                    </div>
+                    <div style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; cursor:pointer;" onclick="openVideoModal('Huberman: Dopamine & Drive', 'https://www.youtube.com/embed/placeholder')">
+                        <div style="height:70px; background:var(--bg-surface); border:1px solid var(--border-highlight); border-radius:4px; margin-bottom:8px; display:flex; justify-content:center; align-items:center; color:var(--text-stealth);">▶</div>
+                        <div style="font-size:10px; color:var(--text-main); font-weight:bold; line-height:1.3;">Huberman: Dopamine & Drive</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. FRIENDS -->
+        <div id="network-friends" class="network-section hidden">
+            <div class="card" style="padding: 16px; margin-bottom: 16px;">
+                <div style="font-size:12px; color:var(--text-main); font-weight:bold; margin-bottom:12px;">Your profile</div>
+                <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">Username</label>
+                <input type="text" id="network-username" class="input-field" placeholder="e.g. Theo_C" style="margin-bottom:12px;" onchange="saveNetworkProfile()" autocomplete="off">
+                <label class="pill-toggle" style="margin:0 0 12px 0; display:inline-block;">
+                    <input type="checkbox" id="network-private" checked onchange="saveNetworkProfile()"><span>Private</span>
+                </label>
+                <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:8px;">
+                    <label style="font-size:11px; color:var(--text-silver); display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="checkbox" id="network-show-streak" checked onchange="saveNetworkProfile()"> Show streak
+                    </label>
+                    <label style="font-size:11px; color:var(--text-silver); display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="checkbox" id="network-show-lift" checked onchange="saveNetworkProfile()"> Show main lift
+                    </label>
+                </div>
+            </div>
+
+            <div style="position: relative; margin-bottom: 12px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input type="text" id="network-friend-search" class="input-field search-bar" placeholder="Search friends..." style="margin-bottom: 0; padding-left: 42px;" oninput="filterNetworkFriends(this.value)" autocomplete="off">
+            </div>
+            <div id="network-friend-empty" class="hidden" style="padding:12px; margin-bottom:12px; font-size:12px; color:var(--text-muted);">
+                No matches. <button type="button" style="background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:12px; cursor:pointer; padding:0;" onclick="switchNetworkTab('share', document.querySelectorAll('.network-tab-btn')[3])">Share a workout with a teammate</button>
+            </div>
+            <div id="network-friends-list">
+                <div class="network-friend-row card" data-username="Theo_C" style="padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-size:13px; font-weight:bold; color:var(--text-main);">Theo_C</div>
+                        <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">12-day streak · Bench 110kg</div>
+                    </div>
+                    <button class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="addNetworkFriendDemo('Theo_C')">Add</button>
+                </div>
+                <div class="network-friend-row card" data-username="John_F" style="padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-size:13px; font-weight:bold; color:var(--text-main);">John_F</div>
+                        <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">8-day streak · Bench 95kg</div>
+                    </div>
+                    <button class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="addNetworkFriendDemo('John_F')">Add</button>
+                </div>
+                <div class="network-friend-row card" data-username="Tyler_F" style="padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-size:13px; font-weight:bold; color:var(--text-main);">Tyler_F</div>
+                        <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">5-day streak · Bench 87.5kg</div>
+                    </div>
+                    <button class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="addNetworkFriendDemo('Tyler_F')">Add</button>
+                </div>
+            </div>
+            <div id="network-friend-demo-notice" class="hidden" style="margin-top:8px; font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono';"></div>
+        </div>
+
+        <!-- 3. SQUADS -->
+        <div id="network-squads" class="network-section hidden">
+            <div class="card" style="padding: 16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <span style="font-size:12px; color:var(--text-main); font-weight:bold;">My Squads</span>
+                    <div style="display:flex; gap:10px;">
+                        <button type="button" style="background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:10px; font-weight:bold; cursor:pointer;" onclick="networkCreateSquadDemo()">+ CREATE</button>
+                        <button type="button" style="background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:10px; font-weight:bold; cursor:pointer;" onclick="networkInviteSquadDemo()">INVITE</button>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-surface-elevated); padding:12px; border-radius:8px; border:1px solid var(--border-subtle); margin-bottom:10px;">
+                    <div>
+                        <div style="font-size:13px; font-weight:bold; color:var(--text-main); margin-bottom:2px;">Imperial College 1st XV</div>
+                        <div style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">34 Operators · Pre-Season · Demo</div>
+                    </div>
+                    <button class="btn-icon" style="padding:6px 12px; font-size:10px;" onclick="toggleSquadDetail()">VIEW</button>
+                </div>
+                <div id="network-squad-detail" class="hidden" style="margin-top:12px; border-top:1px solid var(--border-highlight); padding-top:12px;">
+                    <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:8px;">SHARED SESSIONS</div>
+                    <div style="background:var(--bg-surface-elevated); padding:10px; border-radius:6px; margin-bottom:8px; font-size:12px; color:var(--text-silver);">
+                        <strong style="color:var(--text-main);">Session B — Squats</strong><br>
+                        <span style="font-size:10px; font-family:'Roboto Mono'; color:var(--text-muted);">Theo_C · 5×5 @ 140kg · yesterday</span>
+                    </div>
+                    <div style="background:var(--bg-surface-elevated); padding:10px; border-radius:6px; margin-bottom:12px; font-size:12px; color:var(--text-silver);">
+                        <strong style="color:var(--text-main);">Upper Power</strong><br>
+                        <span style="font-size:10px; font-family:'Roboto Mono'; color:var(--text-muted);">John_F · Bench 4×6 @ 95kg · Mon</span>
+                    </div>
+                    <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:8px;">CHAT <span style="color:var(--gold-accent);">(demo — not live)</span></div>
+                    <div id="network-squad-chat" style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; max-height:180px; overflow-y:auto; margin-bottom:8px;">
+                        <div style="margin-bottom:10px;"><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">Theo_C</span><div style="font-size:12px; color:var(--text-silver);">Squats felt heavy but bar speed was clean. Anyone hitting Session B tomorrow?</div></div>
+                        <div style="margin-bottom:10px;"><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">John_F</span><div style="font-size:12px; color:var(--text-silver);">I'm in for 07:30 if the room's free.</div></div>
+                        <div style="margin-bottom:10px;"><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">Tyler_F</span><div style="font-size:12px; color:var(--text-silver);">Bring bands — coach wants activation before doubles.</div></div>
+                        <div><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">Theo_C</span><div style="font-size:12px; color:var(--text-silver);">Copy. See you there.</div></div>
+                    </div>
+                    <input type="text" class="input-field" placeholder="Chat coming soon" disabled style="opacity:0.55; margin:0;">
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. SHARE -->
+        <div id="network-share" class="network-section hidden">
+            <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
+                <button class="btn-primary" style="margin:0;" onclick="shareNetworkWorkout()">Share last workout</button>
+                <button class="btn-primary" style="margin:0; border-color:var(--border-highlight); color:var(--text-silver);" onclick="shareNetworkMeal()">Share today's meal</button>
+            </div>
+            <div class="hud-header">Card preview</div>
+            <div id="network-share-preview" class="card" style="padding: 20px; min-height: 140px; background: linear-gradient(160deg, rgba(212,175,55,0.12) 0%, var(--bg-surface) 55%); border-color: var(--gold-accent);">
+                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; letter-spacing:1px; margin-bottom:8px;">ASCENSUS</div>
+                <div id="network-share-preview-title" style="font-size:16px; font-weight:bold; color:var(--text-main); margin-bottom:6px;">Session B — Squats</div>
+                <div id="network-share-preview-body" style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; line-height:1.5;">5×5 @ 140kg<br>Calibrated via Ascensus GPS</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MODALS & OVERLAYS -->
+    <!-- ========================================== -->
+
+    <!-- SHARED EXECUTION ZONE (FULL-SCREEN FOCUS) -->
+    <div id="execution-zone" class="hidden">
+        <div class="execution-zone-header">
+            <div style="min-width:0; flex:1;">
+                <div class="hud-header" style="margin: 0; border: none; padding: 0; color:var(--text-main);" id="current-route-title">Active workout</div>
+                <div id="workout-timer-wrap" class="hidden workout-timer-wrap">
+                    <span class="workout-timer-label">Timer</span>
+                    <span id="workout-session-timer" class="workout-session-timer">00:00</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <div style="display: flex; gap: 8px; align-items: center;" id="fuel-toggles">
+                    <div style="display:flex; align-items:center; gap:2px;">
+                        <button type="button" class="icon-toggle" id="btn-zero-prep" onclick="toggleConstraint('zero-prep')" title="Avoid Prep" aria-label="Avoid Prep"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg></button>
+                        <button type="button" class="info-tip-btn" onclick="showConstraintInfo('zero-prep')" title="What does this do?" aria-label="Info about Avoid Prep">ℹ</button>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:2px;">
+                        <button type="button" class="icon-toggle" id="btn-budget" onclick="toggleConstraint('budget')" title="Budget Saver" aria-label="Budget Saver"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></button>
+                        <button type="button" class="info-tip-btn" onclick="showConstraintInfo('budget')" title="What does this do?" aria-label="Info about Budget Saver">ℹ</button>
+                    </div>
+                </div>
+                <button type="button" class="execution-zone-close" onclick="closeExecutionZone()" title="Close" aria-label="Close">&times;</button>
+            </div>
+        </div>
+        <div class="execution-zone-body">
+        <div id="fuel-toggle-tip" class="hidden" style="font-size:11px; color:var(--text-silver); line-height:1.45; margin:-6px 0 12px 0; padding:10px 12px; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-surface-elevated); font-family:'Roboto Mono';"></div>
+        <div id="ghost-template-container" class="ghost-panel hidden"><div id="ghost-content"></div><button id="btn-lock-in-route" class="btn-primary is-primary" style="padding: 14px; margin-top: 15px;" onclick="acceptGhostTemplate()">Confirm meal</button></div>
+        <div id="meal-hydration-block" class="hidden" style="margin-bottom:16px; padding:14px; border:1px dashed var(--border-highlight); border-radius:12px;">
+            <label style="margin-top:0; display:block; font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:1px;">Hydration (this meal)</label>
+            <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+                <input type="number" id="meal-hydration-ml" class="input-field" min="0" step="50" placeholder="e.g. 350" style="margin:0; flex:1;" inputmode="numeric">
+                <span style="font-size:12px; color:var(--text-stealth); font-family:'Roboto Mono';">ml</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:8px; line-height:1.4;">Counts toward your daily hydration goal (3.0 L).</div>
+        </div>
+        <div id="active-log-container"><div id="active-log-list"></div></div>
+        <div style="display: flex; gap: 6px; margin-top: 24px; flex-wrap: nowrap; align-items: stretch;">
+            <button class="btn-primary is-primary" style="margin: 0; flex: 1 1 0; min-width: 0; padding: 12px 6px; font-size: 10px; white-space: nowrap;" onclick="submitLog()">✓ Complete log</button>
+            <button type="button" id="btn-load-recipe" class="btn-primary hidden" style="margin: 0; flex: 1 1 0; min-width: 0; padding: 12px 6px; font-size: 10px; border-color: var(--text-main); color: var(--text-main); white-space: nowrap;" onclick="openLoadRecipePicker()">Load Recipe</button>
+            <button type="button" id="btn-unconfirm-route" class="btn-primary hidden" style="margin: 0; flex: 1 1 0; min-width: 0; padding: 12px 6px; font-size: 10px; border-color: var(--text-stealth); color: var(--text-silver); white-space: nowrap;" onclick="unconfirmGhostTemplate()">Back to plan</button>
+            <button type="button" id="btn-load-workout-picker" class="btn-primary hidden" style="margin: 0; flex: 1 1 0; min-width: 0; padding: 12px 6px; font-size: 10px; border-color: var(--text-main); color: var(--text-main); white-space: nowrap;" onclick="openLoadWorkoutPicker()">Load Workout</button>
+            <button type="button" id="btn-save-as-template" class="btn-primary" style="margin: 0; flex: 1 1 0; min-width: 0; padding: 12px 6px; font-size: 10px; border-color: var(--gold-accent); color: var(--gold-accent); white-space: nowrap;" onclick="saveCurrentAsTemplate()">Save Workout</button>
+            <button type="button" id="btn-manual-add" class="btn-icon" style="flex: 0 0 auto; padding: 0 14px; border-color: var(--border-highlight); font-size: 22px; font-weight:700; color: var(--gold-accent); line-height:1;" onclick="toggleToolsMenu()" title="Add manually" aria-label="Add manually">+</button>
+        </div>
+        <div id="tools-menu" class="card hidden" style="margin-top: 16px; padding: 16px; border-style: dashed;">
+            <select id="select-food" class="input-field" style="font-size: 13px; padding: 12px; margin-bottom: 12px; display:none;"><option value="">+ Manual Food...</option></select>
+            <select id="select-exercise" class="input-field" style="font-size: 13px; padding: 12px; margin-bottom: 12px; display:none;"><option value="">+ Manual Exercise...</option></select>
+            <div style="display: flex; gap: 10px;"><button class="btn-primary" style="margin:0; padding: 12px; font-size: 11px; flex: 1;" onclick="manualAdd()">Add Item</button><button class="btn-primary" style="margin:0; padding: 12px; font-size: 11px; flex: 1; border-color: #555; color: #aaa;" onclick="applyUserTemplate()">Load Saved</button><button class="btn-primary" style="margin:0; padding: 12px; font-size: 11px; flex: 1; border-color: var(--gold-accent); color: var(--gold-accent);" onclick="saveCurrentAsTemplate()">Save Named</button>
+<button class="btn-icon" style="margin:0; padding: 0 12px; font-size: 14px; flex: 0.5; border-color: var(--gold-accent); color: var(--gold-accent);" onclick="shareActiveRoute()" title="Share Route">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+</button>
+</div><select id="template-selector" class="input-field" style="margin-top: 12px; margin-bottom: 0; font-size: 13px; padding: 12px;"><option value="">Select saved workout...</option></select></div>
+        <p id="log-status" style="color: var(--gold-accent); font-size: 11px; text-align: center; margin-top: 16px;"></p>
+        </div>
+    </div>
+    
+    <!-- Hidden logic inputs -->
+    <select id="log-type-selector" style="display:none;"><option value="weight">WGT</option><option value="bodyfat">BF</option><option value="breakfast">B</option><option value="lunch">L</option><option value="dinner">D</option><option value="snack">S</option><option value="workout">W</option></select>
+    <input type="checkbox" id="toggle-zero-prep" style="display:none;"><input type="checkbox" id="toggle-budget-saver" style="display:none;">
+
+    <!-- FIXED SCHEDULE POPUP (viewport-level — outside .tab-content so fixed positioning works) -->
+    <div id="schedule-modal" class="hidden" onclick="if(event.target===this)closeFixedScheduleModal()">
+        <div class="modal-content stealth-panel" onclick="event.stopPropagation()">
+            <div class="sheet-handle" style="margin-bottom:16px;" onclick="closeFixedScheduleModal()"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div>
+                    <div style="font-family:'Roboto Mono'; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:1px; text-transform:uppercase;">Route Locks</div>
+                    <h2 style="color:var(--text-main); font-family:'Roboto Mono'; font-size:16px; text-transform:uppercase; margin:4px 0 0 0; letter-spacing:1px;">Fixed Schedule</h2>
+                </div>
+                <button type="button" onclick="closeFixedScheduleModal()" style="background:none; border:none; color:var(--text-stealth); font-size:28px; cursor:pointer; line-height:1;">&times;</button>
+            </div>
+            <p style="font-size:11px; color:var(--text-muted); line-height:1.5; margin-bottom:16px;">Set non-negotiable Practice, Match, or Rest days. Add a time of day so the Route shows when you train. Max 2 events per day.</p>
+            <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+                <select id="sched-day" class="input-field" style="margin:0; padding:12px; font-size:13px;">
+                    <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
+                    <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
+                </select>
+                <select id="sched-event" class="input-field" style="margin:0; padding:12px; font-size:13px;" onchange="toggleSchedTimeVisibility()">
+                    <option value="Practice">Practice</option>
+                    <option value="Game">Game / Match</option>
+                    <option value="Rest">Cannot Workout / Rest</option>
+                </select>
+                <select id="sched-time" class="input-field" style="margin:0; padding:12px; font-size:13px;">
+                    <option value="Morning">Morning</option>
+                    <option value="Afternoon" selected>Afternoon</option>
+                    <option value="Evening">Evening</option>
+                </select>
+            </div>
+            <button type="button" class="btn-primary" style="margin:0 0 16px 0; padding:12px; font-size:12px; border-color:var(--gold-accent); color:var(--gold-accent);" onclick="addFixedSchedule()">+ Add to Fixed Schedule</button>
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Current locks</div>
+            <div id="fixed-schedule-list" style="display:flex; flex-direction:column; gap:8px; min-height:40px;"></div>
+            <button type="button" class="btn-primary" style="margin-top:20px; border-color:var(--text-stealth); color:var(--text-main);" onclick="closeFixedScheduleModal()">Done</button>
+        </div>
+    </div>
+
+    <!-- FORM VIDEO MODAL -->
+    ...
+    <div id="video-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 3000; display: flex; justify-content: center; align-items: center; padding: 20px;">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); padding:0; overflow:hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:16px; border-bottom:1px solid #222;">
+                <h2 id="video-modal-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; font-size:12px; text-transform:uppercase; margin:0;">Form Video</h2>
+                <button onclick="closeVideoModal()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <!-- Blank space where video will load -->
+            <div id="video-modal-frame" style="width:100%; aspect-ratio:16/9; background:var(--bg-surface-elevated); display:flex; justify-content:center; align-items:center; color:var(--text-muted); font-size:12px; font-family:'Roboto Mono';">
+                TAP TO LOAD INTEL
+            </div>
+            <div style="padding:16px;">
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; font-weight:bold; text-transform:uppercase;">Key Directives:</div>
+                <ul id="video-modal-notes" style="font-size:12px; color:var(--text-silver); padding-left:16px; line-height:1.6;">
+                    <li>Keep core braced.</li>
+                    <li>Control the eccentric phase.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLEEP LOG MODAL -->
+    <div id="sleep-modal" class="bottom-sheet hidden" style="z-index: 3000; text-align:center;">
+        <div class="sheet-handle" onclick="closeSleepModal()"></div>
+        <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing:0.4px; margin-bottom:15px;">Log sleep</h2>
+        <input type="number" step="0.5" min="0" max="24" id="sleep-input-hours" class="input-field" style="font-size:32px; font-weight:800; text-align:center; padding:20px; border-color:var(--gold-accent);" placeholder="8.0" oninput="document.getElementById('sleep-hours-warning').classList.toggle('hidden', !(parseFloat(this.value) > 24))">
+        <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Total Hours Slept (max 24)</div>
+        <div id="sleep-hours-warning" class="hidden" style="font-size:12px; color:#FF3B30; font-family:'Roboto Mono', monospace; margin-bottom:12px; font-weight:700;">Maximum sleep is 24 hours. Please enter 24 or less.</div>
+        <button class="btn-primary is-primary" style="margin-top:0;" onclick="submitSleepLog()">Save sleep</button>
+    </div>
+
+    <!-- WEIGHT LOG MODAL (same format as sleep) -->
+    <div id="weight-modal" class="bottom-sheet hidden" style="z-index: 3000; text-align:center;">
+        <div class="sheet-handle" onclick="closeWeightModal()"></div>
+        <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing:0.4px; margin-bottom:15px;">Log weight</h2>
+        <input type="number" step="0.1" min="20" max="250" id="weight-input-kg" class="input-field" style="font-size:32px; font-weight:800; text-align:center; padding:20px; border-color:var(--gold-accent);" placeholder="84.2" inputmode="decimal">
+        <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Kilograms (KG)</div>
+        <div id="weight-input-warning" class="hidden" style="font-size:12px; color:#FF3B30; font-family:'Roboto Mono', monospace; margin-bottom:12px; font-weight:700;">Enter a valid weight.</div>
+        <button class="btn-primary is-primary" style="margin-top:0;" onclick="submitWeightLog()">Save weight</button>
+    </div>
+
+    <!-- BODY FAT LOG MODAL (same format as sleep) -->
+    <div id="bodyfat-modal" class="bottom-sheet hidden" style="z-index: 3000; text-align:center;">
+        <div class="sheet-handle" onclick="closeBodyFatModal()"></div>
+        <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing:0.4px; margin-bottom:15px;">Log body fat</h2>
+        <input type="number" step="0.1" min="1" max="100" id="bodyfat-input-pct" class="input-field" style="font-size:32px; font-weight:800; text-align:center; padding:20px; border-color:var(--gold-accent);" placeholder="12.5" inputmode="decimal">
+        <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Body fat %</div>
+        <div id="bodyfat-input-warning" class="hidden" style="font-size:12px; color:#FF3B30; font-family:'Roboto Mono', monospace; margin-bottom:12px; font-weight:700;">Enter a valid body fat %.</div>
+        <button class="btn-primary is-primary" style="margin-top:0;" onclick="submitBodyFatLog()">Save body fat</button>
+    </div>
+
+
+    <!-- SUNDAY FORECAST MODAL & PANTRY AUDIT -->
+    <div id="sunday-forecast-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 2000; display: flex; justify-content: center; align-items: center; padding: 20px;">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); max-height: 90vh; overflow-y: auto;">
+            <div style="font-family:'Roboto Mono', monospace; font-size:10px; color:var(--text-muted); font-weight:800; text-transform:uppercase; margin-bottom:5px; letter-spacing:1px;">System Lockout</div>
+            <h2 style="color:var(--text-main); margin-bottom: 5px; font-family:'Roboto Mono', monospace; letter-spacing:1px; text-transform:uppercase;">THE SUNDAY FORECAST</h2>
+            <p style="font-size: 11px; color:var(--text-muted); margin-bottom:15px; line-height: 1.5; font-family:'Roboto Mono', monospace;">A new microcycle begins. Calibrate the GPS.</p>
+            
+            <div id="dependent-athlete-warning" style="display:none; margin-bottom: 15px; font-size:11px; color:var(--gold-accent); align-items:flex-start; gap:6px;">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0; margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <span style="font-family:'Roboto Mono', monospace;">Dependent Athlete Mode Active: Budgeting disabled.</span>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <div style="flex:1;"><label style="font-family:'Roboto Mono', monospace; margin-top:0;">Weight (kg)</label><input type="number" step="0.1" id="sunday-weight" class="input-field" style="margin-bottom:0;" placeholder="0.0"></div>
+                <div id="sunday-budget-container" style="flex:1;"><label style="font-family:'Roboto Mono', monospace; margin-top:0;">Budget (£)</label><input type="number" step="1" id="sunday-budget" class="input-field" style="margin-bottom:0;" placeholder="0.00"></div>
+            </div>
+
+            <!-- 10-SECOND PANTRY AUDIT -->
+            <div style="border-top: 1px dashed #333; padding-top: 15px; margin-top: 10px;">
+                <label style="font-family:'Roboto Mono', monospace; color:var(--gold-accent); margin-top:0;">10-Second Pantry Audit</label>
+                <p style="font-size: 10px; color:var(--text-muted); margin-bottom:10px; font-family:'Roboto Mono', monospace;">Uncheck items you ran out of. We will add them to this week's Grocery Route.</p>
+                <div id="sunday-pantry-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom: 20px; max-height: 150px; overflow-y:auto; padding-right:5px;">
+                    <!-- Auto populated via JS -->
+                </div>
+            </div>
+
+            <button class="btn-primary is-primary" style="margin-top:0;" onclick="executeSundayForecast()">Generate 7-day plan</button>
+        </div>
+    </div>
+
+<!-- POST-SESSION BRAIN DUMP (JOURNAL) -->
+    <div id="post-session-modal" class="hidden" style="position: fixed !important; top: 0; left: 0; width: 100vw; height: 100vh; background: transparent; z-index: 26000; display: flex; justify-content: center; align-items: flex-end; padding: 0;" onclick="if(event.target===this) dismissJournalModal()">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); max-height: 90vh; overflow-y: auto; pointer-events: auto; border-radius: 20px 20px 0 0; box-shadow: 0 -8px 40px rgba(0,0,0,0.35);" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:5px;">
+                <div style="font-family:'Roboto Mono', monospace; font-size:10px; color:var(--gold-accent); font-weight:800; text-transform:uppercase; letter-spacing:1px;" id="journal-modal-eyebrow">Session Complete</div>
+                <button type="button" onclick="dismissJournalModal()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;">&times;</button>
+            </div>
+            <h2 id="journal-modal-title" style="color:var(--text-main); margin-bottom: 8px; font-family:'Roboto Mono', monospace; letter-spacing:1px; text-transform:uppercase;">THE BRAIN DUMP</h2>
+            <div id="journal-weekly-averages" style="display:none; font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-bottom:14px; line-height:1.4;"></div>
+
+            <!-- Legacy blocks kept for compatibility; hidden when dynamic fields render -->
+            <div id="journal-rpe-block" style="margin-bottom:15px; display:none;">
+                <label style="margin-top:0;">Session RPE (1-10)</label>
+                <input type="number" id="journal-rpe" class="input-field" placeholder="e.g. 7" min="1" max="10" style="margin-bottom:0;">
+            </div>
+            <div id="journal-scores-row" style="display:none; gap:10px; margin-bottom:15px;">
+                <div id="journal-athletic-block" style="flex:1;">
+                    <input type="number" id="journal-athletic" class="input-field" min="1" max="10" style="margin-bottom:0;">
+                </div>
+                <div id="journal-mental-block" style="flex:1;">
+                    <input type="number" id="journal-mental" class="input-field" min="1" max="10" style="margin-bottom:0;">
+                </div>
+            </div>
+            <div id="journal-match-block" style="margin-bottom:15px; display:none;">
+                <input type="number" id="journal-match-perf" class="input-field" min="1" max="10" style="margin-bottom:0;">
+            </div>
+            <div id="journal-hydration-block" style="margin-bottom:15px; display:none;">
+                <input type="number" id="journal-hydration-ml" class="input-field" min="0" step="50" style="margin-bottom:0;" inputmode="numeric">
+            </div>
+
+            <div id="journal-dynamic-fields"></div>
+
+            <div id="journal-injury-pain-block" style="margin-bottom:15px; display:none;">
+                <label style="margin-top:0;" id="journal-injury-pain-label">Injury follow-up · pain (0-10)</label>
+                <div style="font-size:9px; color:var(--text-muted); margin-bottom:8px;" id="journal-injury-pain-hint">Rate pain in the previously injured area today. This recalibrates Repair Mode for the week.</div>
+                <input type="number" id="journal-injury-pain" class="input-field" placeholder="0–10" min="0" max="10" style="margin-bottom:0;" inputmode="numeric">
+                <div style="font-size:9px; color:var(--text-stealth); margin-top:8px; font-family:'Roboto Mono'; line-height:1.4;">
+                    8–10 → Level 1 · 5–7 → Level 2 · 3–4 → Level 3 · 0–2 → Normal
+                </div>
+            </div>
+
+            <label style="margin-top:0;">Tactical Notes / Mistakes</label>
+            <textarea id="journal-notes" class="input-field" placeholder="What broke down? What went well? Document it for next time." rows="4" style="resize:none; font-family:'Inter', sans-serif; font-size:13px;"></textarea>
+
+            <div id="journal-media-block" style="margin:16px 0 8px 0;">
+                <label style="margin-top:0;">Session media</label>
+                <div style="font-size:9px; color:var(--text-muted); margin-bottom:10px;">Attach photos, videos, or voice notes from this session (saved on this device).</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                    <label class="btn-primary" style="margin:0; padding:10px 12px; font-size:11px; flex:1; min-width:90px; text-align:center; cursor:pointer; border-color:var(--gold-accent); color:var(--gold-accent);">
+                        Photo
+                        <input type="file" id="journal-media-photo" accept="image/*" capture="environment" style="display:none;" onchange="onJournalMediaSelected(this)">
+                    </label>
+                    <label class="btn-primary" style="margin:0; padding:10px 12px; font-size:11px; flex:1; min-width:90px; text-align:center; cursor:pointer; border-color:var(--gold-accent); color:var(--gold-accent);">
+                        Video
+                        <input type="file" id="journal-media-video" accept="video/*" capture="environment" style="display:none;" onchange="onJournalMediaSelected(this)">
+                    </label>
+                    <button type="button" id="journal-media-voice-btn" class="btn-primary" style="margin:0; padding:10px 12px; font-size:11px; flex:1; min-width:90px; text-align:center; cursor:pointer; border-color:var(--gold-accent); color:var(--gold-accent);" onclick="toggleJournalVoiceNote()">Voice</button>
+                    <label class="btn-primary" style="margin:0; padding:10px 12px; font-size:11px; flex:1; min-width:90px; text-align:center; cursor:pointer; border-color:var(--text-stealth); color:var(--text-main);">
+                        Library
+                        <input type="file" id="journal-media-library" accept="image/*,video/*,audio/*" multiple style="display:none;" onchange="onJournalMediaSelected(this)">
+                    </label>
+                </div>
+                <div id="journal-voice-status" style="display:none; font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:8px;"></div>
+                <div id="journal-media-preview" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+            </div>
+
+            <button type="button" id="btn-edit-diary-schema" class="btn-primary is-secondary" style="margin-top:8px; margin-bottom:0; padding:12px; font-size:11px;" onclick="toggleDiarySchemaEditor()">Edit diary entry</button>
+            <div id="journal-schema-editor" class="hidden" style="margin-top:12px; padding:14px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-surface-elevated);"></div>
+
+            <button type="button" id="btn-finalize-workout" class="btn-primary is-primary" style="margin-top:14px; pointer-events: auto; cursor: pointer;" onclick="finalizeWorkoutLog()">Save & close</button>
+        </div>
+    </div>
+
+
+
+    <!-- BLIND REROUTE (DAMAGE CONTROL) -->
+    <div id="quick-add-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 1000; display: flex; justify-content: center; align-items: center; padding: 20px;">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing: 0.4px; margin:0;">I ate something else</h2>
+                <button onclick="document.getElementById('quick-add-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p style="font-size: 10px; color:var(--text-muted); margin-bottom:15px; margin-top:10px; line-height: 1.5; font-family:'Roboto Mono', monospace;">No maths. No guilt. Tap how off-plan it was. Optionally enter what you spent — we'll absorb the hit and recalibrate.</p>
+            
+            <label style="margin-top:0;">Cost of deviation (£) — optional</label>
+            <input type="number" id="blind-reroute-cost" class="input-field" placeholder="e.g. 18.50" step="0.01" min="0" style="margin-bottom:16px;">
+            
+            <button class="btn-primary" style="background: rgba(52, 199, 89, 0.05); border-color: #34C759; color: #34C759; margin-top:0; padding:14px; text-align:left; font-family:'Roboto Mono', monospace;" onclick="submitBlindReroute('light')">
+                <div style="font-weight:bold; font-size:14px;">Light</div>
+                <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">e.g. Steak & Potatoes, Sushi (~700 kcal)</div>
+            </button>
+            
+            <button class="btn-primary" style="background: rgba(212, 175, 55, 0.05); border-color: var(--gold-accent); color: var(--gold-accent); padding:14px; text-align:left; font-family:'Roboto Mono', monospace;" onclick="submitBlindReroute('moderate')">
+                <div style="font-weight:bold; font-size:14px;">Moderate</div>
+                <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">e.g. Burger & Fries, Pasta (~1,200 kcal)</div>
+            </button>
+            
+            <button class="btn-primary" style="background: rgba(255, 59, 48, 0.05); border-color: #FF3B30; color: #FF3B30; padding:14px; text-align:left; font-family:'Roboto Mono', monospace;" onclick="submitBlindReroute('heavy')">
+                <div style="font-weight:bold; font-size:14px;">Heavy</div>
+                <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">e.g. Pizza, Multiple Pints (~2,000 kcal)</div>
+            </button>
+        </div>
+    </div>
+
+    <!-- TACTILE REROUTING TERMINAL -->
+    <div id="tactile-terminal" class="hidden" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:9999; display:flex; align-items:center; justify-content:center;">
+        <div style="width:100%; max-width:390px; padding:30px; font-family:'Roboto Mono', monospace; font-size:13px; color:var(--gold-accent); text-shadow: 0 0 5px var(--gold-glow); line-height:2;">
+            <div id="term-line-1" style="opacity:0; margin-bottom: 10px;">> DEVIATION DETECTED.</div>
+            <div id="term-line-2" style="opacity:0; margin-bottom: 10px;">> SHIFTING MACROS TO COMPENSATE.</div>
+            <div id="term-line-3" style="opacity:0; margin-bottom: 10px;">> CNS PATHWAYS CLEARED.</div>
+            <div id="term-line-4" style="opacity:0; font-weight: bold;">> ROUTE SECURED.</div>
+        </div>
+    </div>
+
+    <!-- GROCERY ITEM DETAIL MODAL -->
+    <div id="grocery-detail-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 4500; display: flex; justify-content: center; align-items: center; padding: 20px;" onclick="if(event.target===this) closeGroceryDetail()">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface);" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+                <h2 id="grocery-detail-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing: 0.4px; margin:0; font-size:15px;">Item</h2>
+                <button type="button" onclick="closeGroceryDetail()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <div id="grocery-detail-body" style="font-size:13px; color:var(--text-muted); line-height:1.55;"></div>
+            <button type="button" class="btn-primary is-secondary" style="margin-top:18px;" onclick="closeGroceryDetail()">Close</button>
+        </div>
+    </div>
+
+    <!-- TRACKER GUIDANCE MODAL -->
+    <div id="tracker-guidance-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 4500; display: flex; justify-content: center; align-items: center; padding: 20px;" onclick="if(event.target===this) closeTrackerGuidanceModal()">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface);" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform: uppercase; letter-spacing: 1px; margin:0; font-size:16px;">Tracker</h2>
+                <button onclick="closeTrackerGuidanceModal()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p style="font-size: 12px; color:var(--text-muted); margin-bottom:16px; line-height:1.5;">Which guidance do you want to switch off? You can select more than one.</p>
+            <label style="display:flex; align-items:center; gap:12px; padding:12px; margin-bottom:8px; border:1px solid var(--border-subtle); border-radius:12px; cursor:pointer;">
+                <input type="checkbox" id="tracker-off-food" style="width:18px; height:18px; accent-color:var(--gold-accent);">
+                <span>
+                    <strong style="display:block; color:var(--text-main); font-size:13px;">Food</strong>
+                    <span style="font-size:11px; color:var(--text-muted);">No recommendations in Today's Food</span>
+                </span>
+            </label>
+            <label style="display:flex; align-items:center; gap:12px; padding:12px; margin-bottom:8px; border:1px solid var(--border-subtle); border-radius:12px; cursor:pointer;">
+                <input type="checkbox" id="tracker-off-workout" style="width:18px; height:18px; accent-color:var(--gold-accent);">
+                <span>
+                    <strong style="display:block; color:var(--text-main); font-size:13px;">Workout</strong>
+                    <span style="font-size:11px; color:var(--text-muted);">No workouts generated for you</span>
+                </span>
+            </label>
+            <label style="display:flex; align-items:center; gap:12px; padding:12px; margin-bottom:16px; border:1px solid var(--border-subtle); border-radius:12px; cursor:pointer;">
+                <input type="checkbox" id="tracker-off-timetabling" style="width:18px; height:18px; accent-color:var(--gold-accent);">
+                <span>
+                    <strong style="display:block; color:var(--text-main); font-size:13px;">Timetabling</strong>
+                    <span style="font-size:11px; color:var(--text-muted);">Route shows fixed schedule only — no planned gym sessions</span>
+                </span>
+            </label>
+            <button class="btn-primary" style="margin-top:0; border-color: var(--gold-accent); color: var(--gold-accent);" onclick="saveTrackerGuidance()">Save Guidance</button>
+        </div>
+    </div>
+
+    <!-- PERIODIZATION PLANNER MODAL -->
+    <div id="periodization-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 4500; display: flex; justify-content: center; align-items: center; padding: 20px;">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform: uppercase; letter-spacing: 2px; margin:0;">Macro-Periodization</h2>
+                <button onclick="document.getElementById('periodization-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p style="font-size: 10px; color:var(--text-muted); margin-bottom:15px; font-family:'Roboto Mono', monospace;">Set your calendar. The GPS will automatically shift you through Adaptation, Strength, Power, and Maintenance phases.</p>
+            
+            <label style="margin-top:0;">Off-Season Start (Adaptation & Strength)</label>
+            <input type="date" id="date-offseason" class="input-field" style="color-scheme: dark;">
+            
+            <label style="margin-top:0;">Pre-Season Start (Power & Plyo)</label>
+            <input type="date" id="date-preseason" class="input-field" style="color-scheme: dark;">
+            
+            <label style="margin-top:0;">In-Season / Trials (Maintenance)</label>
+            <input type="date" id="date-inseason" class="input-field" style="color-scheme: dark;">
+            
+            <button class="btn-primary" style="margin-top:10px; border-color: var(--gold-accent); color: var(--gold-accent);" onclick="saveSeasonDates()">Lock In Calendar</button>
+            <button class="btn-primary" style="margin-top:10px; border-color: #333; color: var(--text-stealth);" onclick="clearSeasonDates()">Disable Auto-Season</button>
+        </div>
+    </div>
+
+    <!-- REPAIR MODE (INJURY ASSESSMENT) MODAL -->
+    <div id="repair-mode-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 5500; display: flex; justify-content: center; align-items: center; padding: 20px;">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); text-align: left;">
+            <div style="font-family:'Roboto Mono', monospace; font-size:10px; color:#FF3B30; font-weight:800; text-transform:uppercase; margin-bottom:5px; letter-spacing:1px;">System Lockout</div>
+            <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform:uppercase; letter-spacing:1px; margin-bottom:15px; margin-top:0;">Repair Mode Initiated</h2>
+            <p style="font-size: 11px; color:var(--text-muted); margin-bottom:20px; line-height: 1.5; font-family:'Roboto Mono', monospace;">Injury detected. To safely reprogram your mechanical pathways and inject prehab, please answer the following diagnostic questions.</p>
+            
+            <div id="repair-questions-container" style="display:flex; flex-direction:column; gap:12px; margin-bottom: 20px;">
+                <!-- Injected via JS based on Upper/Lower -->
+            </div>
+
+            <button class="btn-primary" style="margin-top:0; border-color:#FF3B30; color:#FF3B30; background:rgba(255,59,48,0.05);" onclick="submitRepairAssessment()">Process Diagnostics</button>
+        </div>
+    </div>
+
+    <!-- PLATE CALCULATOR MODAL -->
+    <div id="plate-calculator-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 4500; display: flex; justify-content: center; align-items: center; padding: 20px;">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 350px; background: var(--bg-surface);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform: uppercase; letter-spacing: 2px; margin:0;">Plate Calculator</h2>
+                <button onclick="document.getElementById('plate-calculator-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p style="font-size: 10px; color:var(--text-muted); margin-bottom:15px; font-family:'Roboto Mono', monospace;">Enter target weight to calculate plates per side (Assumes 20kg Bar).</p>
+            
+            <div style="display:flex; gap:10px; margin-bottom:15px;">
+                <input type="number" id="plate-calc-target" class="input-field" style="margin:0; font-size:20px; font-weight:bold; text-align:center;" placeholder="100" onkeyup="calculatePlates()">
+                <span style="display:flex; align-items:center; color:var(--text-silver); font-size:14px;">kg</span>
+            </div>
+            
+            <div style="background:var(--bg-surface-elevated); padding:15px; border-radius:8px; border:1px solid var(--border-subtle); text-align:center; min-height:80px; display:flex; flex-direction:column; justify-content:center; gap:8px;">
+                <div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Plates Per Side</div>
+                <div id="plate-visuals" style="display:flex; justify-content:center; gap:8px; flex-wrap:wrap; font-family:'Roboto Mono', monospace; font-size:14px; font-weight:bold; color:var(--gold-accent);">
+                    --
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SPONTANEOUS EVENT MODAL -->
+    <div id="spontaneous-event-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 3000; display: flex; justify-content: center; align-items: flex-end; padding: 20px;">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); max-height: min(78vh, 620px); overflow-y:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform: uppercase; letter-spacing: 1px; margin:0; font-size:14px;">Spontaneous Event</h2>
+                <button onclick="document.getElementById('spontaneous-event-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p style="font-size:11px; color:var(--text-muted); line-height:1.45; margin:0 0 14px 0;">Adds an event to your Route for the next 3 days. Log it later from Exercise — RPE&gt;8 triggers rest; Practice/Match RPE&gt;6 counts as a lactate credit.</p>
+
+            <label style="margin-top:0;">Day</label>
+            <select id="spontaneous-day" class="input-field"></select>
+
+            <label>Event Type</label>
+            <select id="spontaneous-type" class="input-field">
+                <option value="Game">Match / Game</option>
+                <option value="Practice">Practice</option>
+                <option value="Lactate">Lactate/HIT</option>
+                <option value="Cardio (Steady)">Steady State</option>
+                <option value="Full Body / Strength">Gym / Strength</option>
+            </select>
+
+            <button class="btn-primary" style="margin-top:10px; background: rgba(212, 175, 55, 0.05); border-color: var(--gold-accent); color: var(--gold-accent);" onclick="submitSpontaneousEvent()">Add to Route</button>
+        </div>
+    </div>
+
+    <!-- DYNAMIC RECIPE VIEWER MODAL -->
+    <div id="recipe-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: transparent; z-index: 14000; display: flex; justify-content: center; align-items: center; padding: 20px;">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); padding: 0; overflow: hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:16px; border-bottom:1px solid #222;">
+                <h2 id="recipe-modal-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; font-size:14px; text-transform:uppercase; margin:0; letter-spacing:1px;">Recipe Title</h2>
+                <button onclick="document.getElementById('recipe-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            
+            <div style="background: linear-gradient(0deg, var(--bg-surface) 0%, rgba(212,175,55,0.05) 100%); padding: 20px 16px;">
+                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; text-transform:uppercase; margin-bottom:15px; font-weight:bold;">Custom-Scaled to your Next Meal</div>
+                
+                <div id="recipe-ingredients-list" style="display:flex; flex-direction:column; gap:12px; margin-bottom: 20px;">
+                    <!-- Auto Injected via JS -->
+                </div>
+                
+                <div style="font-size:12px; color:var(--text-muted); line-height:1.6; border-top:1px dashed var(--border-highlight); padding-top:15px;" id="recipe-instructions">
+                    Instructions go here.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- WORKOUT TYPE PICKER (Steady / Lactate / Gym) -->
+    <div id="workout-type-modal" class="hidden" style="position: fixed; top: 0; left: 50%; width: 100%; max-width: 390px; height: 100%; background: transparent; z-index: 21050; display: flex; justify-content: center; align-items: center; padding: 20px; transform: translateX(-50%); box-sizing: border-box;" onclick="if(event.target===this) closeWorkoutTypePicker()">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); transform: none; animation: none;" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 id="workout-type-modal-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:15px;">Which type of workout?</h2>
+                <button type="button" onclick="closeWorkoutTypePicker()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p id="workout-type-modal-hint" style="font-size:11px; color:var(--text-muted); margin:0 0 16px 0; line-height:1.4;">Choose the session type so it counts toward this week’s plan.</p>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                <button type="button" onclick="selectWorkoutType('Cardio (Steady)')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Steady State</div>
+                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">Zone 2 aerobic base — counts as one steady session this week.</div>
+                </button>
+                <button type="button" onclick="selectWorkoutType('Lactate')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Lactate/HIT</div>
+                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">~45 min · 10 min HIT block with variable work:rest. Search modalities next — counts as one of this week’s two Lactate/HIT sessions.</div>
+                </button>
+                <button type="button" onclick="selectWorkoutType('Full Body / Strength')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Gym Workout</div>
+                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">Strength / lifting session — counts toward this week’s gym plan.</div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOAD SAVED WORKOUT PICKER -->
+    <div id="load-workout-modal" class="hidden" style="position: fixed; top: 0; left: 50%; width: 100%; max-width: 390px; height: 100%; background: transparent; z-index: 21000; display: flex; justify-content: center; align-items: center; padding: 20px; transform: translateX(-50%); box-sizing: border-box;" onclick="if(event.target===this) closeLoadWorkoutPicker()">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); max-height: 80vh; overflow:hidden; display:flex; flex-direction:column; transform: none; animation: none;" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:15px;">Load Workout</h2>
+                <button type="button" onclick="closeLoadWorkoutPicker()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p id="load-workout-modal-subtitle" style="font-size:11px; color:var(--text-muted); margin:0 0 12px 0; line-height:1.4;">Choose a saved workout from My Workouts.</p>
+            <button type="button" onclick="closeLoadWorkoutPicker(); openWorkoutTypePicker('load')" style="align-self:flex-start; background:none; border:none; color:var(--gold-accent); font-size:11px; font-family:'Roboto Mono'; cursor:pointer; padding:0; margin:0 0 12px 0;">← Change type</button>
+            <div id="load-workout-list" style="overflow-y:auto; flex:1; min-height:120px;"></div>
+        </div>
+    </div>
+
+    <!-- LOAD SAVED RECIPE PICKER -->
+    <div id="load-recipe-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: transparent; z-index: 21000; display: flex; justify-content: center; align-items: center; padding: 20px;" onclick="if(event.target===this) closeLoadRecipePicker()">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); max-height: 80vh; overflow:hidden; display:flex; flex-direction:column;" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:15px;">Load Recipe</h2>
+                <button type="button" onclick="closeLoadRecipePicker()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p style="font-size:11px; color:var(--text-muted); margin:0 0 12px 0; line-height:1.4;">Choose a saved recipe from My Recipes.</p>
+            <div id="load-recipe-list" style="overflow-y:auto; flex:1; min-height:120px;"></div>
+        </div>
+    </div>
+
+    <!-- COACHES NOTES MODAL -->
+    <div id="coaches-notes-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 5000; display: flex; justify-content: center; align-items: center; padding: 20px;">
+        <!-- Click away to close layer -->
+        <div style="position:absolute; top:0; left:0; width:100%; height:100%; z-index: 5000;" onclick="document.getElementById('coaches-notes-modal').classList.add('hidden')"></div>
+        
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); position: relative; z-index: 5001;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+                <h2 style="color:var(--gold-accent); font-family:'Roboto Mono', monospace; letter-spacing: 0.4px; margin:0;">Coach notes</h2>
+                <button onclick="document.getElementById('coaches-notes-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <ul style="font-size: 12px; color:var(--text-main); margin-bottom:15px; line-height: 1.6; font-family:'Roboto Mono', monospace; padding-left: 15px;" id="coaches-notes-list">
+                <li style="margin-bottom:8px;"><strong>Do not overtrain.</strong> Adhere to prescribed fatigue lockouts.</li>
+                <li style="margin-bottom:8px;"><strong>Dietary limits.</strong> Avoid additives in food, seed oils, and preservatives.</li>
+                <li style="margin-bottom:8px;"><strong>Water quality.</strong> Buy a water filter for unfluoridated water.</li>
+                <li style="margin-bottom:8px;"><strong>Supplements.</strong> Take certain supplements throughout the year such as Vitamin D when it is winter (from British Supplements - 10,000 IU). Vitamin D, Magnesium Glycinate.</li>
+                <li style="margin-bottom:8px;"><strong>Gym protocol.</strong> Fixed warm-up before every session, warm-down at the end.</li>
+            </ul>
+            <button class="btn-primary is-secondary" style="margin-top:0;" onclick="document.getElementById('coaches-notes-modal').classList.add('hidden')">Got it</button>
+        </div>
+    </div>
+
+    <!-- PANTRY ADD/EDIT BOTTOM SHEET -->
+    <div id="pantry-form-container" class="bottom-sheet hidden">
+        <div class="sheet-handle" onclick="cancelFoodEdit()"></div>
+        <h2 id="pantry-form-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; font-size:14px; letter-spacing:0.4px; margin-bottom:15px;">Add food</h2>
+        <input type="hidden" id="edit-food-id" value="">
+        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <input type="text" id="food-name" class="input-field" style="margin:0;" placeholder="Food Name" oninput="syncPackSizeFieldMode()">
+            <select id="food-category" class="input-field" style="margin:0; width: 40%;" title="Heading">
+                <option value="Meat">Meat</option>
+                <option value="Fruit">Fruit</option>
+                <option value="Vegetables">Vegetables</option>
+                <option value="Carbs">Carbs</option>
+                <option value="Animal products">Animal products</option>
+                <option value="Fish">Fish</option>
+                <option value="Nuts">Nuts</option>
+                <option value="Drinks">Drinks</option>
+                <option value="Oils and condiments">Oils and condiments</option>
+            </select>
+        </div>
+        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <div style="flex: 1;"><label style="margin:0 0 4px 0;">Total Price (£)</label><input type="number" step="0.01" id="food-total-price" class="input-field" style="margin:0;" placeholder="0.00"></div>
+            <div style="flex: 1;"><label id="food-pack-size-label" style="margin:0 0 4px 0;">Pack Size (g)</label><input type="number" id="food-total-weight" class="input-field" style="margin:0;" placeholder="e.g. 500" oninput="syncPackSizeFieldMode()"></div>
+        </div>
+        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <div style="flex: 1;"><label id="food-pro-label" style="margin:0 0 4px 0;">Pro/100g</label><input type="number" id="food-pro" class="input-field" style="margin:0;"></div>
+            <div style="flex: 1;"><label id="food-carb-label" style="margin:0 0 4px 0;">Carb/100g</label><input type="number" id="food-carb" class="input-field" style="margin:0;"></div>
+            <div style="flex: 1;"><label id="food-fat-label" style="margin:0 0 4px 0;">Fat/100g</label><input type="number" id="food-fat" class="input-field" style="margin:0;"></div>
+        </div>
+        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <div style="flex: 1;"><label id="food-water-label" style="margin:0 0 4px 0;">Water/100g</label><input type="number" id="food-water" class="input-field" style="margin:0;" min="0" max="100" step="1" placeholder="e.g. 65"></div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn-primary is-primary" id="btn-save-food" style="margin-top:0;" onclick="saveFoodToCloud()">Save</button>
+        </div>
+    </div>
+
+    <!-- EXERCISE ADD/EDIT BOTTOM SHEET -->
+    <div id="ex-form-container" class="bottom-sheet hidden">
+        <div class="sheet-handle" onclick="cancelExEdit()"></div>
+        <h2 id="ex-form-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; font-size:14px; letter-spacing:0.4px; margin-bottom:15px;">Add exercise</h2>
+        <input type="hidden" id="edit-ex-id" value="">
+        <input type="text" id="ex-name" class="input-field" placeholder="Exercise Name">
+        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <select id="ex-domain" class="input-field" style="margin:0;">
+                <option value="lifting">Lifting</option>
+                <option value="power">Power</option>
+                <option value="cardio">Cardio/Endurance</option>
+            </select>
+            <select id="ex-muscle" class="input-field" style="margin:0;">
+                <option value="bilateral_posterior">Bilateral Posterior</option>
+                <option value="unilateral_posterior">Unilateral Posterior</option>
+                <option value="bilateral_anterior">Bilateral Anterior</option>
+                <option value="unilateral_anterior">Unilateral Anterior</option>
+                <option value="quad">Quad</option>
+                <option value="glute">Glute</option>
+                <option value="hamstrings">Hamstrings</option>
+                <option value="groin">Groin</option>
+                <option value="calf">Calf</option>
+                <option value="ankle">Ankle</option>
+                <option value="core">Core</option>
+                <option value="ql">QL</option>
+                <option value="lats">Lats</option>
+                <option value="lower_chest">Lower Chest</option>
+                <option value="upper_chest">Upper Chest</option>
+                <option value="biceps">Biceps</option>
+                <option value="triceps">Triceps</option>
+                <option value="shoulders">Shoulders</option>
+                <option value="grip">Grip</option>
+                <option value="lower_lats">Lower Lats</option>
+                <option value="neck">Neck</option>
+                <option value="rotator_cuff">Rotator Cuff</option>
+            </select>
+        </div>
+        <button class="btn-primary is-primary" id="btn-save-ex" style="margin-top:0;" onclick="saveExerciseToCloud()">Save</button>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- BOTTOM NAVIGATION (5 Icons) -->
+    <!-- Food · Exercise · Shop · Plan · Progress -->
+    <!-- ========================================== -->
+    <div class="nav-tabs" id="main-nav">
+        
+        <div class="nav-item active" onclick="switchTab(this, 'fuel', 'Food')">
+            <svg viewBox="0 0 19.46 16.65" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4.69,8.31,3.57,10.16a1.12,1.12,0,0,0,.58,1.08,1.13,1.13,0,0,0,1,0,1.09,1.09,0,0,0,.54-1Z" transform="translate(-2.57 -4.18)"></path>
+                <path d="M6.22,5.18,10.15,6l2.74,2.7,1.21-.37,4.44,3.1L21,17.63l-4.94,2.2Q13.76,14.52,11.46,9.2l1.43-.46" transform="translate(-2.57 -4.18)"></path>
+            </svg>
+        </div>
+        
+        <div class="nav-item" onclick="switchTab(this, 'drive', 'Exercise')">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9.59 4.59A2 2 0 1 1 11 8H2"></path><path d="M12.59 19.41A2 2 0 1 0 14 16H2"></path><path d="M17.73 7.73A2.5 2.5 0 1 1 19.5 12H2"></path>
+            </svg>
+        </div>
+        
+        <div class="nav-item" onclick="switchTab(this, 'logistics', 'Shopping')">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path>
+            </svg>
+        </div>
+
+        <div class="nav-item" onclick="switchTab(this, 'route', 'Plan')">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line>
+            </svg>
+        </div>
+        
+        <div class="nav-item" onclick="switchTab(this, 'journey', 'Progress')">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+            </svg>
+        </div>
+
+        
+    </div>
+
+</div>
+
+<!-- CALENDAR EVENT ACTION SHEET -->
+<div id="calendar-event-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: transparent; z-index: 12050; display: flex; justify-content: center; align-items: center; padding: 20px;" onclick="if(event.target===this) this.classList.add('hidden')">
+    <div class="card" style="width: 100%; max-width: 320px; background: var(--bg-surface-elevated);" onclick="event.stopPropagation()">
+        <div id="cal-event-date" style="font-family:'Roboto Mono'; font-size:10px; color:var(--gold-accent); margin-bottom:10px; text-transform:uppercase;">DATE</div>
+        <h3 style="color:var(--text-main); margin-bottom:15px; margin-top:0;">Assign Event</h3>
+        <input type="hidden" id="cal-event-hidden-date">
+        <label style="margin-top:0;">Event type</label>
+        <select id="cal-event-select" class="input-field">
+            <option value="Match">Match / Game</option>
+            <option value="Practice">Heavy Practice</option>
+            <option value="Rest">Forced Rest Day</option>
+            <option value="None">Clear Event</option>
+        </select>
+        <label style="margin-top:12px;">Notes / details (optional)</label>
+        <input type="text" id="cal-event-note" class="input-field" placeholder="e.g. Away fixture 15:00" style="margin-bottom:0;">
+        <div style="display:flex; gap:10px; margin-top:14px;">
+            <button type="button" class="btn-primary" style="flex:1; border-color:#333; color:#aaa; margin-top:0;" onclick="document.getElementById('calendar-event-modal').classList.add('hidden')">Cancel</button>
+            <button type="button" class="btn-primary" style="flex:1; border-color:var(--gold-accent); color:var(--gold-accent); margin-top:0;" onclick="saveCalendarEvent()">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- TACTICAL HUD ALERT -->
+<div id="tactical-alert-box" style="position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background: var(--bg-surface); border: 1px solid var(--gold-accent); border-radius: 8px; padding: 16px 20px; z-index: 10000; display: flex; align-items: center; gap: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.4), 0 0 15px var(--gold-glow); transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); max-width: 90%; width: 350px;">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--gold-accent)" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <div id="tactical-alert-text" style="color: var(--text-main); font-family: 'Roboto Mono', monospace; font-size: 11px; font-weight: 600; text-transform: uppercase; line-height: 1.4;">System Notification</div>
+</div>
+
+<!-- MACRO CONTRIBUTION BREAKDOWN -->
+<div id="macro-breakdown-sheet" class="hidden" onclick="if(event.target===this) closeMacroBreakdown()">
+    <div id="macro-breakdown-panel" onclick="event.stopPropagation()">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:4px;">
+            <div>
+                <div id="macro-breakdown-title" style="font-family:'Roboto Mono', monospace; font-size:14px; font-weight:700; color:var(--text-main); letter-spacing:0.3px;">Protein</div>
+                <div id="macro-breakdown-subtitle" style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono', monospace; margin-top:4px;"></div>
+            </div>
+            <button type="button" onclick="closeMacroBreakdown()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
+        </div>
+        <div id="macro-breakdown-list"></div>
+    </div>
+</div>
+
+<!-- LIBRARY ITEM DETAIL (food / exercise) -->
+<div id="library-detail-sheet" class="hidden detail-bottom-sheet" onclick="if(event.target===this) closeLibraryDetail()">
+    <div id="library-detail-panel" class="detail-bottom-panel" onclick="event.stopPropagation()">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
+            <div style="min-width:0;">
+                <div id="library-detail-title" style="font-family:'Roboto Mono', monospace; font-size:14px; font-weight:700; color:var(--text-main); letter-spacing:0.3px;">Detail</div>
+                <div id="library-detail-subtitle" style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono', monospace; margin-top:4px;"></div>
+            </div>
+            <button type="button" onclick="closeLibraryDetail()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
+        </div>
+        <div id="library-detail-body" style="display:flex; flex-direction:column; gap:10px;"></div>
+        <div style="display:flex; gap:10px; margin-top:16px;">
+            <button type="button" id="library-detail-edit-btn" class="btn-primary is-secondary" style="margin:0; flex:1;" onclick="editFromLibraryDetail()">Edit</button>
+            <button type="button" id="library-detail-ban-btn" class="btn-primary is-secondary" style="margin:0; flex:1; border-color:rgba(255,59,48,0.45); color:#FF3B30;" onclick="toggleBanFromLibraryDetail()">Ban</button>
+        </div>
+    </div>
+</div>
+
+<!-- MEAL DETAIL (planned meal macros — no aim bands) -->
+<div id="meal-detail-sheet" class="hidden detail-bottom-sheet" onclick="if(event.target===this) closeMealDetail()">
+    <div id="meal-detail-panel" class="detail-bottom-panel" onclick="event.stopPropagation()">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
+            <div style="min-width:0;">
+                <div id="meal-detail-title" style="font-family:'Roboto Mono', monospace; font-size:14px; font-weight:700; color:var(--text-main); letter-spacing:0.3px;">Meal</div>
+                <div id="meal-detail-subtitle" style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono', monospace; margin-top:4px;"></div>
+            </div>
+            <button type="button" onclick="closeMealDetail()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
+        </div>
+        <div id="meal-detail-macros" style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;"></div>
+        <div id="meal-detail-foods"></div>
+        <div id="meal-detail-actions" class="hidden" style="margin-top:16px;"></div>
+    </div>
+</div>
+
+<!-- WORKOUT DOMAINS (planned session domain hit amounts) -->
+<div id="workout-domains-sheet" class="hidden detail-bottom-sheet" onclick="if(event.target===this) closeWorkoutDomainsDetail()">
+    <div id="workout-domains-panel" class="detail-bottom-panel" onclick="event.stopPropagation()">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
+            <div style="min-width:0;">
+                <div id="workout-domains-title" style="font-family:'Roboto Mono', monospace; font-size:14px; font-weight:700; color:var(--text-main); letter-spacing:0.3px;">Workout</div>
+                <div id="workout-domains-subtitle" style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono', monospace; margin-top:4px;">Fitness domains</div>
+            </div>
+            <button type="button" onclick="closeWorkoutDomainsDetail()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
+        </div>
+        <div id="workout-domains-list" style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;"></div>
+        <div id="workout-domains-exercises"></div>
+    </div>
+</div>
+
+<!-- DAY DETAIL MODAL (Plan forecast + Progress history) -->
+    <div id="day-detail-modal" class="bottom-sheet hidden">
+        <div class="sheet-handle" onclick="closeDayDetail()"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; flex-shrink:0; gap:12px;">
+            <button type="button" onclick="closeDayDetail()" style="background:none; border:none; color:var(--text-stealth); font-size:28px; cursor:pointer; line-height:1; padding:0 4px;" title="Close" aria-label="Close">&times;</button>
+            <h2 id="modal-date-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; margin:0; flex:1; text-align:center;">DATE</h2>
+            <span style="width:28px;"></span>
+        </div>
+        <div class="day-detail-body">
+            <div id="modal-summary" style="font-size:12px; color:var(--text-muted); margin-bottom:20px; font-weight:bold; font-family:'Roboto Mono';"></div>
+            <div id="day-detail-forecast" class="hidden">
+                <div style="display:flex; gap:8px; margin-bottom:20px; overflow-x:auto; padding-bottom:4px;">
+                    <button type="button" class="btn-primary catalogue-sub-btn is-primary active" data-day-plan="food" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchDayPlanSubTab('food', this)">Food</button>
+                    <button type="button" class="btn-primary catalogue-sub-btn is-secondary" data-day-plan="exercise" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchDayPlanSubTab('exercise', this)">Exercise</button>
+                </div>
+                <div id="day-plan-panel-food"></div>
+                <div id="day-plan-panel-exercise" class="hidden"></div>
+            </div>
+            <div id="modal-log-list"></div>
+        </div>
+    </div>
+
+<!-- EXERCISE SETS MODAL (COMPACT WORKOUT VIEW) -->
+    <!-- Background changed to 0.5 opacity and blur reduced to 4px -->
+<div id="exercise-sets-modal" class="hidden" style="position: fixed; top: 0; left: 50%; width: 100%; max-width: 390px; height: 100%; background: transparent; z-index: 9999; display: flex; justify-content: center; align-items: flex-end; padding: 0; transform: translateX(-50%); box-sizing: border-box;">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); max-height: min(78dvh, 680px); overflow-y: auto; border-radius: 20px 20px 0 0; padding: 24px; position: relative; height: auto; flex: 0 1 auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 15px;">
+                <h2 id="sets-modal-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform: uppercase; letter-spacing: 1px; margin:0; font-size:16px;">EXERCISE</h2>
+                <button onclick="window.closeExerciseSetsModal()" style="background:none; border:none; color:var(--text-stealth); font-size:28px; cursor:pointer;">&times;</button>
+            </div>
+            <div id="sets-modal-progress-wrap" style="margin-bottom: 16px; display: none;">
+                <div class="hud-label" style="margin-bottom: 8px;">PROGRESS HISTORY</div>
+                <div style="position: relative; height: 140px; width: 100%; background: var(--bg-surface-elevated); border-radius: 8px; border: 1px solid var(--border-subtle); padding: 8px;">
+                    <canvas id="sets-modal-exercise-chart"></canvas>
+                </div>
+            </div>
+            <div id="sets-modal-swap-wrap" style="margin-bottom: 16px; display: none;">
+                <label id="sets-modal-swap-label" style="margin-top:0;">Swap for equivalent (same muscle group)</label>
+                <select id="sets-modal-swap-select" class="input-field" style="margin-bottom:8px;" onchange="swapExerciseInLog(this.value)"></select>
+            </div>
+            <div id="sets-modal-cardio-type-wrap" style="margin-bottom: 16px; display: none;">
+                <label style="margin-top:0;">Cardio type</label>
+                <div style="font-size:9px; color:var(--text-muted); margin-bottom:8px;">Choose how you did today’s steady session</div>
+                <div style="position: relative; margin-bottom: 8px;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="text" id="sets-modal-cardio-search" class="input-field search-bar" placeholder="Search cardio types..." oninput="filterCardioTypeList()" autocomplete="off" style="margin-bottom:0; padding-left:40px;">
+                </div>
+                <select id="sets-modal-cardio-type-select" class="input-field" style="margin-bottom:0;" onchange="selectCardioTypeInLog(this.value)"></select>
+            </div>
+            <div id="sets-modal-content"></div>
+            <button class="btn-primary" style="margin-top:24px; border-color:var(--gold-accent); background:rgba(212, 175, 55, 0.05); color:var(--gold-accent);" onclick="window.closeExerciseSetsModal()">CONFIRM & CLOSE</button>
+        </div>
+    </div>
+
+
+    <div class="iphone-home-indicator" aria-hidden="true"></div>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

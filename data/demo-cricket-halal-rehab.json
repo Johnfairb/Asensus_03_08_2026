@@ -1,0 +1,184 @@
+{
+  "settings": {
+    "weight": 81.5,
+    "targetWeight": 85.0,
+    "height": 182,
+    "age": 22,
+    "sex": "Male",
+    "activity": 1.55,
+    "goal": "Muscle_Gain",
+    "mealsPerDay": 3,
+    "budget": 120.0,
+    "volume": {
+      "push": 1,
+      "pull": 2,
+      "legs": 2,
+      "cardio": 1,
+      "rest": 1
+    },
+    "baselineTargets": {
+      "cals": 3200,
+      "pro": 180,
+      "carb": 400,
+      "fat": 90
+    },
+    "targets": {
+      "cals": 3200,
+      "pro": 180,
+      "carb": 400,
+      "fat": 90
+    },
+    "diet": "Halal",
+    "injury": "LowerBack",
+    "sport": "Cricket"
+  },
+  "food_inventory": [
+    {
+      "name": "[PRO] Halal Chicken Breast",
+      "price_per_100g": 0.65,
+      "protein_per_100g": 31,
+      "carbs_per_100g": 0,
+      "fat_per_100g": 3.6,
+      "water_per_100g": 68.0
+    },
+    {
+      "name": "[PRO] Halal Lamb Mince",
+      "price_per_100g": 1.1,
+      "protein_per_100g": 24,
+      "carbs_per_100g": 0,
+      "fat_per_100g": 15,
+      "water_per_100g": 62.0
+    },
+    {
+      "name": "[CARB] Basmati Rice",
+      "price_per_100g": 0.18,
+      "protein_per_100g": 2.6,
+      "carbs_per_100g": 28,
+      "fat_per_100g": 0.3,
+      "water_per_100g": 12.0
+    }
+  ],
+  "exercise_inventory": [
+    {
+      "name": "Bulgarian Split Squat",
+      "domain": "legs",
+      "muscle_group": "quads"
+    },
+    {
+      "name": "Chest-Supported Row",
+      "domain": "pull",
+      "muscle_group": "back"
+    },
+    {
+      "name": "Single Arm DB Press",
+      "domain": "push",
+      "muscle_group": "shoulders"
+    }
+  ],
+  "base_metrics": {
+    "start_weight": 80.0,
+    "end_weight": 81.5
+  },
+  "base_workouts": [
+    {
+      "day": 1,
+      "exercise": "Bulgarian Split Squat",
+      "type": "legs",
+      "sets": 3,
+      "reps": 8,
+      "base_weight": 40,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 7
+    },
+    {
+      "day": 1,
+      "exercise": "Single Arm DB Press",
+      "type": "push",
+      "sets": 3,
+      "reps": 8,
+      "base_weight": 20,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 7
+    },
+    {
+      "day": 3,
+      "exercise": "Chest-Supported Row",
+      "type": "pull",
+      "sets": 3,
+      "reps": 8,
+      "base_weight": 60,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 7
+    },
+    {
+      "day": 5,
+      "exercise": "Bulgarian Split Squat",
+      "type": "legs",
+      "sets": 3,
+      "reps": 8,
+      "base_weight": 40,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 8
+    }
+  ],
+  "base_meals": [
+    {
+      "day": 0,
+      "meal_name": "BREAKFAST",
+      "cals": 800,
+      "pro": 40,
+      "carb": 100,
+      "fat": 25,
+      "cost": 2.5
+    },
+    {
+      "day": 0,
+      "meal_name": "LUNCH",
+      "cals": 1100,
+      "pro": 60,
+      "carb": 140,
+      "fat": 30,
+      "cost": 4.5
+    },
+    {
+      "day": 0,
+      "meal_name": "DINNER",
+      "cals": 1300,
+      "pro": 80,
+      "carb": 160,
+      "fat": 35,
+      "cost": 6.5
+    },
+    {
+      "day": 1,
+      "meal_name": "BREAKFAST",
+      "cals": 750,
+      "pro": 35,
+      "carb": 100,
+      "fat": 22,
+      "cost": 2.2
+    },
+    {
+      "day": 1,
+      "meal_name": "LUNCH",
+      "cals": 1200,
+      "pro": 70,
+      "carb": 150,
+      "fat": 32,
+      "cost": 5.0
+    },
+    {
+      "day": 1,
+      "meal_name": "DINNER",
+      "cals": 1250,
+      "pro": 75,
+      "carb": 150,
+      "fat": 33,
+      "cost": 6.0
+    }
+  ]
+}

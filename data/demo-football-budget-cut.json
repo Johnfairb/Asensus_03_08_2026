@@ -1,0 +1,165 @@
+{
+  "settings": {
+    "weight": 85.0,
+    "targetWeight": 78.0,
+    "height": 180,
+    "age": 21,
+    "sex": "Male",
+    "activity": 1.55,
+    "goal": "Fat_Loss",
+    "mealsPerDay": 3,
+    "budget": 40.0,
+    "volume": {
+      "push": 1,
+      "pull": 1,
+      "legs": 2,
+      "cardio": 2,
+      "rest": 1
+    },
+    "baselineTargets": {
+      "cals": 2200,
+      "pro": 170,
+      "carb": 210,
+      "fat": 75
+    },
+    "targets": {
+      "cals": 2200,
+      "pro": 170,
+      "carb": 210,
+      "fat": 75
+    },
+    "diet": "Standard",
+    "injury": "None",
+    "sport": "Football"
+  },
+  "food_inventory": [
+    {
+      "name": "[PRO] Eggs (Tray)",
+      "price_per_100g": 0.2,
+      "protein_per_100g": 13,
+      "carbs_per_100g": 1,
+      "fat_per_100g": 11,
+      "water_per_100g": 76.0
+    },
+    {
+      "name": "[PRO] Frozen Chicken Breast",
+      "price_per_100g": 0.55,
+      "protein_per_100g": 24,
+      "carbs_per_100g": 0,
+      "fat_per_100g": 2,
+      "water_per_100g": 68.0
+    },
+    {
+      "name": "[CARB] Potatoes",
+      "price_per_100g": 0.1,
+      "protein_per_100g": 2,
+      "carbs_per_100g": 17,
+      "fat_per_100g": 0,
+      "water_per_100g": 79.0
+    },
+    {
+      "name": "[CARB] Value Oats",
+      "price_per_100g": 0.12,
+      "protein_per_100g": 13,
+      "carbs_per_100g": 68,
+      "fat_per_100g": 7,
+      "water_per_100g": 10.0
+    }
+  ],
+  "exercise_inventory": [
+    {
+      "name": "Back Squat",
+      "domain": "legs",
+      "muscle_group": "quads"
+    },
+    {
+      "name": "40m Sprints",
+      "domain": "cardio",
+      "muscle_group": "full"
+    },
+    {
+      "name": "Bench Press",
+      "domain": "push",
+      "muscle_group": "chest"
+    }
+  ],
+  "base_metrics": {
+    "start_weight": 88.5,
+    "end_weight": 85.0
+  },
+  "base_workouts": [
+    {
+      "day": 1,
+      "exercise": "Back Squat",
+      "type": "legs",
+      "sets": 3,
+      "reps": 5,
+      "base_weight": 85,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 8
+    },
+    {
+      "day": 3,
+      "exercise": "40m Sprints",
+      "type": "cardio",
+      "sets": 5,
+      "reps": 1,
+      "base_weight": 0,
+      "base_distance": 2,
+      "time_minutes": 15,
+      "base_rpe": 9
+    },
+    {
+      "day": 4,
+      "exercise": "Bench Press",
+      "type": "push",
+      "sets": 3,
+      "reps": 8,
+      "base_weight": 60,
+      "base_distance": 0,
+      "time_minutes": 0,
+      "base_rpe": 7
+    },
+    {
+      "day": 6,
+      "exercise": "40m Sprints",
+      "type": "cardio",
+      "sets": 5,
+      "reps": 1,
+      "base_weight": 0,
+      "base_distance": 2,
+      "time_minutes": 15,
+      "base_rpe": 9
+    }
+  ],
+  "base_meals": [
+    {
+      "day": 0,
+      "meal_name": "BREAKFAST",
+      "cals": 600,
+      "pro": 35,
+      "carb": 70,
+      "fat": 20,
+      "cost": 0.85
+    },
+    {
+      "day": 0,
+      "meal_name": "LUNCH",
+      "cals": 750,
+      "pro": 65,
+      "carb": 90,
+      "fat": 15,
+      "cost": 2.1
+    },
+    {
+      "day": 0,
+      "meal_name": "DINNER",
+      "cals": 850,
+      "pro": 70,
+      "carb": 100,
+      "fat": 20,
+      "cost": 2.3
+    }
+  ]
+}

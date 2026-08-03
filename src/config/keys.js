@@ -1,0 +1,2 @@
+export const SUPABASE_URL = "https://mbdbtiweaiuzwupddwlb.supabase.co";
+export const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1iZGJ0aXdlYWl1end1cGRkd2xiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3OTMzMzcsImV4cCI6MjA5NzM2OTMzN30.lyx8KYOWcH814QblrnMah4DZTx2n5QTClwvjnE5Zgx0";

@@ -1,0 +1,2111 @@
+import { store } from '../state/store.js';
+import {
+    DOMAIN_LABELS,
+    buildPlainSessionCardHtml,
+    getTodayFocus,
+    isGuidanceOff,
+    mergeDayDomainTargets
+} from './fitness-hud.js';
+import { buildMealPlanCardsHtml, getDayRecipeNames, resolveDayMealItems } from './meal-planner.js';
+import { computeMacroBarLayout, formatMacroAimLabel } from '../lib/macro-range.js';
+import { applyInjuryPainFollowUpFromJournal } from './periodization.js';
+import { getGymPlanPrefs, isStrengthFocus } from './strength-engine.js';
+import {
+    getHypertrophyPlanPrefs,
+    HYPERTROPHY_DISPLAY_LABELS,
+    hypertrophyEventForKind,
+    isHypertrophyEvent,
+    isHypertrophyPhase,
+    nextHypertrophyRotation,
+    resolveHypertrophySessionKind
+} from './hypertrophy-engine.js';
+import { persistUserConfigToCloud } from './thermodynamics.js';
+import { recordHydrationMl, specificEventName } from '../lib/food-parse.js';
+import { drawMacroChart } from '../ui/charts.js';
+import { upsertTodaySleep } from './body-metrics.js';
+import { configureJournalModal } from '../ui/drive.js';
+import { buildDiaryEntryFromForm } from '../ui/diary-ui.js';
+import { loadDayJournal, loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveMatchJournalEntry, savePracticeJournalEntry, deleteMatchJournalEntry, deletePracticeJournalEntry } from '../ui/journey.js';
+
+// ==========================================
+// 14. UNIFIED ROUTE FORECAST & PLAN VIEWER
+// ==========================================
+// --- FIXED SCHEDULE ENGINE ---
+export const LIFTING_EVENT_TYPES = [
+    'Full Body / Strength', 'Full Body / Strength A', 'Full Body / Strength B',
+    'Hypertrophy / Push', 'Hypertrophy / Pull', 'Hypertrophy / Legs',
+    'Hypertrophy / Upper', 'Hypertrophy / Lower', 'Hypertrophy / Full Body',
+    'Full Body / Power', 'Auxiliary', 'Cardio', 'Cardio (Steady)', 'Lactate'
+];
+export function isGameEvent(e) { return e === 'Game' || e === 'Match'; }
+export function isPracticeEvent(e) { return e === 'Practice'; }
+export function isRestEvent(e) { return e === 'Rest' || e === 'Rest (Cardio Only)' || e === 'Cannot Workout'; }
+export function isSteadyCardio(e) { return e === 'Cardio' || e === 'Cardio (Steady)'; }
+export function isLactateEvent(e) { return e === 'Lactate' || e === 'Cardio (Lactate)'; }
+export function isAuxEvent(e) {
+    if (!e || typeof e !== 'string') return false;
+    if (e === 'Auxiliary' || e === 'Band Auxiliary') return true;
+    return /auxiliar/i.test(e);
+}
+/** Strength A/B or hypertrophy gym sessions (hard lift days). */
+export function isStrengthEvent(e) {
+    return typeof e === 'string' && (e.includes('Strength') || e.includes('Hypertrophy'));
+}
+export function isLiftingEvent(e) {
+    return LIFTING_EVENT_TYPES.includes(e) || (typeof e === 'string' && (
+        e.includes('Strength') || e.includes('Hypertrophy') || e.includes('Power') ||
+        e === 'Auxiliary' || e.includes('Cardio') || e === 'Lactate'
+    ));
+}
+export function canShareWithPractice(focus) {
+    if (!focus || isGameEvent(focus) || isRestEvent(focus)) return false;
+    // Lactate may follow practice on the same day (afternoon slot)
+    return isLactateEvent(focus) || isStrengthEvent(focus) || isAuxEvent(focus)
+        || isSteadyCardio(focus) || focus === 'Full Body / Power';
+}
+
+export function invalidateWeekPlanCache() { store._weekPlanCache = { key: '', plan: null }; }
+
+export function getMondayISO(d) {
+    const x = new Date(d);
+    x.setHours(12, 0, 0, 0);
+    const day = x.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    x.setDate(x.getDate() + diff);
+    return dateToISO(x);
+}
+
+/**
+ * Hard sessions (Practice / Match) with RPE > 6 each replace one Lactate that week.
+ * Cap at 2 so the weekly lactate quota never goes negative beyond plan intent.
+ */
+export function countPracticeLactateCredits(weekStartISO) {
+    let credits = 0;
+    const seen = new Set();
+    for (let i = 0; i < 7; i++) {
+        const ds = addDaysISO(weekStartISO, i);
+        if (seen.has(ds)) continue;
+        seen.add(ds);
+        const j = loadDayJournal(ds);
+        if (!j) continue;
+        const rpe = Number(j.rpe);
+        if (!(rpe > 6)) continue;
+        if (j.source === 'practice' || j.type === 'practice') credits++;
+        else if (j.source === 'match' || j.type === 'match') credits++;
+    }
+    return Math.min(2, credits);
+}
+
+/** Which monthly lactate slot (A/B) this date is on the weekly plan. */
+export function getLactateSlotForDate(dateIso) {
+    if (!dateIso) return 'A';
+    try {
+        const weekStart = getMondayISO(dateIso + 'T12:00:00');
+        const plan = buildWeeklyTrainingPlan(weekStart);
+        const lactateDays = (plan || [])
+            .filter(d => (d.events || []).some(isLactateEvent))
+            .map(d => d.dateStr)
+            .sort();
+        const idx = lactateDays.indexOf(dateIso);
+        if (idx <= 0) return 'A';
+        return 'B';
+    } catch (e) {
+        return 'A';
+    }
+}
+
+const LOGGED_SESSIONS_KEY = 'ascensus_logged_sessions';
+const WORKOUT_SESSION_SNAPSHOTS_KEY = 'ascensus_workout_session_snapshots';
+
+/** Canonical kinds that count toward the weekly plan. */
+export const WORKOUT_TYPE_OPTIONS = [
+    { kind: 'Cardio (Steady)', label: 'Steady State', blurb: 'Zone 2 aerobic base' },
+    { kind: 'Lactate', label: 'Lactate/HIT', blurb: '~45 min · 10 min HIT block' },
+    { kind: 'Full Body / Strength', label: 'Gym Workout', blurb: 'Strength / lifting session' }
+];
+
+export function loadLoggedSessionsMap() {
+    try {
+        return JSON.parse(localStorage.getItem(LOGGED_SESSIONS_KEY) || '{}') || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+export function saveLoggedSessionsMap(map) {
+    localStorage.setItem(LOGGED_SESSIONS_KEY, JSON.stringify(map || {}));
+    invalidateWeekPlanCache();
+}
+
+export function loadWorkoutSessionSnapshots() {
+    try {
+        return JSON.parse(localStorage.getItem(WORKOUT_SESSION_SNAPSHOTS_KEY) || '{}') || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+export function saveWorkoutSessionSnapshots(map) {
+    localStorage.setItem(WORKOUT_SESSION_SNAPSHOTS_KEY, JSON.stringify(map || {}));
+}
+
+/** Normalize a focus / picker value into a plan-credit kind (or null if none). */
+export function normalizeLoggedSessionKind(kind) {
+    if (!kind || typeof kind !== 'string') return null;
+    if (isSteadyCardio(kind)) return 'Cardio (Steady)';
+    if (isLactateEvent(kind)) return 'Lactate';
+    if (isAuxEvent(kind)) return 'Auxiliary';
+    if (isStrengthEvent(kind) || kind === 'Gym' || kind === 'Gym Workout' || kind === 'Full Body / Power') {
+        return 'Full Body / Strength';
+    }
+    return null;
+}
+
+/** Count logged Steady / Lactate / Gym sessions that already count for this week. */
+export function countLoggedWorkoutCredits(weekStartISO) {
+    const map = loadLoggedSessionsMap();
+    const out = { steady: 0, lactate: 0, strength: 0 };
+    for (let i = 0; i < 7; i++) {
+        const ds = addDaysISO(weekStartISO, i);
+        const entries = Array.isArray(map[ds]) ? map[ds] : [];
+        entries.forEach(entry => {
+            const kind = normalizeLoggedSessionKind(entry?.kind || entry);
+            if (kind === 'Cardio (Steady)') out.steady++;
+            else if (kind === 'Lactate') out.lactate++;
+            else if (kind === 'Full Body / Strength') out.strength++;
+        });
+    }
+    return out;
+}
+
+/**
+ * Record (or replace) a logged session for week-plan credit + Log tab editing.
+ * Pass the same sessionId when re-saving an edited session to avoid double-counting.
+ * Always writes a Log snapshot — even for Auxiliary / generic planned sessions.
+ */
+export function recordLoggedWorkoutSession({
+    dateIso,
+    kind,
+    sessionId,
+    logIds = [],
+    items = [],
+    durationMinutes = 0,
+    durationMs = 0,
+    durationLabel = null,
+    rpe = null,
+    hitTypes = null,
+    lactateSlot = null,
+    isHitClass = null,
+    lactateSummary = null
+} = {}) {
+    if (!dateIso || !sessionId) return null;
+    const creditKind = normalizeLoggedSessionKind(kind);
+    const displayKind = creditKind || kind || 'Workout';
+
+    // Week-plan credit only for Steady / Lactate / Gym
+    if (creditKind) {
+        const map = loadLoggedSessionsMap();
+        const dayList = Array.isArray(map[dateIso]) ? map[dateIso].filter(e => e && e.sessionId !== sessionId) : [];
+        dayList.push({ kind: creditKind, sessionId, logIds: logIds.filter(Boolean) });
+        map[dateIso] = dayList;
+        saveLoggedSessionsMap(map);
+    }
+
+    const snaps = loadWorkoutSessionSnapshots();
+    const prev = snaps[sessionId] || {};
+    const mins = Number(durationMinutes);
+    const ms = Number(durationMs);
+    snaps[sessionId] = {
+        id: sessionId,
+        dateIso,
+        kind: displayKind,
+        createdAt: prev.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        logIds: logIds.filter(Boolean),
+        items: JSON.parse(JSON.stringify(items || [])),
+        durationMinutes: Number.isFinite(mins) && mins > 0 ? mins : (prev.durationMinutes || 0),
+        durationMs: Number.isFinite(ms) && ms > 0 ? ms : (prev.durationMs || ((Number.isFinite(mins) && mins > 0) ? mins * 60000 : 0)),
+        durationLabel: durationLabel || prev.durationLabel || null,
+        rpe: rpe != null && Number.isFinite(Number(rpe)) ? Number(rpe) : (prev.rpe != null ? prev.rpe : null),
+        hitTypes: Array.isArray(hitTypes) ? hitTypes : (prev.hitTypes || null),
+        lactateSlot: lactateSlot != null ? lactateSlot : (prev.lactateSlot || null),
+        isHitClass: isHitClass != null ? !!isHitClass : !!prev.isHitClass,
+        lactateSummary: lactateSummary != null ? lactateSummary : (prev.lactateSummary || null)
+    };
+    saveWorkoutSessionSnapshots(snaps);
+
+    try {
+        if (typeof persistUserConfigToCloud === 'function') persistUserConfigToCloud();
+    } catch (e) { /* ignore */ }
+
+    return snaps[sessionId];
+}
+
+export function getWorkoutSessionSnapshot(sessionId) {
+    if (!sessionId) return null;
+    return loadWorkoutSessionSnapshots()[sessionId] || null;
+}
+
+export function removeWorkoutSessionSnapshot(sessionId) {
+    if (!sessionId) return;
+    const snaps = loadWorkoutSessionSnapshots();
+    if (!snaps[sessionId]) return;
+    const dateIso = snaps[sessionId].dateIso;
+    delete snaps[sessionId];
+    saveWorkoutSessionSnapshots(snaps);
+
+    const map = loadLoggedSessionsMap();
+    if (dateIso && Array.isArray(map[dateIso])) {
+        map[dateIso] = map[dateIso].filter(e => e && e.sessionId !== sessionId);
+        if (!map[dateIso].length) delete map[dateIso];
+        saveLoggedSessionsMap(map);
+    }
+}
+
+export function listWorkoutSessionsForDate(dateIso) {
+    const snaps = loadWorkoutSessionSnapshots();
+    return Object.values(snaps)
+        .filter(s => s && s.dateIso === dateIso)
+        .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+}
+
+export function prettyWorkoutTypeLabel(kind) {
+    const normalized = normalizeLoggedSessionKind(kind) || kind;
+    if (normalized === 'Cardio (Steady)') return 'Steady State';
+    if (normalized === 'Lactate') return 'Lactate/HIT';
+    if (normalized === 'Full Body / Strength') return 'Gym Workout';
+    if (normalized === 'Auxiliary' || isAuxEvent(normalized)) return 'Auxiliary';
+    if (typeof normalized === 'string' && normalized.includes('Power')) return 'Power';
+    if (normalized === 'Workout') return 'Workout';
+    return prettyFocusName(kind || 'Workout');
+}
+
+export function matchRequiresNextDayRest(matchDateStr) {
+    const j = loadDayJournal(matchDateStr);
+    if (j && (j.source === 'match' || j.type === 'match') && Number(j.rpe) > 5) return true;
+    try {
+        const raw = localStorage.getItem('ascensus_match_journal_' + matchDateStr);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Number(parsed.rpe) > 5) return true;
+        }
+    } catch (e) {}
+    // Legacy override written by older match logs
+    const next = addDaysISO(matchDateStr, 1);
+    const ov = loadRouteOverrides()[next];
+    return (ov === 'Rest' || ov === 'Rest (Cardio Only)')
+        && localStorage.getItem('ascensus_match_rest_' + matchDateStr) === '1';
+}
+
+export function dayHasStrength(events) {
+    return (events || []).some(isStrengthEvent);
+}
+
+export function isHardLiftEvent(e) {
+    // Strength / Aux / Lactate / Power — NOT steady cardio
+    return isStrengthEvent(e) || isAuxEvent(e) || isLactateEvent(e) ||
+        (typeof e === 'string' && e.includes('Power'));
+}
+
+export function dayHasHardLift(events) {
+    return (events || []).some(isHardLiftEvent);
+}
+
+export function slotsUsed(events) {
+    return (events || []).length;
+}
+
+export function canAcceptGPS(day, focus) {
+    if (!day || !focus) return false;
+    if (day.events.some(isRestEvent) || day.events.some(isGameEvent)) return false;
+    if (slotsUsed(day.events) >= 2) return false;
+    if (day.events.some(isPracticeEvent) && !canShareWithPractice(focus)) return false;
+    // Never two of the same session type on one day
+    if (isStrengthEvent(focus) && dayHasStrength(day.events)) return false;
+    if (isAuxEvent(focus) && day.events.some(isAuxEvent)) return false;
+    if (isLactateEvent(focus) && day.events.some(isLactateEvent)) return false;
+    if (isSteadyCardio(focus) && day.events.some(isSteadyCardio)) return false;
+    return true;
+}
+
+export function wouldCreateThreeStrengthStreak(days, index) {
+    const has = (i) => i >= 0 && i < days.length && dayHasStrength(days[i].events);
+    if (has(index - 2) && has(index - 1)) return true;
+    if (has(index - 1) && has(index + 1)) return true;
+    if (has(index + 1) && has(index + 2)) return true;
+    return false;
+}
+
+export function isDayBeforeMatch(days, index) {
+    return index < days.length - 1 && (days[index + 1].events || []).some(isGameEvent);
+}
+
+export function sameFocusFamily(focus, e) {
+    if (isStrengthEvent(focus)) return isStrengthEvent(e);
+    if (isAuxEvent(focus)) return isAuxEvent(e);
+    if (isLactateEvent(focus)) return isLactateEvent(e);
+    if (isSteadyCardio(focus)) return isSteadyCardio(e);
+    return e === focus;
+}
+
+export function scoreDayForPlacement(days, index, focus, opts = {}) {
+    if (!canAcceptGPS(days[index], focus)) return -Infinity;
+    if (!opts.ignoreStrengthStreak && isStrengthEvent(focus) && wouldCreateThreeStrengthStreak(days, index)) return -Infinity;
+    if (opts.forbidBeforeMatch && isLactateEvent(focus) && isDayBeforeMatch(days, index)) return -Infinity;
+
+    let score = 0;
+    const placingHard = isHardLiftEvent(focus);
+    const adjLift =
+        (index > 0 && dayHasHardLift(days[index - 1].events)) ||
+        (index < days.length - 1 && dayHasHardLift(days[index + 1].events));
+    // Prefer no back-to-back hard lifts unless absolutely necessary
+    if (placingHard && adjLift) score -= opts.allowAdjacent ? 40 : 120;
+
+    let minDistSame = 99;
+    days.forEach((d, i) => {
+        if (i === index) return;
+        if ((d.events || []).some(e => sameFocusFamily(focus, e))) {
+            minDistSame = Math.min(minDistSame, Math.abs(i - index));
+        }
+    });
+    score += (minDistSame < 99 ? minDistSame * 12 : 55);
+    score += (2 - slotsUsed(days[index].events)) * 4;
+    // Slight preference for mid-week spacing anchors
+    score += (index === 0 || index === 6) ? 0 : 1;
+
+    // Lactate: prefer after Match, and on / after Practice (so high RPE can replace it)
+    if (isLactateEvent(focus)) {
+        if (index > 0 && (days[index - 1].events || []).some(isGameEvent)) score += 100;
+        if ((days[index].events || []).some(isPracticeEvent)) score += 80;
+        else if (index > 0 && (days[index - 1].events || []).some(isPracticeEvent)) score += 45;
+    }
+    return score;
+}
+
+export function placeBestGPS(days, focus, opts = {}) {
+    let best = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < days.length; i++) {
+        const s = scoreDayForPlacement(days, i, focus, { ...opts, allowAdjacent: false });
+        if (s > bestScore) { bestScore = s; best = i; }
+    }
+    // Absolute necessity: allow adjacent hard lifts if nothing else fits
+    if (best < 0 || bestScore === -Infinity) {
+        best = -1;
+        bestScore = -Infinity;
+        for (let i = 0; i < days.length; i++) {
+            const s = scoreDayForPlacement(days, i, focus, { ...opts, allowAdjacent: true });
+            if (s > bestScore) { bestScore = s; best = i; }
+        }
+    }
+    if (best < 0 || bestScore === -Infinity) return false;
+    return pushGPS(days[best], focus);
+}
+
+export function pushGPS(day, focus) {
+    if (!canAcceptGPS(day, focus)) return false;
+    day.events.push(focus);
+    return true;
+}
+
+export function resolveStrengthEventLetter(e) {
+    if (!isStrengthEvent(e)) return null;
+    if (/Strength\s*B/i.test(e) || /\sB$/i.test(e)) return 'B';
+    if (/Strength\s*A/i.test(e) || /\sA$/i.test(e)) return 'A';
+    return null;
+}
+
+export function strengthLabelForLetter(letter) {
+    return letter === 'B' ? 'Full Body / Strength B' : 'Full Body / Strength A';
+}
+
+export function getWeekStartStrengthLetter(weekStartISO) {
+    // Continue A/B from the previous planned week when available
+    try {
+        const prevWeek = localStorage.getItem('ascensus_strength_plan_tail_week');
+        const prevTail = localStorage.getItem('ascensus_strength_plan_tail');
+        if (prevWeek === addDaysISO(weekStartISO, -7) && (prevTail === 'A' || prevTail === 'B')) {
+            return prevTail === 'A' ? 'B' : 'A';
+        }
+    } catch (e) {}
+    return 'A';
+}
+
+export function persistWeekStrengthTail(days) {
+    if (!days || !days.length) return;
+    let lastLetter = null;
+    for (let i = 0; i < days.length; i++) {
+        const ev = (days[i].events || []).find(isStrengthEvent);
+        if (!ev) continue;
+        lastLetter = resolveStrengthEventLetter(ev) || 'A';
+    }
+    if (!lastLetter) return;
+    try {
+        localStorage.setItem('ascensus_strength_plan_tail', lastLetter);
+        localStorage.setItem('ascensus_strength_plan_tail_week', days[0].dateStr);
+    } catch (e) {}
+}
+
+/** Force chronological Strength labels to A, B, A, B... */
+export function enforceStrengthABAlternation(days, startLetter = 'A') {
+    let letter = startLetter === 'B' ? 'B' : 'A';
+    for (let i = 0; i < days.length; i++) {
+        const sIdx = (days[i].events || []).findIndex(isStrengthEvent);
+        if (sIdx < 0) continue;
+        days[i].events[sIdx] = strengthLabelForLetter(letter);
+        letter = letter === 'A' ? 'B' : 'A';
+    }
+}
+
+export function placeStrengthSessions(days, count) {
+    const target = Math.min(4, Math.max(0, parseInt(count, 10) || 0));
+    const weekStartISO = days[0] ? days[0].dateStr : null;
+    const startLetter = weekStartISO ? getWeekStartStrengthLetter(weekStartISO) : 'A';
+
+    // Collect existing strength day indexes (e.g. from fixed schedules)
+    let strengthIdx = [];
+    for (let i = 0; i < days.length; i++) {
+        if (dayHasStrength(days[i].events)) strengthIdx.push(i);
+    }
+
+    // Trim extras when gym willingness dropped (keep earliest sessions)
+    while (strengthIdx.length > target) {
+        const i = strengthIdx.pop();
+        const sIdx = days[i].events.findIndex(isStrengthEvent);
+        if (sIdx >= 0) days[i].events.splice(sIdx, 1);
+        if (days[i].events.length === 0) days[i].events = [];
+    }
+
+    // Add sessions until we hit the willingness-based target, spaced across the week
+    while (strengthIdx.length < target) {
+        let best = -1;
+        let bestScore = -Infinity;
+        for (let pass = 0; pass < 2 && best < 0; pass++) {
+            const allowAdjacent = pass === 1;
+            best = -1;
+            bestScore = -Infinity;
+            for (let i = 0; i < 7; i++) {
+                if (strengthIdx.includes(i)) continue;
+                const probe = 'Full Body / Strength A';
+                let s = scoreDayForPlacement(days, i, probe, { allowAdjacent });
+                if (s === -Infinity) continue;
+                // Reward distance from other strength days
+                let minDist = 99;
+                strengthIdx.forEach(idx => { minDist = Math.min(minDist, Math.abs(idx - i)); });
+                s += (minDist < 99 ? minDist * 8 : 40);
+                if (s > bestScore) { bestScore = s; best = i; }
+            }
+            if (bestScore === -Infinity) best = -1;
+        }
+        if (best < 0) break;
+        if (!pushGPS(days[best], 'Full Body / Strength A')) break;
+        strengthIdx.push(best);
+        strengthIdx.sort((a, b) => a - b);
+    }
+
+    // Chronological A/B/A/B labels
+    enforceStrengthABAlternation(days, startLetter);
+    persistWeekStrengthTail(days);
+    return strengthIdx.length;
+}
+
+/**
+ * Place hypertrophy sessions (PPL / Upper-Lower / Full Body) up to 6×/week.
+ * Never on Match/Game; Rest overrides win. Adjacent days allowed for PPL.
+ */
+export function placeHypertrophySessions(days, count) {
+    const prefs = getHypertrophyPlanPrefs();
+    const target = Math.min(6, Math.max(0, parseInt(count, 10) || prefs.sessionCount || 0));
+    const split = prefs.split;
+
+    let liftIdx = [];
+    for (let i = 0; i < days.length; i++) {
+        if (dayHasStrength(days[i].events)) liftIdx.push(i);
+    }
+
+    while (liftIdx.length > target) {
+        const i = liftIdx.pop();
+        const sIdx = days[i].events.findIndex(isStrengthEvent);
+        if (sIdx >= 0) days[i].events.splice(sIdx, 1);
+    }
+
+    // Prefer packing early-week for high frequency; allow adjacent for PPL / UL
+    while (liftIdx.length < target) {
+        let best = -1;
+        let bestScore = -Infinity;
+        for (let pass = 0; pass < 2 && best < 0; pass++) {
+            const allowAdjacent = true; // hypertrophy PPL needs adjacent days
+            best = -1;
+            bestScore = -Infinity;
+            for (let i = 0; i < 7; i++) {
+                if (liftIdx.includes(i)) continue;
+                // Skip match / rest-locked days
+                if ((days[i].events || []).some(isGameEvent)) continue;
+                if ((days[i].events || []).some(e => e === 'Rest' || e === 'Cannot Workout')) continue;
+                const probe = hypertrophyEventForKind(split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full');
+                let s = scoreDayForPlacement(days, i, probe, { allowAdjacent, ignoreStrengthStreak: true });
+                if (s === -Infinity) continue;
+                // Prefer spreading a bit for 3–4 day UL; pack for 5–6 PPL
+                let minDist = 99;
+                liftIdx.forEach(idx => { minDist = Math.min(minDist, Math.abs(idx - i)); });
+                if (split === 'ppl') s += (minDist === 1 ? 12 : minDist * 4);
+                else s += (minDist < 99 ? minDist * 8 : 40);
+                if (s > bestScore) { bestScore = s; best = i; }
+            }
+            if (bestScore === -Infinity) best = -1;
+        }
+        if (best < 0) break;
+        const probe = hypertrophyEventForKind(split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full');
+        if (!pushGPS(days[best], probe)) break;
+        liftIdx.push(best);
+        liftIdx.sort((a, b) => a - b);
+    }
+
+    // Rotate labels chronologically
+    let startKind = 'push';
+    try {
+        const prev = localStorage.getItem('ascensus_hypertrophy_tail');
+        if (prev) startKind = nextHypertrophyRotation([prev], split);
+        else startKind = split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full';
+    } catch (e) {
+        startKind = split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full';
+    }
+
+    let kind = startKind;
+    let lastKind = null;
+    for (let i = 0; i < days.length; i++) {
+        const sIdx = (days[i].events || []).findIndex(isStrengthEvent);
+        if (sIdx < 0) continue;
+        // Convert legacy Strength labels on hypertrophy weeks
+        days[i].events[sIdx] = hypertrophyEventForKind(kind);
+        lastKind = kind;
+        kind = nextHypertrophyRotation([kind], split);
+    }
+    if (lastKind) {
+        try {
+            localStorage.setItem('ascensus_hypertrophy_tail', lastKind);
+            localStorage.setItem('ascensus_hypertrophy_tail_week', days[0]?.dateStr || '');
+        } catch (e) { /* ignore */ }
+    }
+    return liftIdx.length;
+}
+
+export function isQualifyingRestDay(events) {
+    const ev = events || [];
+    if (!ev.length) return true;
+    if (ev.some(isGameEvent) || ev.some(isPracticeEvent) || dayHasHardLift(ev)) return false;
+    return ev.every(e => isRestEvent(e) || isSteadyCardio(e));
+}
+
+export function ensureWeeklySoftRestDay(days) {
+    if (days.some(d => isQualifyingRestDay(d.events))) return;
+    // Prefer an empty / Rest day, else a Steady-only day, else strip a removable GPS day
+    for (let i = 0; i < days.length; i++) {
+        if (days[i].events.length === 0 || days[i].events.every(isRestEvent)) {
+            days[i].events = ['Rest'];
+            return;
+        }
+    }
+    for (let i = 0; i < days.length; i++) {
+        if (days[i].events.every(e => isSteadyCardio(e) || isRestEvent(e)) &&
+            !days[i].events.some(isPracticeEvent) && !days[i].events.some(isGameEvent)) {
+            days[i].events = days[i].events.filter(isSteadyCardio);
+            if (!days[i].events.length) days[i].events = ['Rest'];
+            return;
+        }
+    }
+    // Last resort: clear a day that only has Aux/Lactate/Steady (never Match/Practice/locked Rest)
+    for (let i = days.length - 1; i >= 0; i--) {
+        const d = days[i];
+        if (d.events.some(isGameEvent) || d.events.some(isPracticeEvent)) continue;
+        if (d.events.some(isStrengthEvent)) continue;
+        const removable = d.events.every(e => isAuxEvent(e) || isLactateEvent(e) || isSteadyCardio(e) || isRestEvent(e));
+        if (removable) {
+            d.events = ['Rest'];
+            return;
+        }
+    }
+}
+
+/** Keep at most one Aux / one Lactate / one Strength / one Steady per day (fixed schedules can duplicate). */
+export function dedupeHardSessionsPerDay(days) {
+    (days || []).forEach(day => {
+        let seenAux = false;
+        let seenLactate = false;
+        let seenStrength = false;
+        let seenSteady = false;
+        day.events = (day.events || []).filter(e => {
+            if (isAuxEvent(e)) {
+                if (seenAux) return false;
+                seenAux = true;
+            } else if (isLactateEvent(e)) {
+                if (seenLactate) return false;
+                seenLactate = true;
+            } else if (isStrengthEvent(e)) {
+                if (seenStrength) return false;
+                seenStrength = true;
+            } else if (isSteadyCardio(e)) {
+                if (seenSteady) return false;
+                seenSteady = true;
+            }
+            return true;
+        });
+    });
+}
+
+/**
+ * Weekly GPS quotas (driven by Algorithms gym prefs):
+ * - Strength count from gym willingness / band aux (max 4)
+ * - Aux: separate days when attachMode is none; otherwise co-scheduled on strength days
+ * - Space equivalent hard sessions; avoid back-to-back lifts when possible
+ * - Lactate never the day before a Match/Game; prefer after Match / with Practice
+ * - ≥1 soft rest day (Rest or Steady-only) per week
+ * - Steady ×2; Lactate ×2 minus Practice/Match RPE > 6 credits
+ */
+export function countEventType(days, pred) {
+    return (days || []).reduce((n, d) => n + ((d.events || []).some(pred) ? 1 : 0), 0);
+}
+
+export function trimEventTypeToQuota(days, pred, quota) {
+    const cap = Math.max(0, Number(quota) || 0);
+    let count = countEventType(days, pred);
+    if (count <= cap) return;
+    for (let i = days.length - 1; i >= 0 && count > cap; i--) {
+        const idx = (days[i].events || []).findIndex(pred);
+        if (idx < 0) continue;
+        days[i].events.splice(idx, 1);
+        count--;
+        if (!days[i].events.length) days[i].events = [];
+    }
+}
+
+/** Absolute last-pass: never more than `cap` Auxiliary days in the week. */
+export function enforceAuxiliaryCap(days, cap = 2) {
+    const limit = Math.min(2, Math.max(0, Number(cap) || 0));
+    trimEventTypeToQuota(days, isAuxEvent, limit);
+    return countEventType(days, isAuxEvent);
+}
+
+/** Remove every Auxiliary marker from the week (before re-placing to quota). */
+export function stripAllAuxiliary(days) {
+    (days || []).forEach(day => {
+        day.events = (day.events || []).filter(e => !isAuxEvent(e));
+        if (!day.events.length) day.events = [];
+    });
+}
+
+/**
+ * Place Auxiliary to an exact weekly quota (max 2).
+ * Band mode: always standalone Aux days (never co-label Strength + Aux on the timetable).
+ * Non-band: attach to strength when attachMode says so, else standalone.
+ */
+export function placeAuxiliarySessions(days, prefs) {
+    if (isHypertrophyPhase()) {
+        stripAllAuxiliary(days);
+        return 0;
+    }
+    const cap = Math.min(2, Math.max(0, Number(prefs.auxCount) || 0));
+    stripAllAuxiliary(days);
+    if (cap <= 0) return 0;
+
+    // Band auxiliary: always exactly `cap` separate calendar sessions (max 2)
+    if (prefs.band || prefs.attachMode === 'none') {
+        let left = cap;
+        while (left > 0) {
+            if (!placeBestGPS(days, 'Auxiliary')) break;
+            left--;
+        }
+        // Force onto Rest / empty days if scoring placement fell short
+        left = Math.max(0, cap - countEventType(days, isAuxEvent));
+        for (let i = 0; i < days.length && left > 0; i++) {
+            const ev = days[i].events || [];
+            if (ev.some(isAuxEvent) || ev.some(isGameEvent) || ev.some(isStrengthEvent)) continue;
+            if (!ev.length || (ev.length === 1 && isRestEvent(ev[0]))) {
+                days[i].events = ['Auxiliary'];
+                left--;
+            }
+        }
+        // Last resort: share with Practice only
+        left = Math.max(0, cap - countEventType(days, isAuxEvent));
+        for (let i = 0; i < days.length && left > 0; i++) {
+            if (pushGPS(days[i], 'Auxiliary')) left--;
+        }
+    } else {
+        // Gym aux attached to strength days (still max 2)
+        attachAuxiliaryToStrengthDays(days, cap);
+    }
+
+    enforceAuxiliaryCap(days, cap);
+    return countEventType(days, isAuxEvent);
+}
+
+/**
+ * Land exactly `quota` Lactate days (default 2, reduced by Practice/Match RPE > 6).
+ * Prefer: day after Match → same day as Practice → day after Practice → scored fill.
+ */
+export function ensureLactateSessions(days, quota = 2) {
+    const target = Math.max(0, Number(quota) || 0);
+
+    const tryPlaceOn = (i) => {
+        if (i < 0 || i >= days.length) return false;
+        if (isDayBeforeMatch(days, i)) return false;
+        const ev = days[i].events || [];
+        if (ev.some(isLactateEvent)) return true;
+        if (ev.some(isGameEvent)) return false;
+        if (pushGPS(days[i], 'Lactate')) return true;
+        if (!ev.length || (ev.length === 1 && isRestEvent(ev[0]))) {
+            days[i].events = ['Lactate'];
+            return true;
+        }
+        return false;
+    };
+
+    // Pass 0: one lactate after Match when a match is in the week
+    let left = Math.max(0, target - countEventType(days, isLactateEvent));
+    if (left > 0) {
+        const matchIdx = days.findIndex(d => (d.events || []).some(isGameEvent));
+        if (matchIdx >= 0 && tryPlaceOn(matchIdx + 1)) left--;
+    }
+
+    // Pass 1: follow Practice (same day — afternoon)
+    left = Math.max(0, target - countEventType(days, isLactateEvent));
+    for (let i = 0; i < days.length && left > 0; i++) {
+        if (!(days[i].events || []).some(isPracticeEvent)) continue;
+        if (tryPlaceOn(i)) left--;
+    }
+
+    // Pass 2: day after Practice
+    left = Math.max(0, target - countEventType(days, isLactateEvent));
+    for (let i = 1; i < days.length && left > 0; i++) {
+        if (!(days[i - 1].events || []).some(isPracticeEvent)) continue;
+        if (tryPlaceOn(i)) left--;
+    }
+
+    // Pass 3: scored placement (never day before match)
+    left = Math.max(0, target - countEventType(days, isLactateEvent));
+    while (left > 0) {
+        if (!placeBestGPS(days, 'Lactate', { forbidBeforeMatch: true })) break;
+        left--;
+    }
+
+    // Pass 4: empty / Rest-only days
+    left = Math.max(0, target - countEventType(days, isLactateEvent));
+    for (let i = 0; i < days.length && left > 0; i++) {
+        if (isDayBeforeMatch(days, i)) continue;
+        const ev = days[i].events || [];
+        if (!ev.length || (ev.length === 1 && isRestEvent(ev[0]))) {
+            days[i].events = ['Lactate'];
+            left--;
+        }
+    }
+
+    // Pass 5: any open GPS slot
+    left = Math.max(0, target - countEventType(days, isLactateEvent));
+    for (let i = 0; i < days.length && left > 0; i++) {
+        if (isDayBeforeMatch(days, i)) continue;
+        if (pushGPS(days[i], 'Lactate')) left--;
+    }
+
+    // Pass 6: last resort — replace soft days (keep Match / Strength / Aux / Steady)
+    left = Math.max(0, target - countEventType(days, isLactateEvent));
+    for (let i = days.length - 1; i >= 0 && left > 0; i--) {
+        if (isDayBeforeMatch(days, i)) continue;
+        const d = days[i];
+        const ev = d.events || [];
+        if (ev.some(isLactateEvent)) continue;
+        if (ev.some(isGameEvent) || ev.some(isStrengthEvent) || ev.some(isAuxEvent) || ev.some(isSteadyCardio)) continue;
+        const keep = ev.filter(e => isPracticeEvent(e));
+        d.events = keep.length ? [...keep, 'Lactate'].slice(0, 2) : ['Lactate'];
+        left--;
+    }
+
+    trimEventTypeToQuota(days, isLactateEvent, target);
+    return countEventType(days, isLactateEvent);
+}
+
+export function attachAuxiliaryToStrengthDays(days, auxCount) {
+    const cap = Math.min(2, Math.max(0, auxCount || 0));
+    if (cap <= 0) return 0;
+    const strengthDays = days.filter(d => dayHasStrength(d.events));
+    let attached = 0;
+    for (const day of strengthDays) {
+        if (attached >= cap) break;
+        if (day.events.some(isAuxEvent)) { attached++; continue; }
+        if (pushGPS(day, 'Auxiliary')) attached++;
+    }
+    return attached;
+}
+
+/** Always land exactly `quota` steady-state days (default 2). */
+export function ensureSteadySessions(days, quota = 2) {
+    const target = Math.max(0, quota);
+
+    // Pass 1: normal scored placement
+    let left = Math.max(0, target - countEventType(days, isSteadyCardio));
+    while (left > 0) {
+        if (!placeBestGPS(days, 'Cardio (Steady)')) break;
+        left--;
+    }
+
+    // Pass 2: convert empty / Rest-only days into Steady
+    left = Math.max(0, target - countEventType(days, isSteadyCardio));
+    for (let i = 0; i < days.length && left > 0; i++) {
+        const ev = days[i].events || [];
+        if (!ev.length || (ev.length === 1 && isRestEvent(ev[0]))) {
+            days[i].events = ['Cardio (Steady)'];
+            left--;
+        }
+    }
+
+    // Pass 3: share with Practice / open slots via normal GPS rules
+    left = Math.max(0, target - countEventType(days, isSteadyCardio));
+    for (let i = 0; i < days.length && left > 0; i++) {
+        if (pushGPS(days[i], 'Cardio (Steady)')) left--;
+    }
+
+    // Pass 4: last resort — replace non-match / non-strength / non-aux days
+    left = Math.max(0, target - countEventType(days, isSteadyCardio));
+    for (let i = days.length - 1; i >= 0 && left > 0; i--) {
+        const d = days[i];
+        const ev = d.events || [];
+        if (ev.some(isSteadyCardio)) continue;
+        if (ev.some(isGameEvent) || ev.some(isStrengthEvent) || ev.some(isAuxEvent)) continue;
+        const keep = ev.filter(e => isPracticeEvent(e));
+        d.events = keep.length ? [...keep, 'Cardio (Steady)'].slice(0, 2) : ['Cardio (Steady)'];
+        left--;
+    }
+
+    // Never keep more than `target`
+    trimEventTypeToQuota(days, isSteadyCardio, target);
+    return countEventType(days, isSteadyCardio);
+}
+
+export function buildWeeklyTrainingPlan(weekStartISO) {
+    const prefs = getGymPlanPrefs();
+    const hypPrefs = getHypertrophyPlanPrefs();
+    const hypertrophyMode = isHypertrophyPhase();
+    const loggedCredits = countLoggedWorkoutCredits(weekStartISO);
+    const lactateQuota = Math.max(0, 2 - countPracticeLactateCredits(weekStartISO) - (loggedCredits.lactate || 0));
+    const steadyQuota = Math.max(0, 2 - (loggedCredits.steady || 0));
+    const gymTarget = hypertrophyMode
+        ? Math.max(0, (hypPrefs.sessionCount || 0) - (loggedCredits.strength || 0))
+        : Math.max(0, (prefs.strengthCount || 0) - (loggedCredits.strength || 0));
+    const strengthTarget = gymTarget;
+    const cacheKey = [
+        'v6-hypertrophy',
+        weekStartISO,
+        hypertrophyMode ? 1 : 0,
+        hypPrefs.split,
+        prefs.willingness,
+        prefs.band ? 1 : 0,
+        prefs.maxTime,
+        hypertrophyMode ? hypPrefs.sessionCount : prefs.strengthCount,
+        prefs.auxCount,
+        prefs.attachMode,
+        prefs.separateAuxDays,
+        lactateQuota,
+        steadyQuota,
+        strengthTarget,
+        loggedCredits.steady || 0,
+        loggedCredits.lactate || 0,
+        loggedCredits.strength || 0,
+        isGuidanceOff('timetabling') ? 1 : 0
+    ].join('|');
+
+    if (store._weekPlanCache.key === cacheKey && store._weekPlanCache.plan) return store._weekPlanCache.plan;
+
+    const fixedScheds = loadFixedSchedules();
+    const specificScheds = JSON.parse(localStorage.getItem('ascensus_specific_schedules')) || {};
+    const routeOverrides = loadRouteOverrides();
+
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+        const dateStr = addDaysISO(weekStartISO, i);
+        const d = new Date(dateStr + 'T12:00:00');
+        const dayOfWeek = d.getDay();
+        let events = [];
+
+        const yStr = addDaysISO(dateStr, -1);
+        if (matchRequiresNextDayRest(yStr)) {
+            events = ['Rest (Cardio Only)'];
+        } else if (routeOverrides[dateStr]) {
+            events = [routeOverrides[dateStr]];
+        } else if (specificScheds[dateStr]) {
+            const sp = specificEventName(specificScheds[dateStr]);
+            events = [sp === 'Match' ? 'Game' : sp];
+        } else if (fixedScheds[dayOfWeek] && fixedScheds[dayOfWeek].length) {
+            events = fixedScheds[dayOfWeek].map(scheduleEventName).filter(Boolean);
+        }
+
+        days.push({ dateStr, dayOfWeek, events: events.slice(0, 2) });
+    }
+
+    // Cap any pre-seeded Lactate/Steady/Aux before placing more
+    const auxCap = Math.min(2, Math.max(0, Number(prefs.auxCount) || 0));
+    trimEventTypeToQuota(days, isLactateEvent, lactateQuota);
+    trimEventTypeToQuota(days, isSteadyCardio, steadyQuota);
+    stripAllAuxiliary(days);
+
+    const timetablingOff = isGuidanceOff('timetabling');
+
+    if (!timetablingOff) {
+        // 1) Gym sessions — hypertrophy (default) or strength A/B
+        if (hypertrophyMode) {
+            placeHypertrophySessions(days, strengthTarget);
+        } else {
+            placeStrengthSessions(days, strengthTarget);
+        }
+
+        // 2) Auxiliary — strength / band only (never in hypertrophy)
+        if (!hypertrophyMode) {
+            placeAuxiliarySessions(days, prefs);
+        } else {
+            stripAllAuxiliary(days);
+        }
+
+        // 3) Steady cardio — remaining after logged steady sessions
+        ensureSteadySessions(days, steadyQuota);
+
+        // 4) Lactate — remaining after Practice/Match RPE > 6 credits + logged lactate
+        ensureLactateSessions(days, lactateQuota);
+    }
+
+    // Empty days → Rest, then enforce ≥1 soft rest day
+    days.forEach(day => {
+        if (day.events.length === 0) day.events = ['Rest'];
+    });
+    dedupeHardSessionsPerDay(days);
+    if (!timetablingOff) ensureWeeklySoftRestDay(days);
+
+    // Final hard caps — Aux ≤ 2 always (strip+verify); re-assert steady + lactate
+    if (!timetablingOff) {
+        if (hypertrophyMode) {
+            stripAllAuxiliary(days);
+        } else {
+            enforceAuxiliaryCap(days, 2);
+            // If soft-rest surgery wiped Aux below quota for band/gym separate mode, refill once
+            if (countEventType(days, isAuxEvent) < auxCap && (prefs.band || prefs.attachMode === 'none')) {
+                placeAuxiliarySessions(days, prefs);
+            }
+            enforceAuxiliaryCap(days, 2);
+        }
+        ensureSteadySessions(days, steadyQuota);
+        ensureLactateSessions(days, lactateQuota);
+        if (hypertrophyMode) stripAllAuxiliary(days);
+        else enforceAuxiliaryCap(days, 2);
+    }
+    days.forEach(day => {
+        if (day.events.length === 0) day.events = ['Rest'];
+    });
+
+    // Sanity: never ship a plan with >2 Aux
+    if (countEventType(days, isAuxEvent) > 2) enforceAuxiliaryCap(days, 2);
+
+    store._weekPlanCache = { key: cacheKey, plan: days };
+    return days;
+}
+
+export function getPlannedDayEvents(dateObj) {
+    const weekStart = getMondayISO(dateObj);
+    const plan = buildWeeklyTrainingPlan(weekStart);
+    const dateStr = dateToISO(dateObj);
+    const day = plan.find(d => d.dateStr === dateStr);
+    return day ? [...day.events] : ['Rest'];
+}
+
+export function loadRouteOverrides() {
+    return JSON.parse(localStorage.getItem('ascensus_route_overrides')) || {};
+}
+export function saveRouteOverrides(map) {
+    localStorage.setItem('ascensus_route_overrides', JSON.stringify(map));
+    invalidateWeekPlanCache();
+    if (typeof persistUserConfigToCloud === 'function') persistUserConfigToCloud();
+}
+export function setRouteOverride(dateStr, value) {
+    const map = loadRouteOverrides();
+    if (!value) delete map[dateStr];
+    else map[dateStr] = value;
+    saveRouteOverrides(map);
+}
+export function dateToISO(d) {
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+export function addDaysISO(dateStr, days) {
+    const d = new Date(dateStr + 'T12:00:00');
+    d.setDate(d.getDate() + days);
+    return dateToISO(d);
+}
+
+export function loadFixedSchedules() {
+    const raw = JSON.parse(localStorage.getItem('ascensus_fixed_schedules')) || {};
+    const migrated = {};
+    for (let d in raw) {
+        const arr = Array.isArray(raw[d]) ? raw[d] : [raw[d]];
+        migrated[d] = arr.map(item => {
+            if (item && typeof item === 'object') {
+                return {
+                    event: item.event || item.type || 'Practice',
+                    time: item.time || item.timeOfDay || ''
+                };
+            }
+            if (typeof item === 'string' && item.includes('|')) {
+                const [event, time] = item.split('|');
+                return { event, time: time || '' };
+            }
+            return { event: item, time: '' };
+        });
+    }
+    return migrated;
+}
+export function saveFixedSchedules(scheds) {
+    localStorage.setItem('ascensus_fixed_schedules', JSON.stringify(scheds));
+    invalidateWeekPlanCache();
+    renderFixedSchedules();
+    generateFutureTimeline();
+    try { getTodayFocus(); } catch(e) {}
+    if (typeof persistUserConfigToCloud === 'function') persistUserConfigToCloud();
+}
+
+export function scheduleEventName(entry) {
+    if (!entry) return '';
+    return typeof entry === 'object' ? (entry.event || '') : String(entry);
+}
+
+export function scheduleEventTime(entry) {
+    if (!entry || typeof entry !== 'object') return '';
+    return entry.time || '';
+}
+
+/** Event names only (for planner rules). */
+export function fixedScheduleEventNames(dayOfWeek) {
+    return (loadFixedSchedules()[dayOfWeek] || []).map(scheduleEventName).filter(Boolean);
+}
+
+export function getFixedEventTime(dayOfWeek, eventName) {
+    const list = loadFixedSchedules()[dayOfWeek] || [];
+    const hit = list.find(e => scheduleEventName(e) === eventName);
+    return scheduleEventTime(hit) || '';
+}
+
+/** True if any fixed-schedule entry that day is Morning. */
+export function dayHasFixedMorningEvent(dayOfWeek) {
+    const list = loadFixedSchedules()[dayOfWeek] || [];
+    return list.some(e => String(scheduleEventTime(e) || '').toLowerCase() === 'morning');
+}
+
+/**
+ * Resolve Morning / Afternoon / All Day for a planned session (single-event days).
+ * Strength is Morning unless a fixed schedule event that day is already Morning.
+ */
+export function resolveSessionTimeOfDay(dateObj, eventName) {
+    if (!eventName || isRestEvent(eventName)) return 'All Day';
+    const dow = dateObj instanceof Date ? dateObj.getDay() : new Date(dateObj).getDay();
+    if (isPracticeEvent(eventName) || isGameEvent(eventName)) {
+        return getFixedEventTime(dow, eventName) || 'Afternoon';
+    }
+    if (isStrengthEvent(eventName) || isStrengthFocus(eventName)) {
+        return dayHasFixedMorningEvent(dow) ? 'Afternoon' : 'Morning';
+    }
+    const fixed = getFixedEventTime(dow, eventName);
+    if (fixed) return fixed;
+    return 'Afternoon';
+}
+
+/**
+ * For 2-event days: always one Morning + one Afternoon (Morning listed first).
+ * Prefers fixed-schedule times and Strength→Morning when choosing who gets which slot.
+ */
+export function assignPairedSessionSlots(dateObj, dayEvents) {
+    const events = (dayEvents || []).filter(e => e && !isRestEvent(e));
+    if (!events.length) return [];
+    if (events.length === 1) {
+        return [{ event: events[0], name: prettyFocusName(events[0]), time: resolveSessionTimeOfDay(dateObj, events[0]) }];
+    }
+
+    const pair = events.slice(0, 2);
+    const dow = dateObj instanceof Date ? dateObj.getDay() : new Date(dateObj).getDay();
+
+    const preferred = pair.map(ev => {
+        if (isPracticeEvent(ev) || isGameEvent(ev)) {
+            const ft = getFixedEventTime(dow, ev);
+            if (ft) return String(ft);
+        }
+        if (isStrengthEvent(ev) || isStrengthFocus(ev)) {
+            return dayHasFixedMorningEvent(dow) ? 'Afternoon' : 'Morning';
+        }
+        const ft = getFixedEventTime(dow, ev);
+        return ft ? String(ft) : '';
+    });
+
+    let morningIdx = preferred.findIndex(t => String(t).toLowerCase() === 'morning');
+    let afternoonIdx = preferred.findIndex(t => String(t).toLowerCase() === 'afternoon');
+
+    // Conflict: both want same slot → Strength keeps Morning preference; otherwise first keeps claim
+    if (morningIdx >= 0 && afternoonIdx >= 0 && morningIdx === afternoonIdx) {
+        afternoonIdx = -1;
+    }
+    if (morningIdx >= 0 && afternoonIdx >= 0 && morningIdx !== afternoonIdx) {
+        // already a clean pair
+    } else if (morningIdx >= 0) {
+        afternoonIdx = morningIdx === 0 ? 1 : 0;
+    } else if (afternoonIdx >= 0) {
+        morningIdx = afternoonIdx === 0 ? 1 : 0;
+    } else {
+        // Lactate follows Practice on the same day
+        const practiceIdx = pair.findIndex(isPracticeEvent);
+        const lactateIdx = pair.findIndex(isLactateEvent);
+        if (practiceIdx >= 0 && lactateIdx >= 0) {
+            morningIdx = practiceIdx;
+            afternoonIdx = lactateIdx;
+        } else {
+            const strengthIdx = pair.findIndex(e => isStrengthEvent(e) || isStrengthFocus(e));
+            morningIdx = strengthIdx >= 0 ? strengthIdx : 0;
+            afternoonIdx = morningIdx === 0 ? 1 : 0;
+        }
+    }
+
+    return [
+        { event: pair[morningIdx], name: prettyFocusName(pair[morningIdx]), time: 'Morning' },
+        { event: pair[afternoonIdx], name: prettyFocusName(pair[afternoonIdx]), time: 'Afternoon' }
+    ];
+}
+
+export function formatDaySessionTimes(dateObj, dayEvents) {
+    const slots = assignPairedSessionSlots(dateObj, dayEvents);
+    if (!slots.length) return { rowsHtml: '' };
+
+    const rowsHtml = slots.map(x => {
+        const color = String(x.time).toLowerCase() === 'morning' ? 'var(--gold-accent)'
+            : (String(x.time).toLowerCase() === 'afternoon' ? '#0A84FF' : 'var(--text-silver)');
+        return `<div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-bottom:4px; line-height:1.4;">
+            <span style="color:var(--text-main); font-weight:700;">${x.name}</span>
+            <span style="color:${color};"> · ${x.time}</span>
+        </div>`;
+    }).join('');
+
+    return { rowsHtml };
+}
+
+export function canAddScheduleEvent(existing, event) {
+    existing = (existing || []).map(scheduleEventName);
+    if (existing.includes(event)) return { ok: false, reason: "That event is already on this day." };
+    if (existing.length >= 2) return { ok: false, reason: "Maximum of 2 events per day." };
+
+    const hasGame = existing.some(isGameEvent);
+    const hasPractice = existing.some(isPracticeEvent);
+    const hasRest = existing.some(isRestEvent);
+    const hasLift = existing.some(isLiftingEvent);
+
+    if (isGameEvent(event)) {
+        if (hasLift) return { ok: false, reason: "Games cannot share a day with lifting." };
+        if (hasRest) return { ok: false, reason: "Cannot add a Game on a Rest day." };
+        return { ok: true };
+    }
+    if (isPracticeEvent(event)) {
+        if (hasRest) return { ok: false, reason: "Cannot add Practice on a Rest day." };
+        return { ok: true };
+    }
+    if (isRestEvent(event)) {
+        if (existing.length > 0) return { ok: false, reason: "Rest must be the only event that day." };
+        return { ok: true };
+    }
+    if (isLiftingEvent(event)) {
+        if (hasGame) return { ok: false, reason: "Lifting cannot share a day with a Game." };
+        if (hasRest) return { ok: false, reason: "Cannot lift on a Rest day." };
+        if (hasPractice && hasLift) return { ok: false, reason: "Maximum of 2 events per day." };
+        return { ok: true };
+    }
+    return { ok: true };
+}
+
+export function toggleSchedTimeVisibility() {
+    const ev = document.getElementById('sched-event')?.value;
+    const timeEl = document.getElementById('sched-time');
+    if (!timeEl) return;
+    timeEl.style.display = (ev === 'Rest') ? 'none' : '';
+}
+
+export function openFixedScheduleModal() {
+    const modal = document.getElementById('schedule-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    toggleSchedTimeVisibility();
+    renderFixedSchedules();
+}
+export function closeFixedScheduleModal() {
+    document.getElementById('schedule-modal')?.classList.add('hidden');
+}
+
+export function addFixedSchedule() {
+    const day = document.getElementById('sched-day').value;
+    const event = document.getElementById('sched-event').value;
+    let time = (event === 'Rest') ? '' : (document.getElementById('sched-time')?.value || 'Afternoon');
+    let scheds = loadFixedSchedules();
+    if (!scheds[day]) scheds[day] = [];
+    const check = canAddScheduleEvent(scheds[day], event);
+    if (!check.ok) return alert(check.reason);
+
+    // Two events on one day must be Morning + Afternoon (never the same window)
+    if (scheds[day].length === 1 && event !== 'Rest') {
+        const existing = scheds[day][0];
+        let existT = String(scheduleEventTime(existing) || '').trim();
+        if (!existT) {
+            // Existing had no time — give it the opposite of the new event
+            existT = (String(time).toLowerCase() === 'morning') ? 'Afternoon' : 'Morning';
+            if (typeof existing === 'object') existing.time = existT;
+            else scheds[day][0] = { event: scheduleEventName(existing), time: existT };
+        }
+        if (String(existT).toLowerCase() === String(time).toLowerCase()) {
+            time = String(existT).toLowerCase() === 'morning' ? 'Afternoon' : 'Morning';
+        }
+    }
+
+    scheds[day].push({ event, time });
+    saveFixedSchedules(scheds);
+}
+export function deleteFixedSchedule(day, eventName) {
+    let scheds = loadFixedSchedules();
+    if (!scheds[day]) return;
+    if (eventName === undefined || eventName === null) {
+        delete scheds[day];
+    } else {
+        scheds[day] = scheds[day].filter(e => scheduleEventName(e) !== eventName);
+        if (scheds[day].length === 0) delete scheds[day];
+    }
+    saveFixedSchedules(scheds);
+}
+export function renderFixedSchedules() {
+    // Only populate the Edit Fixed Schedule modal list (timetable already shows locks)
+    const list = document.getElementById('fixed-schedule-list');
+    if (!list) return;
+    const scheds = loadFixedSchedules();
+    const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+    let html = '';
+    for (let d in scheds) {
+        (scheds[d] || []).forEach(ev => {
+            const name = scheduleEventName(ev);
+            const time = scheduleEventTime(ev);
+            const safeEv = String(name).replace(/'/g, "\\'");
+            const timeBit = time ? ` · ${time}` : '';
+            html += `<div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); padding:12px; border-radius:8px; font-size:12px;">
+                <span style="color:var(--text-main); font-weight:bold;">${days[d]}: <span style="color:var(--gold-accent);">${name}${timeBit}</span></span>
+                <button onclick="deleteFixedSchedule('${d}', '${safeEv}')" style="background:none; border:none; color:var(--text-stealth); font-size:18px; cursor:pointer;">&times;</button>
+            </div>`;
+        });
+    }
+    list.innerHTML = html || `<div style="font-size:11px; color:var(--text-muted); padding:8px 0;">No locks yet. Add Practice or Match above.</div>`;
+}
+
+/** Resolve a day's event list: sport overrides + optional GPS lift (max 2). */
+export function resolveDayEvents(options) {
+    const {
+        dayOfWeek, dateStr, gpsFocus, fixedScheds, specificScheds, routeOverrides,
+        forceRestFromPrevGame, forceCardioOnlyRest
+    } = options;
+
+    let events = [];
+
+    // 1) Forced recovery from previous Game / high-RPE Practice
+    if (forceCardioOnlyRest) {
+        return ['Rest (Cardio Only)'];
+    }
+    if (forceRestFromPrevGame) {
+        return ['Rest'];
+    }
+
+    // 2) One-off date overrides (calendar / practice RPE flags)
+    if (routeOverrides[dateStr]) {
+        return [routeOverrides[dateStr]];
+    }
+    if (specificScheds[dateStr]) {
+        const sp = specificEventName(specificScheds[dateStr]);
+        // Calendar uses Match; normalize to Game for rules
+        events = [sp === 'Match' ? 'Game' : sp];
+    } else if (fixedScheds[dayOfWeek] && fixedScheds[dayOfWeek].length) {
+        events = fixedScheds[dayOfWeek].map(scheduleEventName).filter(Boolean);
+    }
+
+    const hasGame = events.some(isGameEvent);
+    const hasPractice = events.some(isPracticeEvent);
+    const hasRest = events.some(isRestEvent);
+    const slotsLeft = 2 - events.length;
+
+    // Games never share with lifting. Practice+Game already = 2 slots → no lift.
+    // Practice alone can take a GPS lift. Empty day takes GPS focus alone.
+    if (!hasGame && !hasRest && slotsLeft > 0 && gpsFocus && !isRestEvent(gpsFocus)) {
+        if (hasPractice) {
+            // Practice + lifting OK
+            if (isLiftingEvent(gpsFocus)) events.push(gpsFocus);
+        } else if (events.length === 0) {
+            events.push(gpsFocus);
+        }
+    }
+
+    if (events.length === 0) events = [gpsFocus || 'Rest'];
+    return events.slice(0, 2);
+}
+
+export function prettyFocusName(focus) {
+    if (!focus || typeof focus !== 'string') return focus;
+    if (HYPERTROPHY_DISPLAY_LABELS[focus]) return HYPERTROPHY_DISPLAY_LABELS[focus];
+    if (isHypertrophyEvent(focus)) {
+        const kind = resolveHypertrophySessionKind(focus);
+        const key = kind ? hypertrophyEventForKind(kind) : null;
+        if (key && HYPERTROPHY_DISPLAY_LABELS[key]) return HYPERTROPHY_DISPLAY_LABELS[key];
+        return focus.replace(/^Hypertrophy\s*\/\s*/i, '');
+    }
+    if (focus === 'Full Body / Strength A' || /Strength\s*A/i.test(focus)) return 'Strength Session A';
+    if (focus === 'Full Body / Strength B' || /Strength\s*B/i.test(focus)) return 'Strength Session B';
+    if (focus === 'Full Body / Strength') return 'Strength Session';
+    if (isSteadyCardio(focus)) return 'Steady Cardio';
+    if (isLactateEvent(focus)) return 'Lactate/HIT';
+    if (isAuxEvent(focus)) {
+        const bandOn = !!(typeof getGymPlanPrefs === 'function' ? getGymPlanPrefs().band : store.userConfig.bandAuxiliary);
+        return bandOn ? 'Band Auxiliary' : 'Auxiliary';
+    }
+    return focus;
+}
+
+export function normalizeFocusName(focus) {
+    if (!focus || typeof focus !== 'string') return focus;
+    // Pretty hypertrophy labels → event keys
+    for (const [eventKey, label] of Object.entries(HYPERTROPHY_DISPLAY_LABELS)) {
+        if (focus === label || focus.includes(label)) return eventKey;
+    }
+    if (isHypertrophyEvent(focus)) return focus;
+    // openFuturePlan may receive pretty labels or multi-event strings
+    if (focus.includes('Strength Session A') || focus === 'Full Body / Strength A') return 'Full Body / Strength A';
+    if (focus.includes('Strength Session B') || focus === 'Full Body / Strength B') return 'Full Body / Strength B';
+    if (focus.includes('Strength Session') || focus === 'Full Body / Strength') return 'Full Body / Strength A';
+    // Multi-event label e.g. "Practice + Strength Session A"
+    const parts = focus.split(/\s*\+\s*/);
+    if (parts.length > 1) {
+        const lift = parts.map(normalizeFocusName).find(p => isLiftingEvent(p) || isStrengthFocus(p));
+        if (lift) return lift;
+    }
+    return focus;
+}
+
+export function formatEventsLabel(events) {
+    return events.map(prettyFocusName).join(' + ');
+}
+
+export function pickPrimaryFocus(events) {
+    if (!events || !events.length) return 'Rest';
+    if (events.some(isGameEvent)) return 'Game';
+    if (events.includes('Rest (Cardio Only)')) return 'Rest (Cardio Only)';
+    if (events.some(isRestEvent)) return 'Rest';
+    const strength = events.find(isStrengthEvent);
+    if (strength) return strength;
+    const lactate = events.find(isLactateEvent);
+    if (lactate) return lactate;
+    const lift = events.find(isLiftingEvent);
+    if (lift) return lift;
+    if (events.some(isPracticeEvent)) return 'Practice';
+    return events[0];
+}
+
+/** Macro goals for a day focus (Rest cuts carbs 20%). */
+export function getDayMacroTargets(focus) {
+    const base = store.userConfig.targets || {};
+    let cals = base.cals || 0;
+    let tPro = base.pro || 150;
+    let tCarb = base.carb || 200;
+    let tFat = base.fat || 70;
+    const f = normalizeFocusName(focus) || focus;
+    if (f === 'Rest') {
+        const reduction = Math.round(tCarb * 0.20);
+        tCarb -= reduction;
+        tFat += Math.round((reduction * 4) / 9);
+        cals = Math.round((tPro * 4) + (tCarb * 4) + (tFat * 9));
+    }
+    return { cals, tPro, tCarb, tFat };
+}
+
+function shortDayLabel(i, futureDate) {
+    if (i === 1) return 'Tomorrow';
+    return futureDate.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+}
+
+export function generateFutureTimeline() {
+    const container = document.getElementById('future-timeline-container');
+    if (!container) return;
+
+    invalidateWeekPlanCache();
+    let html = '';
+    const numDays = 7;
+    const today = new Date();
+
+    for (let i = 1; i <= numDays; i++) {
+        const futureDate = new Date();
+        futureDate.setDate(today.getDate() + i);
+        const dateStr = dateToISO(futureDate);
+        const dayName = shortDayLabel(i, futureDate);
+        const dayEvents = getPlannedDayEvents(futureDate);
+        const primary = pickPrimaryFocus(dayEvents);
+        const macros = getDayMacroTargets(primary);
+        const slots = assignPairedSessionSlots(futureDate, dayEvents);
+        const sectionLabelStyle = `font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px;`;
+        const itemLineStyle = `font-size:12px; font-weight:600; color:var(--text-main); line-height:1.35;`;
+        let sessionItemsHtml = '';
+        if (!slots.length) {
+            const restLabel = (dayEvents || []).includes('Rest (Cardio Only)') ? 'Rest (Cardio Only)' : 'Rest';
+            sessionItemsHtml = `<div style="${itemLineStyle}">${restLabel}</div>`;
+        } else {
+            sessionItemsHtml = slots.map(s =>
+                `<div style="${itemLineStyle}">${s.time} ${s.name}</div>`
+            ).join('');
+        }
+        const sessionLinesHtml = `<div>
+            <strong style="${sectionLabelStyle}">Exercise</strong>
+            <div style="margin-top:4px; display:flex; flex-direction:column; gap:4px;">${sessionItemsHtml}</div>
+        </div>`;
+        let recipeLinesHtml = '';
+        if (!isGuidanceOff('food') && store.globalFoodDB.length && store.userConfig.targets) {
+            const recipeNames = getDayRecipeNames({
+                tPro: macros.tPro,
+                tCarb: macros.tCarb,
+                forDate: futureDate
+            });
+            if (recipeNames.length) {
+                recipeLinesHtml = `<div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border-subtle);">
+                    <strong style="${sectionLabelStyle}">Food</strong>
+                    <div style="margin-top:4px; display:flex; flex-direction:column; gap:2px;">
+                        ${recipeNames.map(n => `<div style="${itemLineStyle}">${n}</div>`).join('')}
+                    </div>
+                </div>`;
+            }
+        }
+        const safeRaw = String(primary).replace(/'/g, "\\'");
+        const safeDay = String(dayName).replace(/'/g, "\\'");
+
+        html += `<div class="card" onclick="openFuturePlan('${safeDay}', '${safeRaw}', ${macros.cals}, '${dateStr}')" style="padding:16px; margin-bottom:12px; cursor:pointer; transition:transform 0.1s ease;" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'">
+            <div style="display:flex; justify-content:flex-start; align-items:center; margin-bottom:10px; border-bottom:1px solid var(--border-subtle); padding-bottom:6px; gap:8px; min-width:0;">
+                <span style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; min-width:0;">${dayName}</span>
+            </div>
+            ${sessionLinesHtml}
+            ${recipeLinesHtml}
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function sumSimulatedDayMacros(macros, forDate) {
+    const meals = resolveDayMealItems({
+        tPro: macros.tPro,
+        tCarb: macros.tCarb,
+        forDate
+    });
+    let pro = 0, carb = 0, fat = 0;
+    meals.forEach(entry => {
+        (entry.items || []).forEach(item => {
+            if (!item?.food) return;
+            const m = (item.mass || 0) / 100;
+            pro += (item.food.protein_per_100g || 0) * m;
+            carb += (item.food.carbs_per_100g || 0) * m;
+            fat += (item.food.fat_per_100g || 0) * m;
+        });
+    });
+    const cals = Math.round((pro * 4) + (carb * 4) + (fat * 9));
+    return { cals, pro, carb, fat };
+}
+
+function buildMacroGoalBarsHtml(macros, forDate = new Date()) {
+    const simulated = sumSimulatedDayMacros(macros, forDate);
+    const rows = [
+        { metric: 'cals', label: 'Calories', current: simulated.cals, target: macros.cals },
+        { metric: 'pro', label: 'Protein', current: simulated.pro, target: macros.tPro },
+        { metric: 'carb', label: 'Carbs', current: simulated.carb, target: macros.tCarb },
+        { metric: 'fat', label: 'Fat', current: simulated.fat, target: macros.tFat }
+    ];
+    let html = `<div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid var(--border-subtle); width:100%; min-width:0;">`;
+    rows.forEach(r => {
+        const layout = computeMacroBarLayout(r.metric, r.current, r.target);
+        const label = formatMacroAimLabel(r.metric, r.current, r.target);
+        const tickHtml = r.target > 0
+            ? `<div class="macro-aim-tick" style="left:${layout.aimPct}%;"></div>`
+            : '';
+        html += `<div style="width:100%; min-width:0;">
+            <div class="day-plan-metric-row" style="margin-bottom:4px;">
+                <span class="hud-label" style="margin:0;">${r.label}</span>
+                <span class="day-plan-metric-val">${label}</span>
+            </div>
+            <div class="progress-bar-bg macro-bar-track">
+                <div class="macro-range-band" style="left:${layout.bandLeft}%; width:${layout.bandWidth}%; background:${layout.bandGradient};"></div>
+                ${tickHtml}
+                <div class="progress-bar-fill ${layout.state}" style="width:${layout.fillPct}%; --in-range-t:${layout.inRangeT};"></div>
+            </div>
+        </div>`;
+    });
+    html += `</div>`;
+    return html;
+}
+
+function buildDomainGoalBarsHtml(targets) {
+    const t = targets || { str: 0, pow: 0, spd: 0, crd: 0, end: 0 };
+    const keys = ['str', 'pow', 'spd', 'crd', 'end'];
+    const max = Math.max(1, ...keys.map(k => t[k] || 0));
+    const colors = {
+        str: 'var(--silver-accent)',
+        pow: 'var(--text-silver)',
+        spd: 'var(--text-stealth)',
+        crd: 'var(--text-stealth)',
+        end: 'var(--text-main)'
+    };
+    let html = `<div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid var(--border-subtle); width:100%; min-width:0;">`;
+    keys.forEach(k => {
+        const val = t[k] || 0;
+        const pct = Math.round((val / max) * 100);
+        html += `<div style="width:100%; min-width:0;">
+            <div class="day-plan-metric-row" style="margin-bottom:4px;">
+                <span class="hud-label" style="margin:0; color:${colors[k]};">${DOMAIN_LABELS[k]}</span>
+                <span class="day-plan-metric-val">${val}</span>
+            </div>
+            <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%; background-color:${colors[k]};"></div></div>
+        </div>`;
+    });
+    html += `</div>`;
+    return html;
+}
+
+export function switchDayPlanSubTab(panel, btn) {
+    const food = document.getElementById('day-plan-panel-food');
+    const ex = document.getElementById('day-plan-panel-exercise');
+    if (food) food.classList.toggle('hidden', panel !== 'food');
+    if (ex) ex.classList.toggle('hidden', panel !== 'exercise');
+    document.querySelectorAll('#day-detail-forecast .catalogue-sub-btn').forEach(b => {
+        const on = btn ? b === btn : b.getAttribute('data-day-plan') === panel;
+        b.classList.toggle('active', on);
+        b.classList.toggle('is-primary', on);
+        b.classList.toggle('is-secondary', !on);
+    });
+}
+
+export function setDayDetailMode(mode) {
+    const forecast = document.getElementById('day-detail-forecast');
+    const summary = document.getElementById('modal-summary');
+    const logList = document.getElementById('modal-log-list');
+    if (mode === 'forecast') {
+        if (forecast) forecast.classList.remove('hidden');
+        if (summary) { summary.classList.add('hidden'); summary.innerHTML = ''; }
+        if (logList) { logList.classList.add('hidden'); logList.innerHTML = ''; }
+    } else {
+        if (forecast) forecast.classList.add('hidden');
+        if (summary) summary.classList.remove('hidden');
+        if (logList) logList.classList.remove('hidden');
+    }
+}
+
+export function openPracticeLogModal(dateStr, opts = {}) {
+    window.journalMode = 'practice';
+    window.pendingPracticeDate = dateStr || dateToISO(new Date());
+    resetJournalMedia();
+    window._editingJournalExistingMedia = [];
+    let prefill = null;
+    if (opts.prefill) {
+        const journal = loadDayJournal(window.pendingPracticeDate);
+        if (journal && (journal.source === 'practice' || journal.type === 'practice' || !journal.source)) {
+            prefill = journal;
+            window._editingJournalExistingMedia = Array.isArray(journal.media) ? journal.media : [];
+            const notes = document.getElementById('journal-notes');
+            if (notes) notes.value = journal.notes || '';
+        }
+    } else {
+        const notes = document.getElementById('journal-notes');
+        if (notes) notes.value = '';
+    }
+    configureJournalModal('practice', prefill);
+    const eyebrow = document.getElementById('journal-modal-eyebrow');
+    const title = document.getElementById('journal-modal-title');
+    if (eyebrow) eyebrow.innerText = opts.prefill ? 'Edit Practice' : 'Practice Complete';
+    if (title) title.innerText = opts.prefill ? 'EDIT PRACTICE DIARY' : 'PRACTICE BRAIN DUMP';
+
+    renderJournalMediaPreview();
+    const modal = document.getElementById('post-session-modal');
+    if (modal) modal.classList.remove('hidden');
+    const btn = document.getElementById('btn-finalize-workout');
+    if (btn) btn.innerText = opts.prefill ? 'Save changes' : 'Save & close';
+}
+
+export function openMatchLogModal(dateStr, opts = {}) {
+    window.journalMode = 'match';
+    window.pendingMatchDate = dateStr || dateToISO(new Date());
+    resetJournalMedia();
+    window._editingJournalExistingMedia = [];
+    let prefill = null;
+    if (opts.prefill) {
+        const journal = loadDayJournal(window.pendingMatchDate);
+        if (journal && (journal.source === 'match' || journal.type === 'match')) {
+            prefill = journal;
+            window._editingJournalExistingMedia = Array.isArray(journal.media) ? journal.media : [];
+            const notes = document.getElementById('journal-notes');
+            if (notes) notes.value = journal.notes || '';
+        }
+    } else {
+        const notes = document.getElementById('journal-notes');
+        if (notes) notes.value = '';
+    }
+    configureJournalModal('match', prefill);
+    const eyebrow = document.getElementById('journal-modal-eyebrow');
+    const title = document.getElementById('journal-modal-title');
+    if (eyebrow) eyebrow.innerText = opts.prefill ? 'Edit Match' : 'Match Complete';
+    if (title) title.innerText = opts.prefill ? 'EDIT MATCH DIARY' : 'MATCH BRAIN DUMP';
+
+    renderJournalMediaPreview();
+    const modal = document.getElementById('post-session-modal');
+    if (modal) modal.classList.remove('hidden');
+    const btn = document.getElementById('btn-finalize-workout');
+    if (btn) btn.innerText = opts.prefill ? 'Save changes' : 'Save & close';
+}
+
+/** Open today's Practice/Match diary from Drive → Log for editing. */
+export function editSportDiaryFromLog(kind) {
+    const dateStr = dateToISO(new Date());
+    const todayStr = new Date().toLocaleDateString();
+    const exerciseName = kind === 'Match' ? 'Match' : 'Practice';
+    const logs = (store.globalGroupedHistory?.[todayStr]?.items || [])
+        .filter(i => i.type === 'workout' && i.exercise === exerciseName);
+    window.editingSportJournal = true;
+    window.editingSportJournalLogIds = logs.map(l => l.id).filter(id => id != null);
+
+    if (exerciseName === 'Match') openMatchLogModal(dateStr, { prefill: true });
+    else openPracticeLogModal(dateStr, { prefill: true });
+}
+
+/** Delete today's Practice/Match diary + matching workout_log rows from Drive → Log. */
+export async function deleteSportDiaryFromLog(kind) {
+    const exerciseName = kind === 'Match' ? 'Match' : 'Practice';
+    if (!confirm(`Delete this ${exerciseName.toLowerCase()} diary entry?`)) return;
+
+    const dateStr = dateToISO(new Date());
+    const todayStr = new Date().toLocaleDateString();
+    const logs = (store.globalGroupedHistory?.[todayStr]?.items || [])
+        .filter(i => i.type === 'workout' && i.exercise === exerciseName);
+    const ids = logs.map(l => l.id).filter(id => id != null);
+
+    if (exerciseName === 'Match') {
+        deleteMatchJournalEntry(dateStr);
+        const next = addDaysISO(dateStr, 1);
+        const ov = loadRouteOverrides();
+        // Clear auto Rest-from-match if present
+        localStorage.removeItem('ascensus_match_rest_' + dateStr);
+        const map = loadRouteOverrides();
+        if (map[next] === 'Rest' || map[next] === 'Rest (Cardio Only)') {
+            delete map[next];
+            saveRouteOverrides(map);
+        }
+    } else {
+        deletePracticeJournalEntry(dateStr);
+    }
+
+    if (ids.length && navigator.onLine) {
+        try {
+            await store.supabaseClient.from('workout_logs').delete().in('id', ids);
+        } catch (e) {
+            console.warn('Could not delete sport diary workout rows:', e);
+        }
+    }
+
+    // Drop from in-memory history immediately
+    if (store.globalGroupedHistory?.[todayStr]) {
+        const idSet = new Set(ids.map(String));
+        store.globalGroupedHistory[todayStr].items = store.globalGroupedHistory[todayStr].items.filter(it =>
+            !(it.type === 'workout' && (it.exercise === exerciseName || idSet.has(String(it.id))))
+        );
+    }
+
+    invalidateWeekPlanCache();
+    try { generateFutureTimeline(); } catch (e) { /* ignore */ }
+    try { getTodayFocus(); } catch (e) { /* ignore */ }
+    try { await loadHistory(); } catch (e) { /* ignore */ }
+    try {
+        const { generateDailyExerciseLog } = await import('./fitness-hud.js');
+        generateDailyExerciseLog();
+    } catch (e) {
+        if (typeof window.generateDailyExerciseLog === 'function') window.generateDailyExerciseLog();
+    }
+}
+
+export async function commitPracticeSession() {
+    const notes = document.getElementById('journal-notes')?.value || '';
+    const entry = buildDiaryEntryFromForm({ notes, type: 'practice' });
+    const rpe = Number(entry.rpe) || 5;
+    const ath = Number(entry.athletic) || 5;
+    const ment = Number(entry.mental) || 5;
+    const hydrationMl = Math.max(0, Number(entry.hydration_ml) || 0);
+    const dateStr = window.pendingPracticeDate || dateToISO(new Date());
+    const isEdit = !!window.editingSportJournal;
+
+    let media = Array.isArray(window._editingJournalExistingMedia) ? [...window._editingJournalExistingMedia] : [];
+    try {
+        const added = await persistPendingJournalMedia(dateStr);
+        if (Array.isArray(added) && added.length) media = media.concat(added);
+    } catch (e) { console.warn(e); }
+    savePracticeJournalEntry(dateStr, { ...entry, notes, rpe, athletic: ath, mental: ment, hydration_ml: hydrationMl, type: 'practice', media });
+    if (hydrationMl > 0) recordHydrationMl(hydrationMl, 'practice', dateStr);
+    resetJournalMedia();
+    window._editingJournalExistingMedia = [];
+    applyInjuryPainFollowUpFromJournal();
+
+    // Replace prior Practice log rows when editing
+    const editIds = isEdit ? (window.editingSportJournalLogIds || []) : [];
+    if (editIds.length && navigator.onLine) {
+        try {
+            await store.supabaseClient.from('workout_logs').delete().in('id', editIds);
+        } catch (e) {
+            console.warn('Could not clear previous Practice rows:', e);
+        }
+    }
+
+    const timedMin = Number(window._lastSessionDurationMin) || 0;
+    const payload = [{
+        exercise: 'Practice',
+        sets: 1,
+        reps: 0,
+        weight_kg: 0,
+        distance_km: 0,
+        time_minutes: timedMin,
+        rpe: Math.round(rpe),
+        type: 'cardio',
+        session_duration_min: timedMin
+    }];
+
+    try {
+        if (!navigator.onLine) throw new Error('Offline');
+        const { error } = await store.supabaseClient.from('workout_logs').insert(payload);
+        if (error) throw error;
+    } catch (e) {
+        store.offlineQueue.push({ table: 'workout_logs', payload });
+        localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
+    }
+
+    if (rpe > 8) {
+        const next = addDaysISO(dateStr, 1);
+        setRouteOverride(next, 'Rest (Cardio Only)');
+        if (!isEdit) alert('RPE > 8: Tomorrow locked to Rest (Cardio Only).');
+    }
+    if (rpe > 6) {
+        invalidateWeekPlanCache();
+        if (!isEdit) alert('Practice RPE > 6 counts as a Lactate session — one Lactate removed from this week\'s plan.');
+    }
+    if (ath < 4) {
+        localStorage.setItem('ascensus_gps_index', '2');
+        if (!isEdit) alert('Athletic Performance < 4: GPS forced toward Rest.');
+    }
+    if (ment < 4 && !isEdit) {
+        alert('Mental Fatigue < 4: Prioritize sleep and recovery tonight.');
+    }
+
+    window.journalMode = null;
+    window.pendingPracticeDate = null;
+    window.editingSportJournal = false;
+    window.editingSportJournalLogIds = [];
+    invalidateWeekPlanCache();
+    generateFutureTimeline();
+    try { getTodayFocus(); } catch(e) {}
+    try { await loadHistory(); } catch(e) {}
+    try {
+        const driveNav = document.querySelector('#main-nav .nav-item[onclick*="drive"]');
+        if (typeof window.switchTab === 'function' && driveNav) window.switchTab(driveNav, 'drive', 'Drive');
+        if (typeof window.switchDriveSubTab === 'function') window.switchDriveSubTab('log');
+    } catch (e) { /* ignore */ }
+    alert(isEdit ? 'Practice diary updated.' : 'Practice logged.');
+}
+
+export async function commitMatchSession() {
+    const notes = document.getElementById('journal-notes')?.value || '';
+    const entry = buildDiaryEntryFromForm({ notes, type: 'match' });
+    const rpe = Number(entry.rpe) || 5;
+    const ath = Number(entry.athletic) || 5;
+    const ment = Number(entry.mental) || 5;
+    const matchPerf = Number(entry.matchPerformance) || ath;
+    const hydrationMl = Math.max(0, Number(entry.hydration_ml) || 0);
+    const dateStr = window.pendingMatchDate || dateToISO(new Date());
+    const isEdit = !!window.editingSportJournal;
+
+    let media = Array.isArray(window._editingJournalExistingMedia) ? [...window._editingJournalExistingMedia] : [];
+    try {
+        const added = await persistPendingJournalMedia(dateStr);
+        if (Array.isArray(added) && added.length) media = media.concat(added);
+    } catch (e) { console.warn(e); }
+    saveMatchJournalEntry(dateStr, { ...entry, notes, rpe, athletic: ath, mental: ment, matchPerformance: matchPerf, hydration_ml: hydrationMl, media });
+    if (hydrationMl > 0) recordHydrationMl(hydrationMl, 'match', dateStr);
+    resetJournalMedia();
+    window._editingJournalExistingMedia = [];
+    applyInjuryPainFollowUpFromJournal();
+
+    const editIds = isEdit ? (window.editingSportJournalLogIds || []) : [];
+    if (editIds.length && navigator.onLine) {
+        try {
+            await store.supabaseClient.from('workout_logs').delete().in('id', editIds);
+        } catch (e) {
+            console.warn('Could not clear previous Match rows:', e);
+        }
+    }
+
+    const timedMin = Number(window._lastSessionDurationMin) || 0;
+    const payload = [{
+        exercise: 'Match',
+        sets: 1,
+        reps: 0,
+        weight_kg: 0,
+        distance_km: 0,
+        time_minutes: timedMin,
+        rpe: Math.round(rpe),
+        type: 'cardio',
+        session_duration_min: timedMin
+    }];
+
+    try {
+        if (!navigator.onLine) throw new Error('Offline');
+        const { error } = await store.supabaseClient.from('workout_logs').insert(payload);
+        if (error) throw error;
+    } catch (e) {
+        store.offlineQueue.push({ table: 'workout_logs', payload });
+        localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
+    }
+
+    store.fatigueLockouts['legs'] = true;
+    if (rpe > 5) {
+        const next = addDaysISO(dateStr, 1);
+        // Rest (Cardio Only) — recovery day that still allows optional steady
+        setRouteOverride(next, 'Rest (Cardio Only)');
+        localStorage.setItem('ascensus_match_rest_' + dateStr, '1');
+        if (!isEdit) alert('Match RPE > 5: Tomorrow locked to Rest (optional steady is fine).');
+    } else {
+        localStorage.removeItem('ascensus_match_rest_' + dateStr);
+        if (isEdit) {
+            const next = addDaysISO(dateStr, 1);
+            const map = loadRouteOverrides();
+            if (map[next] === 'Rest' || map[next] === 'Rest (Cardio Only)') {
+                delete map[next];
+                saveRouteOverrides(map);
+            }
+        } else {
+            alert('Match logged. No Rest day scheduled (RPE ≤ 5).');
+        }
+    }
+    if (rpe > 6) {
+        invalidateWeekPlanCache();
+        if (!isEdit) alert('Match RPE > 6 counts as a Lactate session — one Lactate removed from this week\'s plan.');
+    }
+    if (ath < 4 && !isEdit) alert('Athletic Performance < 4: Prioritize recovery.');
+    if (ment < 4 && !isEdit) alert('Mental Fatigue < 4: Prioritize sleep tonight.');
+
+    window.journalMode = null;
+    window.pendingMatchDate = null;
+    window.editingSportJournal = false;
+    window.editingSportJournalLogIds = [];
+    invalidateWeekPlanCache();
+    generateFutureTimeline();
+    try { getTodayFocus(); } catch(e) {}
+    try { await loadHistory(); } catch(e) {}
+    try {
+        const driveNav = document.querySelector('#main-nav .nav-item[onclick*="drive"]');
+        if (typeof window.switchTab === 'function' && driveNav) window.switchTab(driveNav, 'drive', 'Drive');
+        if (typeof window.switchDriveSubTab === 'function') window.switchDriveSubTab('log');
+    } catch (e) { /* ignore */ }
+    alert(isEdit ? 'Match diary updated.' : 'Match logged.');
+}
+
+export function pickFixedFocusForDay(events) {
+    // Kept for compatibility; prefer resolveDayEvents for new logic
+    if (!events || events.length === 0) return null;
+    if (!Array.isArray(events)) return events;
+    return pickPrimaryFocus(events);
+}
+
+export function openFuturePlan(dateStr, focus, totalCals, isoDate) {
+    const titleEl = document.getElementById('modal-date-title');
+    if (titleEl) titleEl.innerText = dateStr;
+
+    const planDate = isoDate ? new Date(isoDate + 'T12:00:00') : new Date();
+    const dayEvents = getPlannedDayEvents(planDate);
+    const primary = pickPrimaryFocus(dayEvents.length ? dayEvents : [normalizeFocusName(focus) || focus]);
+    const macros = getDayMacroTargets(primary);
+    const domains = mergeDayDomainTargets(dayEvents.length ? dayEvents : [primary]);
+    const slots = assignPairedSessionSlots(planDate, dayEvents.length ? dayEvents : [primary]);
+
+    setDayDetailMode('forecast');
+
+    const foodPanel = document.getElementById('day-plan-panel-food');
+    const exPanel = document.getElementById('day-plan-panel-exercise');
+
+    if (foodPanel) {
+        foodPanel.innerHTML = buildMacroGoalBarsHtml(macros, planDate)
+            + buildMealPlanCardsHtml({
+                tPro: macros.tPro,
+                tCarb: macros.tCarb,
+                includeLog: false,
+                forDate: planDate,
+                plain: true
+            });
+    }
+
+    if (exPanel) {
+        let sessionHtml = buildDomainGoalBarsHtml(domains);
+        if (!slots.length || slots.every(s => isRestEvent(s.event))) {
+            const restFocus = dayEvents.includes('Rest (Cardio Only)') ? 'Rest (Cardio Only)' : 'Rest';
+            sessionHtml += buildPlainSessionCardHtml(restFocus, '');
+        } else {
+            slots.forEach(slot => {
+                sessionHtml += buildPlainSessionCardHtml(slot.event, slot.time);
+            });
+        }
+        exPanel.innerHTML = sessionHtml;
+    }
+
+    const foodBtn = document.querySelector('#day-detail-forecast .catalogue-sub-btn[data-day-plan="food"]');
+    switchDayPlanSubTab('food', foodBtn);
+
+    const modal = document.getElementById('day-detail-modal');
+    if (modal) {
+        const body = modal.querySelector('.day-detail-body');
+        if (body) body.scrollTop = 0;
+        modal.classList.remove('hidden');
+        setTimeout(() => modal.classList.add('show'), 10);
+    }
+}
+
+// Call renderFixedSchedules on boot
+setTimeout(renderFixedSchedules, 1000);
+
+// --- MODAL & METRIC LOGIC ---
+export function openSleepModal() {
+    const modal = document.getElementById('sleep-modal');
+    const warn = document.getElementById('sleep-hours-warning');
+    if (warn) {
+        warn.textContent = 'Maximum sleep is 24 hours. Please enter 24 or less.';
+        warn.classList.add('hidden');
+    }
+    modal.classList.remove('hidden');
+    setTimeout(() => modal.classList.add('show'), 10);
+}
+
+export function closeSleepModal() {
+    const modal = document.getElementById('sleep-modal');
+    modal.classList.remove('show');
+    setTimeout(() => modal.classList.add('hidden'), 300);
+}
+
+export function submitSleepLog() {
+    const input = document.getElementById('sleep-input-hours');
+    const warn = document.getElementById('sleep-hours-warning');
+    const hours = parseFloat(input?.value);
+    if (!hours || hours <= 0) {
+        if (warn) {
+            warn.textContent = 'Enter a sleep duration greater than 0.';
+            warn.classList.remove('hidden');
+        }
+        return;
+    }
+    if (hours > 24) {
+        if (warn) {
+            warn.textContent = 'Maximum sleep is 24 hours. Please enter 24 or less.';
+            warn.classList.remove('hidden');
+        } else {
+            alert('Maximum sleep is 24 hours. Please enter 24 or less.');
+        }
+        return;
+    }
+    if (warn) {
+        warn.textContent = '';
+        warn.classList.add('hidden');
+    }
+    upsertTodaySleep(hours);
+    
+    closeSleepModal();
+    
+    let sleepBadge = document.getElementById('status-badge-sleep');
+    if (sleepBadge) sleepBadge.classList.add('completed');
+    if (store.macroChartInstance) drawMacroChart(); // Live update chart if visible
+    try {
+        const todayStr = new Date().toLocaleDateString();
+        const foods = store.globalGroupedHistory?.[todayStr]?.items?.filter(i => i.type === 'food') || [];
+        if (typeof window.updateLiveDashboard === 'function') window.updateLiveDashboard(foods);
+    } catch (e) { /* ignore */ }
+}
+
+export function openVideoModal(title, url) {
+    document.getElementById('video-modal-title').innerText = title;
+    const frame = document.getElementById('video-modal-frame');
+    frame.innerHTML = `TAP TO LOAD INTEL`;
+    
+    // Lazy load iframe on tap to save mobile data
+    frame.onclick = function() {
+        frame.innerHTML = `<iframe width="100%" height="100%" src="${url}" frameborder="0" allowfullscreen></iframe>`;
+        frame.onclick = null; 
+    };
+
+    const notesEl = document.getElementById('video-modal-notes');
+    if (notesEl) {
+        notesEl.innerHTML = getVideoDirectives(title).map(d => `<li>${d}</li>`).join('');
+    }
+    
+    document.getElementById('video-modal').classList.remove('hidden');
+}
+
+export function getVideoDirectives(title) {
+    const t = String(title || '').toLowerCase();
+    if (t.includes('insulin') || t.includes('berg')) {
+        return [
+            'Prioritise protein and fibre at every meal.',
+            'Cut liquid sugar and ultra-processed snacks this week.',
+            'Walk 10 minutes after your largest carbohydrate meal.'
+        ];
+    }
+    if (t.includes('squat')) {
+        return [
+            'Brace before you unlock the hips — ribs down, floor through mid-foot.',
+            'Control the eccentric; depth only as far as a neutral spine allows.',
+            'Drive up without letting the knees cave or heels lift.'
+        ];
+    }
+    if (t.includes('sleep')) {
+        return [
+            'Fixed bedtime ±30 minutes — consistency beats one long night.',
+            'Dim screens and lights in the final 60 minutes.',
+            'Cool, dark room; leave caffeine for the morning window only.'
+        ];
+    }
+    if (t.includes('huberman') || t.includes('dopamine')) {
+        return [
+            'Stack hard work before cheap dopamine (scroll / sugar).',
+            'Protect one morning block of deep focus without notifications.',
+            'Use sunlight early and finish intense training before late evening.'
+        ];
+    }
+    if (t.includes('bench') || t.includes('press')) {
+        return [
+            'Plant feet, pinch scapulae, slight arch — bar over wrists and elbows.',
+            'Touch lightly to the chest; no bounce.',
+            'Press up and slightly back to the start position.'
+        ];
+    }
+    if (t.includes('deadlift')) {
+        return [
+            'Bar over mid-foot, shins vertical, lats on before you pull.',
+            'Push the floor away — hinge, don’t yank with the low back.',
+            'Lock out tall without hyperextending the lumbar spine.'
+        ];
+    }
+    if (t.includes('band') || t.includes('pull-apart') || t.includes('face pull')) {
+        return [
+            'Light tension — own the end range without shrugging.',
+            'Slow eccentric; pause where you feel the target muscle.',
+            'Breathing stays easy; this is prehab, not a max set.'
+        ];
+    }
+    // Default form cues for unnamed lifts / adaptation form space
+    return [
+        'Keep the core braced and spine neutral.',
+        'Control the eccentric — no bouncing or dumping the load.',
+        'Stop the set when form breaks, even if reps remain.'
+    ];
+}
+
+export function closeVideoModal() {
+    document.getElementById('video-modal-frame').innerHTML = 'TAP TO LOAD INTEL'; 
+    document.getElementById('video-modal').classList.add('hidden');
+}
+
