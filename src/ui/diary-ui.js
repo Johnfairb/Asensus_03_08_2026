@@ -13,6 +13,7 @@ import {
   resetDiarySchemaMode,
   updateDiaryField
 } from '../domain/diary-schema.js';
+import { RPE_SCALE } from '../domain/rpe-guidance.js';
 import { maybePromptRpeAwareness } from './rpe-guidance-ui.js';
 
 let _editorOpen = false;
@@ -39,6 +40,24 @@ function fieldTypeLabel(f) {
   return 'Number';
 }
 
+function isRpeField(f) {
+  const id = String(f?.id || '').toLowerCase();
+  const label = String(f?.label || '').toLowerCase();
+  return id === 'rpe' || /\brpe\b/.test(label);
+}
+
+function buildRpeSelectHtml(f, storeType) {
+  const options = [
+    `<option value="">Select RPE…</option>`,
+    ...RPE_SCALE.map(({ score, title }) =>
+      `<option value="${score}">${score} — ${escapeHtml(title)}</option>`
+    )
+  ].join('');
+  return `<select class="input-field" style="margin-bottom:0; cursor:pointer;" data-diary-field-id="${escapeHtml(f.id)}" data-diary-field-type="${storeType}" data-diary-scale="10">
+    ${options}
+  </select>`;
+}
+
 export function renderDiaryFields(mode, prefillEntry = null) {
   const host = document.getElementById('journal-dynamic-fields');
   if (!host) return;
@@ -50,21 +69,29 @@ export function renderDiaryFields(mode, prefillEntry = null) {
     const isText = f.type === 'qualitative';
     const tenScale = !isText && (f.type === 'scale10' || isTenPointScaleField(f));
     const isQuant = !isText;
+    const storeType = isText ? 'qualitative' : (tenScale ? 'scale10' : 'quantitative');
     const min = tenScale ? (f.min != null ? f.min : 1) : f.min;
     const max = tenScale ? 10 : f.max;
-    const inputAttrs = isQuant
-      ? `type="number" inputmode="decimal" ${min != null ? `min="${min}"` : ''} ${max != null ? `max="${max}"` : ''} ${f.step != null ? `step="${f.step}"` : 'step="any"'} ${tenScale ? 'data-diary-scale="10"' : ''}`
-      : `type="text"`;
-    const storeType = isText ? 'qualitative' : (tenScale ? 'scale10' : 'quantitative');
+
+    let controlHtml;
+    if (isRpeField(f) && !isText) {
+      controlHtml = buildRpeSelectHtml(f, storeType);
+    } else {
+      const inputAttrs = isQuant
+        ? `type="number" inputmode="decimal" ${min != null ? `min="${min}"` : ''} ${max != null ? `max="${max}"` : ''} ${f.step != null ? `step="${f.step}"` : 'step="any"'} ${tenScale ? 'data-diary-scale="10"' : ''}`
+        : `type="text"`;
+      controlHtml = `<input class="input-field" style="margin-bottom:0;" data-diary-field-id="${escapeHtml(f.id)}" data-diary-field-type="${storeType}" ${inputAttrs} placeholder="${isQuant ? (tenScale ? '1–10' : '0') : 'Type here…'}">`;
+    }
+
     html += `<div class="diary-field-block" style="margin-bottom:15px;">
       <label style="margin-top:0;">${escapeHtml(f.label)} <span style="color:var(--text-stealth); font-weight:600; font-size:9px; text-transform:uppercase;">${fieldTypeLabel(f)}</span></label>
       ${f.hint ? `<div style="font-size:9px; color:var(--text-muted); margin-bottom:8px;">${escapeHtml(f.hint)}</div>` : ''}
-      <input class="input-field" style="margin-bottom:0;" data-diary-field-id="${escapeHtml(f.id)}" data-diary-field-type="${storeType}" ${inputAttrs} placeholder="${isQuant ? (tenScale ? '1–10' : '0') : 'Type here…'}">
+      ${controlHtml}
     </div>`;
   });
   host.innerHTML = html || `<div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">No diary fields — use Edit diary entry to add some.</div>`;
 
-  // Live-clamp quantitative inputs that have min/max (including 1–10)
+  // Live-clamp quantitative number inputs that have min/max (including 1–10)
   host.querySelectorAll('input[data-diary-field-type="quantitative"], input[data-diary-field-type="scale10"]').forEach(el => {
     el.addEventListener('input', () => {
       if (el.value === '' || el.value == null) return;
@@ -80,7 +107,7 @@ export function renderDiaryFields(mode, prefillEntry = null) {
   if (prefillEntry) applyDiaryFieldValues(prefillEntry);
 
   // First time an RPE field appears — ask if they know the scale
-  if (fields.some(f => String(f.id || '').toLowerCase() === 'rpe' || /rpe/i.test(f.label || ''))) {
+  if (fields.some(f => isRpeField(f))) {
     try { maybePromptRpeAwareness(); } catch (e) { /* ignore */ }
   }
 
