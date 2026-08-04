@@ -519,6 +519,8 @@ export function openFoodDetail(id) {
         libraryDetailRow('Status', isFoodBanned(id) ? 'Banned' : 'Allowed'),
     ].filter(Boolean).join('');
     syncLibraryBanButton();
+    const editBtn = document.getElementById('library-detail-edit-btn');
+    if (editBtn) editBtn.classList.remove('hidden');
     document.getElementById('library-detail-sheet')?.classList.remove('hidden');
 }
 
@@ -588,6 +590,8 @@ export function openExerciseDetail(id) {
 
     document.getElementById('library-detail-body').innerHTML = bodyParts.join('');
     syncLibraryBanButton();
+    const editBtn = document.getElementById('library-detail-edit-btn');
+    if (editBtn) editBtn.classList.add('hidden');
     document.getElementById('library-detail-sheet')?.classList.remove('hidden');
 }
 
@@ -597,7 +601,7 @@ export function editFromLibraryDetail() {
     closeLibraryDetail();
     if (!id) return;
     if (kind === 'food') editFood(id);
-    else if (kind === 'exercise') editExercise(id);
+    // Exercises are not editable from the library
 }
 
 export function toggleBanFromLibraryDetail() {
@@ -772,19 +776,26 @@ export async function loadExercises() {
     store.globalExerciseDB = unique;
     if (typeof updateExerciseDropdowns === "function") updateExerciseDropdowns();
 
+    /** My Exercises: PDF catalog (+ core) and non-lifting (power / cardio) only. */
+    const isMyExercisesVisible = (ex) => {
+        if (getExerciseMeta(ex.name) || resolveCatalogName(ex.name)) return true;
+        const domain = String(ex.domain || '').toLowerCase();
+        return domain === 'power' || domain === 'cardio';
+    };
+
     const strengthOrder = Object.keys(STRENGTH_EXERCISE_META);
     const strengthNormSet = new Set(strengthOrder.map(norm));
     const usedIds = new Set();
     const strengthRows = [];
     strengthOrder.forEach(name => {
         const row = unique.find(ex => norm(ex.name) === norm(name));
-        if (row && !usedIds.has(row.id)) {
+        if (row && !usedIds.has(row.id) && isMyExercisesVisible(row)) {
             strengthRows.push(row);
             usedIds.add(row.id);
         }
     });
     const otherRows = unique
-        .filter(ex => !usedIds.has(ex.id) && !strengthNormSet.has(norm(ex.name)))
+        .filter(ex => !usedIds.has(ex.id) && isMyExercisesVisible(ex))
         .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
     const buildExerciseRow = (ex) => {
@@ -799,7 +810,9 @@ export async function loadExercises() {
         const banned = isExerciseBanned(ex.id);
         const sub = sessionLabel
             ? `<div style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono'; margin-top:2px;">${sessionLabel}</div>`
-            : '';
+            : (String(ex.domain || '').toLowerCase() === 'power' || String(ex.domain || '').toLowerCase() === 'cardio'
+                ? `<div style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono'; margin-top:2px;">${ex.domain === 'power' ? 'Power' : 'Cardio'}</div>`
+                : '');
         return `
         <div class="inventory-row${banned ? ' is-banned' : ''}" data-exercise-id="${idAttr}" style="cursor:pointer;">
             <div class="inventory-main">
@@ -808,9 +821,6 @@ export async function loadExercises() {
             </div>
             <div class="inventory-actions">
                 <button type="button" class="btn-ban-item${banned ? ' is-banned' : ''}" data-exercise-id="${idAttr}" title="${banned ? 'Unban exercise' : 'Ban exercise'}" aria-label="${banned ? 'Unban exercise' : 'Ban exercise'}">${banned ? 'Unban' : 'Ban'}</button>
-                <button type="button" class="btn-edit-exercise" data-exercise-id="${idAttr}" title="Edit exercise" aria-label="Edit exercise" style="background:rgba(255,255,255,0.04); color:var(--text-main); border:1px solid var(--border-highlight); border-radius:8px; font-size:14px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; flex-shrink:0; -webkit-tap-highlight-color:transparent;">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                </button>
             </div>
         </div>`;
     };
@@ -842,20 +852,15 @@ export async function loadExercises() {
         if (!list._exerciseActionsBound) {
             list._exerciseActionsBound = true;
             list.addEventListener('click', (e) => {
-                const editBtn = e.target.closest('.btn-edit-exercise');
                 const banBtn = e.target.closest('.btn-ban-item');
                 const row = e.target.closest('.inventory-row[data-exercise-id]');
-                if (editBtn || banBtn) {
+                if (banBtn) {
                     e.preventDefault();
                     e.stopPropagation();
-                    const id = (editBtn || banBtn).getAttribute('data-exercise-id');
+                    const id = banBtn.getAttribute('data-exercise-id');
                     if (id == null || id === '') return;
-                    if (banBtn) {
-                        toggleExerciseBan(id);
-                        loadExercises();
-                        return;
-                    }
-                    editExercise(id);
+                    toggleExerciseBan(id);
+                    loadExercises();
                     return;
                 }
                 if (row) {
