@@ -83,7 +83,7 @@ function escapeHtml(s) {
 
 function buildTopicAccordionHtml(topic) {
     const panelBody = topic.kind === 'rpe'
-        ? buildRpeScaleHtml()
+        ? `<p style="margin:12px 0 8px; font-size:13px; color:var(--text-silver); line-height:1.55;">${escapeHtml(topic.intro || '')}</p>${buildRpeScaleHtml()}`
         : `<p style="margin:12px 0 4px; font-size:13px; color:var(--text-silver); line-height:1.55;">${escapeHtml(topic.body)}</p>`;
     return `
         <div class="card grocery-aisle-card rpe-guidance-card" style="margin-bottom:12px;">
@@ -117,10 +117,5 @@ export function toggleRpeGuidanceSection() {
 export function renderRpeGuidancePanel() {
     const host = document.getElementById('rpe-guidance-content');
     if (!host) return;
-    const intro = GUIDANCE_TOPICS.find(t => t.id === 'rpe')?.intro || '';
-    host.innerHTML = `
-        <p style="margin:0 0 16px; font-size:13px; color:var(--text-silver); line-height:1.5;">
-            ${escapeHtml(intro)}
-        </p>
-        ${GUIDANCE_TOPICS.map(buildTopicAccordionHtml).join('')}`;
+    host.innerHTML = GUIDANCE_TOPICS.map(buildTopicAccordionHtml).join('');
 }

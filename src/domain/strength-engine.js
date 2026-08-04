@@ -2,6 +2,7 @@ import { store } from '../state/store.js';
 import { buildWeeklyTrainingPlan, getMondayISO, isStrengthEvent } from './route-planner.js';
 import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, SPORT_MATRIX } from './sports-matrix.js';
 import { isHypertrophyPhase } from './hypertrophy-engine.js';
+import { buildStrengthMetaMap } from './exercise-catalog.js';
 import { loadExercises } from '../ui/fuel.js';
 
 // --- STRENGTH ENGINE: movement pools, weights, Session A/B, monthly rotation ---
@@ -9,89 +10,42 @@ import { loadExercises } from '../ui/fuel.js';
 // upper push 1:4:1 | lower pull 4:1:1:1 | upper pull 2:2:2:1 | core 4:1
 export const STRENGTH_MOVEMENT_POOLS = {
     flexion_bilateral: [
-        { n: 'Back Squat', w: 4 }, { n: 'Front Squat', w: 1 },
-        { n: 'Wide Squat', w: 1 }, { n: 'Safety Bar Squat', w: 1 }
+        { n: 'Squat', w: 4 }, { n: 'Front Squat', w: 1 },
+        { n: 'Sumo Squat', w: 1 }, { n: 'Goblet Squat', w: 1 }
     ],
     flexion_unilateral: [
-        { n: 'Bulgarian Split Squat', w: 1 }, { n: 'Split Squat', w: 3 }
+        { n: 'Bulgarian Squat', w: 1 }, { n: 'Split Squat', w: 3 }
     ],
     hinge: [
         { n: 'Deadlift', w: 8 }, { n: 'Single Leg Deadlift', w: 1 },
-        { n: 'Trap Bar Deadlift', w: 1 }, { n: 'Romanian Deadlift', w: 1 }
+        { n: 'Rack Deadlift', w: 1 }, { n: 'Romanian Deadlift', w: 1 }
     ],
     lower_push: [
-        { n: 'Bench Press', w: 2 }, { n: 'DB Bench Press', w: 1 },
-        { n: 'Neutral DB Bench Press', w: 1 }, { n: 'Dips', w: 4 },
+        { n: 'Bench Press', w: 2 }, { n: 'Dumbbell Bench Press', w: 1 },
+        { n: 'Neutral Bench Press', w: 1 }, { n: 'Dip', w: 4 },
         { n: 'Decline Bench Press', w: 1 }
     ],
     upper_push: [
-        { n: 'Seated DB Press', w: 1 }, { n: 'Military Press', w: 4 },
-        { n: 'Seated Military Press', w: 1 }
+        { n: 'Seated Dumbbell Shoulder Press', w: 1 }, { n: 'Barbell Military Press', w: 4 },
+        { n: 'Machine Overhead Press', w: 1 }
     ],
     lower_pull: [
-        { n: 'Barbell Row', w: 4 }, { n: 'Single Arm DB Row', w: 1 },
-        { n: 'Chest-Supported Row', w: 1 },
-        { n: 'Cable Row (Underhand)', w: 1 },
-        { n: 'Cable Row (Overhand)', w: 1 },
-        { n: 'Cable Row (Neutral)', w: 1 }
+        { n: 'Overhand Barbell Row', w: 4 }, { n: 'Dumbbell Row', w: 1 },
+        { n: 'Neutral Cable Row', w: 1 },
+        { n: 'Underhand Cable Row', w: 1 },
+        { n: 'Overhand Cable Row', w: 1 }
     ],
     upper_pull: [
-        { n: 'Pull Ups', w: 2 }, { n: 'Chin Ups', w: 2 },
-        { n: 'Neutral Chin Ups', w: 2 }, { n: 'Lat Pulldown', w: 1 }
+        { n: 'Pull Up', w: 2 }, { n: 'Chin Up', w: 2 },
+        { n: 'Neutral Pull Up', w: 2 }, { n: 'Lat Machine Pull', w: 1 }
     ],
     core: [
-        { n: 'Sidesit', w: 4 }, { n: 'Back Extension', w: 1 }
+        { n: 'Side-sit on Hyperextension Bench', w: 4 }, { n: 'Hyperextension', w: 1 }
     ]
 };
 
-// Display metadata for My Exercises (domain / movement / laterality)
-export const STRENGTH_EXERCISE_META = {
-    'Back Squat': { domain: 'strength', movement: 'flexion', laterality: 'Bilateral', muscle_group: 'quad' },
-    'Front Squat': { domain: 'strength', movement: 'flexion', laterality: 'Bilateral', muscle_group: 'quad' },
-    'Wide Squat': { domain: 'strength', movement: 'flexion', laterality: 'Bilateral', muscle_group: 'quad' },
-    'Safety Bar Squat': { domain: 'strength', movement: 'flexion', laterality: 'Bilateral', muscle_group: 'quad' },
-    'Bulgarian Split Squat': { domain: 'strength', movement: 'flexion', laterality: 'Unilateral', muscle_group: 'quad' },
-    'Split Squat': { domain: 'strength', movement: 'flexion', laterality: 'Unilateral', muscle_group: 'quad' },
-    'Deadlift': { domain: 'strength', movement: 'hinge', laterality: 'Bilateral', muscle_group: 'hamstrings' },
-    'Single Leg Deadlift': { domain: 'strength', movement: 'hinge', laterality: 'Unilateral', muscle_group: 'hamstrings' },
-    'Trap Bar Deadlift': { domain: 'strength', movement: 'hinge', laterality: 'Bilateral', muscle_group: 'hamstrings' },
-    'Romanian Deadlift': { domain: 'strength', movement: 'hinge', laterality: 'Bilateral', muscle_group: 'hamstrings' },
-    // Push: laterality replaced by dumbbell yes/no | Pull: laterality replaced by grip
-    'Bench Press': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: false, grip: '', muscle_group: 'lower_chest' },
-    'DB Bench Press': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: true, grip: '', muscle_group: 'lower_chest' },
-    'Neutral DB Bench Press': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: true, grip: 'neutral', muscle_group: 'lower_chest' },
-    'Dips': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: false, grip: '', muscle_group: 'lower_chest' },
-    'Decline Bench Press': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: false, grip: '', muscle_group: 'lower_chest' },
-    'Seated DB Press': { domain: 'strength', movement: 'vertical push', laterality: '', dumbbell: true, grip: '', muscle_group: 'shoulders' },
-    'Military Press': { domain: 'strength', movement: 'vertical push', laterality: '', dumbbell: false, grip: '', muscle_group: 'shoulders' },
-    'Seated Military Press': { domain: 'strength', movement: 'vertical push', laterality: '', dumbbell: false, grip: '', muscle_group: 'shoulders' },
-    'Barbell Row': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'overhand', muscle_group: 'lats' },
-    'Single Arm DB Row': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: true, grip: 'neutral', muscle_group: 'lats' },
-    'Chest-Supported Row': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'neutral', muscle_group: 'lats' },
-    'Cable Row (Underhand)': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'underhand', muscle_group: 'lats' },
-    'Cable Row (Overhand)': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'overhand', muscle_group: 'lats' },
-    'Cable Row (Neutral)': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'neutral', muscle_group: 'lats' },
-    'Pull Ups': { domain: 'strength', movement: 'vertical pull', laterality: '', dumbbell: false, grip: 'overhand', muscle_group: 'lats' },
-    'Chin Ups': { domain: 'strength', movement: 'vertical pull', laterality: '', dumbbell: false, grip: 'underhand', muscle_group: 'lats' },
-    'Neutral Chin Ups': { domain: 'strength', movement: 'vertical pull', laterality: '', dumbbell: false, grip: 'neutral', muscle_group: 'lats' },
-    'Lat Pulldown': { domain: 'strength', movement: 'vertical pull', laterality: '', dumbbell: false, grip: 'overhand', muscle_group: 'lats' },
-    'Sidesit': { domain: 'strength', movement: 'core', laterality: '', muscle_group: 'ql' },
-    'Back Extension': { domain: 'strength', movement: 'core', laterality: '', muscle_group: 'core' },
-    // Hypertrophy isolations
-    'Bicep Curls': { domain: 'lifting', movement: 'bicep isolation', laterality: '', muscle_group: 'biceps' },
-    'French Press': { domain: 'lifting', movement: 'tricep isolation', laterality: '', muscle_group: 'triceps' },
-    'Calf Raises': { domain: 'lifting', movement: 'calf isolation', laterality: 'Bilateral', muscle_group: 'calves' },
-    'Adductor Machine': { domain: 'lifting', movement: 'groin isolation', laterality: '', muscle_group: 'groin' },
-    'Abductor Machine': { domain: 'lifting', movement: 'abductor isolation', laterality: '', muscle_group: 'glute' },
-    'Quad Extension': { domain: 'lifting', movement: 'quad isolation', laterality: '', muscle_group: 'quad' },
-    'Hamstring Curl': { domain: 'lifting', movement: 'hamstring isolation', laterality: '', muscle_group: 'hamstrings' },
-    'Reverse Flyes': { domain: 'lifting', movement: 'rear delt isolation', laterality: '', muscle_group: 'shoulders' },
-    'Front Raises': { domain: 'lifting', movement: 'front delt isolation', laterality: '', muscle_group: 'shoulders' },
-    'Lateral Raises': { domain: 'lifting', movement: 'side delt isolation', laterality: '', muscle_group: 'shoulders' },
-    'Flexion': { domain: 'lifting', movement: 'grip isolation', laterality: '', muscle_group: 'forearm' },
-    'Shrugs': { domain: 'lifting', movement: 'upper trap isolation', laterality: 'Bilateral', muscle_group: 'traps' },
-    'Pec Flyes': { domain: 'lifting', movement: 'pec isolation', laterality: '', muscle_group: 'lower_chest' }
-};
+// Display / migration metadata (from filming template catalog)
+export const STRENGTH_EXERCISE_META = buildStrengthMetaMap();
 
 // Session A: hinge + upper push + lower pull + unilateral flexion
 // Session B: bilateral flexion + upper pull + lower push + core
@@ -130,9 +84,9 @@ export function pickStrengthPoolExercise(poolId, overrides = {}) {
     const options = (STRENGTH_MOVEMENT_POOLS[poolId] || []).map(o => ({ ...o }));
     if (!options.length) return 'Unknown';
 
-    if (poolId === 'upper_push' && overrides.shoulderRisk) return 'Seated DB Press';
-    if (poolId === 'lower_pull' && overrides.armImbalance) return 'Single Arm DB Row';
-    if (poolId === 'upper_pull' && overrides.noPullups) return 'Lat Pulldown';
+    if (poolId === 'upper_push' && overrides.shoulderRisk) return 'Seated Dumbbell Shoulder Press';
+    if (poolId === 'lower_pull' && overrides.armImbalance) return 'Dumbbell Row';
+    if (poolId === 'upper_pull' && overrides.noPullups) return 'Lat Machine Pull';
 
     const month = getStrengthMonthKey();
     let store = {};
@@ -303,7 +257,7 @@ export function buildAuxiliaryExerciseList(sportData) {
     if (sportData && sportData.groin) items.push({ name: dict.groin[0], isAux: true });
     if (sportData && sportData.elbow) items.push({ name: dict.elbow[0], isAux: true });
     if (sportData && sportData.lower_back) {
-        items.push({ name: band ? 'Band Side Plank Row' : 'Sidesit', isAux: true });
+        items.push({ name: band ? 'Band Side Plank Row' : 'Side-sit on Hyperextension Bench', isAux: true });
     }
     items.push(
         { name: dict.rotator_cuff[0], isAux: true },
@@ -356,17 +310,52 @@ export function getAttachedAuxForStrengthDay(dateStr, sportData) {
 }
 
 export async function migrateStrengthExerciseLabels() {
-    // v5: push/pull criteria + hypertrophy isolations + cable row grip split
-    if (localStorage.getItem('ascensus_strength_label_v5') === 'done') return;
+    // v6: filming-template exercise catalog (25/07/2026)
+    if (localStorage.getItem('ascensus_strength_label_v6') === 'done') return;
     try {
         if (!store.supabaseClient) return;
         const { data: existing, error } = await store.supabaseClient.from('exercise_inventory').select('id, name, domain, muscle_group');
         if (error) throw error;
 
         const norm = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
-        const aliases = { 'side sit': 'Sidesit' };
+        const aliases = {
+            'side sit': 'Side-sit on Hyperextension Bench',
+            'sidesit': 'Side-sit on Hyperextension Bench',
+            'back squat': 'Squat',
+            'wide squat': 'Sumo Squat',
+            'bulgarian split squat': 'Bulgarian Squat',
+            'trap bar deadlift': 'Rack Deadlift',
+            'db bench press': 'Dumbbell Bench Press',
+            'neutral db bench press': 'Neutral Bench Press',
+            'dips': 'Dip',
+            'seated db press': 'Seated Dumbbell Shoulder Press',
+            'military press': 'Barbell Military Press',
+            'seated military press': 'Machine Overhead Press',
+            'barbell row': 'Overhand Barbell Row',
+            'single arm db row': 'Dumbbell Row',
+            'chest-supported row': 'Neutral Cable Row',
+            'cable row (underhand)': 'Underhand Cable Row',
+            'cable row (overhand)': 'Overhand Cable Row',
+            'cable row (neutral)': 'Neutral Cable Row',
+            'cable row': 'Overhand Cable Row',
+            'pull ups': 'Pull Up',
+            'chin ups': 'Chin Up',
+            'neutral chin ups': 'Neutral Pull Up',
+            'lat pulldown': 'Lat Machine Pull',
+            'back extension': 'Hyperextension',
+            'bicep curls': 'Dumbbell Curl',
+            'french press': 'Cable French Press',
+            'calf raises': 'Calf Raise Machine',
+            'quad extension': 'Leg Extension',
+            'hamstring curl': 'Seated Hamstring Curl',
+            'hamstring curls': 'Seated Hamstring Curl',
+            'reverse flyes': 'Bent Over Rear Flye',
+            'front raises': 'Standing Dumbbell Front Raise',
+            'lateral raises': 'Lateral Raise',
+            'pec flyes': 'Flye',
+            'db pullovers': 'Pullover'
+        };
 
-        // Rename legacy aliases first
         for (const ex of (existing || [])) {
             const aliasTarget = aliases[norm(ex.name)];
             if (aliasTarget && ex.name !== aliasTarget) {
@@ -374,21 +363,17 @@ export async function migrateStrengthExerciseLabels() {
                 if (targetExists) {
                     await store.supabaseClient.from('exercise_inventory').delete().eq('id', ex.id);
                 } else {
+                    const meta = STRENGTH_EXERCISE_META[aliasTarget] || {};
                     await store.supabaseClient.from('exercise_inventory')
-                        .update({ name: aliasTarget, domain: 'strength', muscle_group: 'ql' })
+                        .update({
+                            name: aliasTarget,
+                            domain: meta.domain || ex.domain,
+                            muscle_group: meta.muscle_group || ex.muscle_group
+                        })
                         .eq('id', ex.id);
                     ex.name = aliasTarget;
                 }
             }
-        }
-
-        // Split legacy "Cable Row" into three grip variants
-        const cableLegacy = (existing || []).find(e => norm(e.name) === 'cable row');
-        if (cableLegacy) {
-            await store.supabaseClient.from('exercise_inventory')
-                .update({ name: 'Cable Row (Overhand)', domain: 'strength', muscle_group: 'lats' })
-                .eq('id', cableLegacy.id);
-            cableLegacy.name = 'Cable Row (Overhand)';
         }
 
         const { data: afterAlias } = await store.supabaseClient.from('exercise_inventory').select('id, name, domain, muscle_group');
@@ -421,6 +406,7 @@ export async function migrateStrengthExerciseLabels() {
 
         await dedupeExerciseInventory();
 
+        localStorage.setItem('ascensus_strength_label_v6', 'done');
         localStorage.setItem('ascensus_strength_label_v5', 'done');
         localStorage.setItem('ascensus_strength_label_v4', 'done');
         localStorage.setItem('ascensus_strength_label_v3', 'done');

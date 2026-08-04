@@ -6,10 +6,10 @@ import { dateToISO, getLactateSlotForDate, isLactateEvent, isLiftingEvent, isSte
 import { SPORT_MATRIX } from './sports-matrix.js';
 import { buildAuxiliaryExerciseList, buildStrengthSessionRoutine, getAttachedAuxForStrengthDay, getGymPlanPrefs, isStrengthFocus } from './strength-engine.js';
 import {
-    buildHypertrophySessionRoutine,
     buildHypertrophyWarmupSets,
     equipmentForExercise,
     getDumbbellIncrement,
+    getHypertrophySessionRoutine,
     isHypertrophyFocus,
     isHypertrophyPhase,
     progressHypertrophyWeight,
@@ -42,6 +42,11 @@ export function addSetToExercise(exIdx) {
     if (exItem.isLactateHit || (exItem.sets || []).some(s => s.isLactateHit)) return;
     if (domain === 'cardio' && !/sprint|lactate|interval|30s\s*on/i.test(name)) return;
     if (/static\s*stretch/i.test(name)) return;
+    // Hypertrophy protocol is fixed at 3 working sets
+    if (isHypertrophyPhase()) {
+        const workCount = (exItem.sets || []).filter(s => !s.isWarmup && !s.isText && !s.isDropSet).length;
+        if (workCount >= 3) return;
+    }
     const lastSet = exItem.sets[exItem.sets.length - 1] || { weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2 };
     exItem.sets.push({ ...lastSet, completed: false, isDropSet: false }); 
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
@@ -154,7 +159,18 @@ export async function generateWorkoutTemplate() {
         if (!raw) return '';
         return String(raw).includes('T') ? String(raw).split('T')[0] : String(raw).slice(0, 10);
     };
-    const EX_ALIASES = { 'Side Sit': 'Sidesit' };
+    const EX_ALIASES = {
+        'Side Sit': 'Side-sit on Hyperextension Bench',
+        'Sidesit': 'Side-sit on Hyperextension Bench',
+        'Back Squat': 'Squat',
+        'DB Bench Press': 'Dumbbell Bench Press',
+        'Dips': 'Dip',
+        'Pull Ups': 'Pull Up',
+        'Chin Ups': 'Chin Up',
+        'Lat Pulldown': 'Lat Machine Pull',
+        'Military Press': 'Barbell Military Press',
+        'Seated DB Press': 'Seated Dumbbell Shoulder Press'
+    };
     const getEx = (exName) => {
         const lookup = EX_ALIASES[exName] || exName;
         // Prefer non-banned catalogue matches for auto plans; fall back to banned/TMP so the slot still resolves
@@ -225,8 +241,8 @@ export async function generateWorkoutTemplate() {
     const useHypertrophy = isHypertrophyFocus(focus)
         || (isHypertrophyPhase(phaseStr) && (isStrengthFocus(focus) || focus === 'Full Body / Strength'));
     if (useHypertrophy) {
-        // Hypertrophy is default programming — also remaps leftover Strength labels
-        const built = buildHypertrophySessionRoutine(focus);
+        // Stable day plan — same exercises until date / prefs / session kind change
+        const built = getHypertrophySessionRoutine(focus);
         window.currentHypertrophySession = built;
         window.currentStrengthSession = null;
         built.items.forEach(item => mainRoutine.push(item));
@@ -278,8 +294,8 @@ export async function generateWorkoutTemplate() {
                 types: sel?.types || ['treadmill_sprints'],
                 slot,
                 date: new Date(),
-                desiredRpe: sel?.desiredRpe || 8,
-                sessionRpe: sel?.sessionRpe || sel?.desiredRpe || 8
+                desiredRpe: sel?.desiredRpe || 7,
+                sessionRpe: sel?.sessionRpe || sel?.desiredRpe || 7
             });
 
         if (plan.isHitClass) {
@@ -399,11 +415,26 @@ export async function generateWorkoutTemplate() {
         const eqType = equipmentForExercise(exObj.name);
         let itemNoteExtra = '';
 
-        // First hypertrophy session: prompt for known load or 10@5 RIR finder
+        // First time THIS exact exercise name is logged — ask for work weight / 10@5 RIR finder
         let needsWeightFind = false;
-        if (useHypertrophy && !latestLog && !item.isText && !isCardioEx) {
-            needsWeightFind = true;
-            itemNoteExtra = ' First session: we will ask if you know your work weight. If not, find a load for 10 reps with 5 RIR — work weight starts 10% heavier.';
+        if (useHypertrophy && !item.isText && !isCardioEx) {
+            const exName = String(exObj.name || '').toLowerCase();
+            const hasHist = (hist || []).some(l => String(l.exercise || '').toLowerCase() === exName && Number(l.weight_kg) > 0);
+            let hasLocal = false;
+            try {
+                const grouped = store.globalGroupedHistory || {};
+                for (const day of Object.values(grouped)) {
+                    const rows = day?.items || [];
+                    if (rows.some(l => String(l.exercise || '').toLowerCase() === exName && Number(l.weight_kg) > 0)) {
+                        hasLocal = true;
+                        break;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            if (!hasHist && !hasLocal && !latestLog) {
+                needsWeightFind = true;
+                itemNoteExtra = ' First time on this exercise: we will ask for your work weight (or help you find 10 reps @ 5 RIR).';
+            }
         }
 
         // REPAIR MODE THROTTLING
@@ -539,6 +570,7 @@ export async function generateWorkoutTemplate() {
             isIsolation: !!item.isIsolation,
             role: item.role || null,
             isLactateHit: !!item.isLactateHit,
+            lactateRows: item.lactateRows || null,
             needsWeightFind: !!needsWeightFind,
             weightFinderResolved: false
         });
@@ -558,7 +590,7 @@ export async function generateWorkoutTemplate() {
                 <div style="font-size: 12px; color:#D4AF37; font-weight:800; text-transform:uppercase;">${item.exercise.name}</div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     ${(!item.isWarmupGroup) ? `<button type="button" onclick="openVideoModal('${String(item.exercise.name).replace(/'/g, "\\'")}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:4px 8px; border-radius:4px; color:var(--text-silver); font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">🎥 FORM</button>` : ''}
-                    ${(!item.isWarmupGroup && item.sets && item.sets.length && !item.sets[0].isText && (item.exercise.domain || '').toLowerCase() !== 'cardio') ? `<div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:700; white-space:nowrap;">${item.sets.length} SETS</div>` : ''}
+                    ${(!item.isWarmupGroup && item.sets && item.sets.length && !item.sets[0].isText && (item.exercise.domain || '').toLowerCase() !== 'cardio') ? `<div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:700; white-space:nowrap;">${(typeof item.plannedSets === 'number' ? item.plannedSets : item.sets.filter(s => !s.isWarmup).length)} SETS</div>` : ''}
                     ${(!item.isWarmupGroup && (item.exercise.domain || '').toLowerCase() === 'cardio' && item.sets?.[0]) ? `<div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:700; white-space:nowrap;">TIMER</div>` : ''}
                 </div>
             </div>`;

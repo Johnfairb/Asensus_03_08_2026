@@ -43,13 +43,13 @@ function renderKnowWeightQuestion(exIdx) {
     body.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <div>
-                <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">First time</div>
+                <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">First time on this exercise</div>
                 <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">Do you know what weight to use for ${escapeHtml(name)}?</div>
             </div>
             <button type="button" onclick="dismissWeightFinder()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
         <p style="font-size:13px; color:var(--text-silver); line-height:1.5; margin:0 0 18px;">
-            This is your first logged session on this lift. We can set the hypertrophy work weight from what you already know, or help you find a starting load.
+            You haven't logged this exercise before. Set a work weight now (before logging sets), or find a starting load with 10 reps @ 5 RIR.
         </p>
         <div style="display:flex; flex-direction:column; gap:8px;">
             <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="confirmWeightFinderKnowsYes()">Yes — I know the weight</button>
@@ -153,8 +153,10 @@ function refreshSetsUi() {
     } catch (e) { /* ignore */ }
 }
 
-/** Open prompt when opening sets for a first-time hypertrophy lift. */
-export function maybePromptWeightFinder(exIdx) {
+let _openLogAfterFinder = false;
+
+/** Open prompt before the sets log for a first-time lift (this exercise name). */
+export function maybePromptWeightFinder(exIdx, opts = {}) {
     const item = store.activeLog?.items?.[exIdx];
     if (!item || item.weightFinderResolved || !item.needsWeightFind) return false;
     if (item.isWarmupGroup || item.isLactateHit) return false;
@@ -162,6 +164,7 @@ export function maybePromptWeightFinder(exIdx) {
     if (domain === 'cardio' || domain === 'warmup') return false;
     if (_finderOpen) return true;
 
+    _openLogAfterFinder = !!opts.openLogAfter;
     _finderExIdx = exIdx;
     const sheet = ensureWeightFinderSheet();
     renderKnowWeightQuestion(exIdx);
@@ -197,8 +200,7 @@ export function submitKnownWorkWeight() {
         showError('Could not apply that weight.');
         return;
     }
-    dismissWeightFinder();
-    refreshSetsUi();
+    finishWeightFinderAndMaybeOpenLog();
 }
 
 export function submitFinderWorkWeight() {
@@ -220,8 +222,17 @@ export function submitFinderWorkWeight() {
         return;
     }
     item.finderWeightKg = finder;
+    finishWeightFinderAndMaybeOpenLog();
+}
+
+function finishWeightFinderAndMaybeOpenLog() {
+    const exIdx = _finderExIdx;
+    const openAfter = _openLogAfterFinder;
     dismissWeightFinder();
     refreshSetsUi();
+    if (openAfter && exIdx != null && typeof window.openExerciseSetsModal === 'function') {
+        window.openExerciseSetsModal(exIdx);
+    }
 }
 
 export function dismissWeightFinder() {
@@ -229,4 +240,5 @@ export function dismissWeightFinder() {
     if (sheet) sheet.classList.add('hidden');
     _finderOpen = false;
     _finderExIdx = null;
+    _openLogAfterFinder = false;
 }

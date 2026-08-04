@@ -1,7 +1,12 @@
 import { store } from '../state/store.js';
 import { generateDailyMealPlan } from '../domain/meal-planner.js';
 import { STRENGTH_EXERCISE_META } from '../domain/strength-engine.js';
-import { getExerciseCriteriaLabel, HYPERTROPHY_EXERCISE_META } from '../domain/hypertrophy-engine.js';
+import {
+    formatMuscleList,
+    getExerciseMeta,
+    getExerciseSessionLabel,
+    resolveCatalogName
+} from '../domain/exercise-catalog.js';
 import { generateGroceryList } from '../domain/grocery.js';
 import {
   isExerciseBanned,
@@ -522,26 +527,66 @@ export function openExerciseDetail(id) {
     if (!ex) return;
     _libraryDetailKind = 'exercise';
     _libraryDetailId = String(id);
-    const norm = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
-    const metaKey = Object.keys(STRENGTH_EXERCISE_META).find(n => norm(n) === norm(ex.name))
-        || Object.keys(HYPERTROPHY_EXERCISE_META).find(n => norm(n) === norm(ex.name));
-    const meta = metaKey
-        ? (STRENGTH_EXERCISE_META[metaKey] || HYPERTROPHY_EXERCISE_META[metaKey])
-        : null;
-    const displayName = metaKey || ex.name;
-    const domain = meta ? meta.domain : (ex.domain || '—');
-    const movement = meta ? meta.movement : (ex.muscle_group || '—');
-    const criteria = getExerciseCriteriaLabel(displayName);
-    const criteriaLabel = criteria?.criteria || 'Laterality';
-    const criteriaValue = criteria?.value || meta?.laterality || '—';
+
+    const catalog = getExerciseMeta(ex.name);
+    const displayName = catalog?.name || resolveCatalogName(ex.name) || ex.name;
+    const sessionLabel = getExerciseSessionLabel(displayName);
+    const primary = formatMuscleList(catalog?.primary);
+    const secondary = formatMuscleList(catalog?.secondary);
+
     document.getElementById('library-detail-title').textContent = displayName || 'Exercise';
-    document.getElementById('library-detail-subtitle').textContent = 'Library exercise';
-    document.getElementById('library-detail-body').innerHTML = [
-        libraryDetailRow('Domain', String(domain)),
-        libraryDetailRow('Movement', String(movement)),
-        libraryDetailRow(criteriaLabel, String(criteriaValue)),
-        libraryDetailRow('Status', isExerciseBanned(id) ? 'Banned' : 'Allowed'),
-    ].join('');
+    document.getElementById('library-detail-subtitle').textContent = sessionLabel
+        ? sessionLabel
+        : (ex.domain === 'cardio' ? 'Cardio' : ex.domain === 'power' ? 'Power' : 'Library exercise');
+
+    const videoPlaceholder = (label) => `
+        <div style="margin-top:8px; border:1px dashed var(--border-highlight); border-radius:10px; background:var(--bg-surface-elevated); min-height:120px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-family:'Roboto Mono'; font-size:10px; letter-spacing:0.4px; text-transform:uppercase;">
+            ${label}
+        </div>`;
+
+    const learningPoints = [1, 2, 3].map((n) => `
+        <button type="button" class="detail-metric-row" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:10px; padding:12px; color:inherit;" onclick="this.nextElementSibling?.classList.toggle('hidden')">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+                <span class="hud-label" style="margin:0;">Learning point ${n}</span>
+                <span style="font-family:'Roboto Mono'; font-size:10px; color:var(--text-stealth);">Video</span>
+            </div>
+        </button>
+        <div class="hidden" style="margin:-2px 0 8px 0;">${videoPlaceholder('Learning point video placeholder')}</div>
+    `).join('');
+
+    const bodyParts = [];
+    if (catalog) {
+        bodyParts.push(`
+            <div class="detail-metric-row">
+                <div class="hud-label" style="margin:0 0 6px 0;">Primary muscle groups</div>
+                <div style="font-family:'Roboto Mono'; font-size:12px; color:var(--text-main); line-height:1.45;">${primary}</div>
+            </div>`);
+        bodyParts.push(`
+            <div class="detail-metric-row">
+                <div class="hud-label" style="margin:0 0 6px 0;">Secondary muscle groups</div>
+                <div style="font-family:'Roboto Mono'; font-size:12px; color:var(--text-silver); line-height:1.45;">${secondary}</div>
+            </div>`);
+        bodyParts.push(`
+            <div class="detail-metric-row">
+                <div class="hud-label" style="margin:0 0 6px 0;">Form video</div>
+                ${videoPlaceholder('Form video placeholder')}
+            </div>`);
+        bodyParts.push(`
+            <div class="detail-metric-row">
+                <div class="hud-label" style="margin:0 0 8px 0;">Learning points</div>
+                <div style="display:flex; flex-direction:column; gap:8px;">${learningPoints}</div>
+            </div>`);
+        bodyParts.push(`
+            <div class="detail-metric-row">
+                <div class="hud-label" style="margin:0 0 6px 0;">Teaching points</div>
+                <div style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-stealth); min-height:28px;"></div>
+            </div>`);
+        bodyParts.push(libraryDetailRow('Status', isExerciseBanned(id) ? 'Banned' : 'Allowed'));
+    } else {
+        bodyParts.push(libraryDetailRow('Status', isExerciseBanned(id) ? 'Banned' : 'Allowed'));
+    }
+
+    document.getElementById('library-detail-body').innerHTML = bodyParts.join('');
     syncLibraryBanButton();
     document.getElementById('library-detail-sheet')?.classList.remove('hidden');
 }
@@ -743,18 +788,23 @@ export async function loadExercises() {
         .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
     const buildExerciseRow = (ex) => {
-        const metaKey = Object.keys(STRENGTH_EXERCISE_META).find(n => norm(n) === norm(ex.name));
-        const displayName = metaKey || ex.name;
+        const catalog = getExerciseMeta(ex.name);
+        const displayName = catalog?.name || resolveCatalogName(ex.name) || ex.name;
+        const sessionLabel = getExerciseSessionLabel(displayName);
         const idAttr = String(ex.id)
             .replace(/&/g, '&amp;')
             .replace(/"/g, '&quot;')
             .replace(/</g, '&lt;');
         const safeName = String(displayName || '').replace(/</g, '&lt;');
         const banned = isExerciseBanned(ex.id);
+        const sub = sessionLabel
+            ? `<div style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono'; margin-top:2px;">${sessionLabel}</div>`
+            : '';
         return `
         <div class="inventory-row${banned ? ' is-banned' : ''}" data-exercise-id="${idAttr}" style="cursor:pointer;">
             <div class="inventory-main">
                 <div style="font-size:12px; color:var(--text-main); font-weight:600; margin-bottom:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeName}</div>
+                ${sub}
             </div>
             <div class="inventory-actions">
                 <button type="button" class="btn-ban-item${banned ? ' is-banned' : ''}" data-exercise-id="${idAttr}" title="${banned ? 'Unban exercise' : 'Ban exercise'}" aria-label="${banned ? 'Unban exercise' : 'Ban exercise'}">${banned ? 'Unban' : 'Ban'}</button>

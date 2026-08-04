@@ -4,13 +4,13 @@ import { resolveSessionRpe } from '../domain/sleep-rpe.js';
 import { calculateLiveFitnessScores, generateDailyExerciseLog, getSeasonPhase, getTodayFocus, getWeeklyCoachTip, getWorkoutSessionAdvice, isGuidanceOff } from '../domain/fitness-hud.js';
 import { applyInjuryPainFollowUpFromJournal, injuryAreaLabel, needsInjuryPainFollowUp } from '../domain/periodization.js';
 import { HIT_TYPE_OPTIONS, resolveHitClassRecovery } from '../domain/lactate-engine.js';
-
-const HIT_TYPE_LABELS_RE = new RegExp(
-    HIT_TYPE_OPTIONS.map(o => o.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
-    'i'
-);
 import { commitMatchSession, commitPracticeSession, dateToISO, generateFutureTimeline, getWorkoutSessionSnapshot, invalidateWeekPlanCache, isAuxEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isSteadyCardio, isStrengthEvent, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, setRouteOverride, addDaysISO } from '../domain/route-planner.js';
 import { lactateSessionRpeBarHtml, openLactateHitPicker, shouldPromptLactateHitTypes } from './lactate-ui.js';
+
+const HIT_TYPE_LABELS_RE = new RegExp(
+    (HIT_TYPE_OPTIONS || []).map(o => String(o.label || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).filter(Boolean).join('|') || 'HIT class',
+    'i'
+);
 import { applyDailyModifiers, saveSettings } from '../domain/thermodynamics.js';
 import { addDropSetToExercise, addExerciseToActiveLog, addSetToExercise, addSupersetWithNext } from '../domain/workout-generator.js';
 import { applyHypertrophyFatigueFromSession, hypertrophyRestSeconds, isHypertrophyPhase } from '../domain/hypertrophy-engine.js';
@@ -19,10 +19,14 @@ import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry } from './journey.js';
 import { notifyRestTimerDone } from './notifications.js';
-import { addFoodToActiveLog, loadGhostTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderActiveLog, switchLogType, updateSaveTemplateButtonLabel } from './templates.js';
+import { addFoodToActiveLog, loadGhostTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderActiveLog, setConfirmRouteButtons, switchLogType, updateExecutionAuxBlocks, updateSaveTemplateButtonLabel } from './templates.js';
 import {
     clearWorkoutDraft,
+    draftMatchesPlanEvent,
+    getDraftSessionLabel,
     hasWorkoutDraft,
+    hasWorkoutDraftKey,
+    loadWorkoutDraft,
     saveWorkoutDraft
 } from '../domain/workout-draft.js';
 import {
@@ -164,19 +168,33 @@ export function renderWorkoutLog() {
     // Lactate/HIT: live session RPE adjuster at top of the workout log
     html += lactateSessionRpeBarHtml();
 
+    const filter = window._workoutLogFilter === 'logged' ? 'logged' : 'todo';
+    const todoCount = (store.activeLog.items || []).filter((item, i) => !isWorkoutItemFullyLogged(item)).length;
+    const loggedCount = (store.activeLog.items || []).filter((item) => isWorkoutItemFullyLogged(item)).length;
+    html += `<div style="display:flex; gap:8px; margin-bottom:14px;">
+        <button type="button" onclick="setWorkoutLogFilter('todo')" style="flex:1; padding:10px; border-radius:8px; border:1px solid ${filter === 'todo' ? 'var(--gold-accent)' : 'var(--border-highlight)'}; background:${filter === 'todo' ? 'rgba(212,175,55,0.12)' : 'var(--bg-surface-elevated)'}; color:${filter === 'todo' ? 'var(--gold-accent)' : 'var(--text-silver)'}; font-size:11px; font-family:'Roboto Mono'; font-weight:800; cursor:pointer;">TO DO (${todoCount})</button>
+        <button type="button" onclick="setWorkoutLogFilter('logged')" style="flex:1; padding:10px; border-radius:8px; border:1px solid ${filter === 'logged' ? 'var(--gold-accent)' : 'var(--border-highlight)'}; background:${filter === 'logged' ? 'rgba(212,175,55,0.12)' : 'var(--bg-surface-elevated)'}; color:${filter === 'logged' ? 'var(--gold-accent)' : 'var(--text-silver)'}; font-size:11px; font-family:'Roboto Mono'; font-weight:800; cursor:pointer;">LOGGED (${loggedCount})</button>
+    </div>`;
+
     store.activeLog.items.forEach((item, exIdx) => {
+        const isAllCompleted = isWorkoutItemFullyLogged(item);
+        if (filter === 'todo' && isAllCompleted) return;
+        if (filter === 'logged' && !isAllCompleted) return;
+
         const isCardio = (item.exercise.domain || '').toLowerCase() === 'cardio';
-        if (isSteadyCardioLogItem(item) && Array.isArray(item.sets) && item.sets.length > 1) {
+        // Never collapse Lactate/HIT interval stacks (e.g. Cycling) into one steady set
+        if (!isLactateHitLogItem(item) && isSteadyCardioLogItem(item) && Array.isArray(item.sets) && item.sets.length > 1) {
             item.sets = [item.sets[0]];
         }
         let domainTag = item.isWarmupGroup ? 'WARMUP' : (item.exercise.domain ? item.exercise.domain.toUpperCase() : 'CUSTOM');
         let domainColor = item.isWarmupGroup ? 'var(--gold-accent)' : (isCardio ? 'var(--text-stealth)' : 'var(--gold-accent)');
         if (item.supersetId) domainTag = 'SUPERSET';
         
-        let completedSets = item.sets.filter(s => s.completed).length;
-        let totalSets = item.sets.length;
-        let isAllCompleted = completedSets === totalSets && totalSets > 0;
-        let cardOpacity = isAllCompleted ? '0.5' : '1';
+        const workSets = (item.sets || []).filter(s => !s.isWarmup);
+        let completedSets = workSets.filter(s => s.completed).length;
+        let totalSets = typeof item.plannedSets === 'number'
+            ? item.plannedSets
+            : workSets.length;
         let checkIcon = isAllCompleted ? `<span style="color:var(--gold-accent); margin-left:8px;">✓</span>` : '';
         const isLactateHit = isLactateHitLogItem(item);
         let unitLabel = item.isWarmupGroup
@@ -186,6 +204,8 @@ export function renderWorkoutLog() {
             domainTag = 'LACTATE/HIT';
             domainColor = 'var(--gold-accent)';
             unitLabel = 'Intervals';
+            totalSets = (item.sets || []).length;
+            completedSets = (item.sets || []).filter(s => s.completed).length;
         }
         const canSuperset = !isLactateHit && !item.isWarmupGroup && !isStaticStretchingLogItem(item)
             && store.activeLog.items[exIdx + 1]
@@ -198,7 +218,7 @@ export function renderWorkoutLog() {
                 ? `<button type="button" onclick="addSupersetWithNext(${exIdx})" style="width:100%; margin-top:10px; background:transparent; color:var(--text-silver); border:1px dashed var(--border-subtle); padding:8px; border-radius:6px; cursor:pointer; font-size:10px; font-family:'Roboto Mono';">+ Superset with next</button>`
                 : '');
 
-        html += `<div class="workout-card" style="opacity: ${cardOpacity}; padding: 16px;" data-ex-idx="${exIdx}">
+        html += `<div class="workout-card" style="padding: 16px;" data-ex-idx="${exIdx}">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                 <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); padding:4px 8px; border-radius:4px; font-size:9px; font-family:'Roboto Mono'; color:${domainColor}; font-weight:bold; letter-spacing:1px;">
                     [ ${domainTag} ]
@@ -211,22 +231,47 @@ export function renderWorkoutLog() {
                     <div class="workout-title" style="color:var(--text-main); margin-bottom:4px; font-size: 15px;">${item.exercise.name}${checkIcon}</div>
                     <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${completedSets} / ${totalSets} ${unitLabel} Logged</div>
                 </div>
-                <button class="btn-primary is-primary" style="width:auto; margin:0; padding:10px 20px; font-size:12px;" onclick="window.openExerciseSetsModal(${exIdx})">${isAllCompleted ? 'Edit' : 'Log'}</button>
+                <button class="btn-primary is-primary" style="width:auto; margin:0; padding:10px 20px; font-size:12px;" onclick="window.beginExerciseLog(${exIdx})">${isAllCompleted ? 'Edit' : 'Log'}</button>
             </div>
             ${restSlot}
         </div>`;
     });
+
+    if (filter === 'todo' && todoCount === 0) {
+        html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px;">All exercises logged. Switch to Logged to review.</div>`;
+    }
+    if (filter === 'logged' && loggedCount === 0) {
+        html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px;">Nothing logged yet — complete sets under To do.</div>`;
+    }
     
-    html += `<button onclick="toggleToolsMenu()" style="width:100%; background:transparent; color:var(--text-silver); border:1px dashed var(--border-highlight); padding:12px; margin-top:8px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ Add exercise</button>`;
+    if (filter === 'todo') {
+        html += `<button onclick="toggleToolsMenu()" style="width:100%; background:transparent; color:var(--text-silver); border:1px dashed var(--border-highlight); padding:12px; margin-top:8px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ Add exercise</button>`;
+    }
     
     document.getElementById('active-log-list').innerHTML = html;
+}
+
+function isWorkoutItemFullyLogged(item) {
+    if (!item || !Array.isArray(item.sets) || !item.sets.length) return false;
+    return item.sets.every(s => s.completed);
+}
+
+export function setWorkoutLogFilter(filter) {
+    window._workoutLogFilter = filter === 'logged' ? 'logged' : 'todo';
+    renderWorkoutLog();
+}
+
+/** Ask for work weight (first time on this exercise) before opening the sets log. */
+export function beginExerciseLog(exIdx) {
+    if (maybePromptWeightFinder(exIdx, { openLogAfter: true })) return;
+    openExerciseSetsModal(exIdx);
 }
 
 export function openExerciseSetsModal(exIdx) {
     window.currentModalExIdx = exIdx;
     const item = store.activeLog.items[exIdx];
     // Steady cardio is always a single distance/duration entry
-    if (isSteadyCardioLogItem(item) && Array.isArray(item.sets) && item.sets.length > 1) {
+    if (!isLactateHitLogItem(item) && isSteadyCardioLogItem(item) && Array.isArray(item.sets) && item.sets.length > 1) {
         item.sets = [item.sets[0]];
     }
     document.getElementById('sets-modal-title').innerText = item.exercise.name;
@@ -238,8 +283,6 @@ export function openExerciseSetsModal(exIdx) {
         item.isWarmupGroup || isStaticStretchingLogItem(item) || isSteadyCardioLogItem(item) || isLactateHitLogItem(item)
     );
     document.getElementById('exercise-sets-modal').classList.remove('hidden');
-    // First hypertrophy session: ask known weight or run 10@5 RIR finder
-    maybePromptWeightFinder(exIdx);
 }
 
 /** Steady duration always comes from the session timer (minutes, floored by rounding). */
@@ -298,10 +341,13 @@ export function closeExerciseSetsModal() {
 /** Steady Zone-2 style cardio (not sprints / lactate intervals). */
 export function isSteadyCardioLogItem(item) {
     if (!item?.exercise) return false;
+    // Lactate/HIT modalities (cycling, rower, elliptical, etc.) are cardio-domain
+    // but must keep all interval sets — never collapse to a single steady entry.
+    if (item.isLactateHit || (item.sets || []).some(s => s && s.isLactateHit)) return false;
     const domain = (item.exercise.domain || '').toLowerCase();
     const name = item.exercise.name || '';
     if (domain !== 'cardio') return false;
-    if (/sprint|lactate|interval|30s\s*on/i.test(name)) return false;
+    if (/sprint|lactate|interval|30s\s*on|hit\s*class|attack\s*bike|skierg|rower|battle\s*rope|elliptical|cycling/i.test(name)) return false;
     return true;
 }
 
@@ -882,7 +928,19 @@ export function renderExerciseSets() {
             </div>`;
         }
 
-        const setLabel = set.isWarmup ? 'WU' : (set.isDropSet ? 'DS' : String(setIdx + 1));
+        let workNum = 0;
+        const setLabel = set.isWarmup
+            ? 'WU'
+            : (set.isDropSet ? 'DS' : String((() => {
+                // Number working sets 1–3 excluding warmups
+                let n = 0;
+                for (let j = 0; j <= setIdx; j++) {
+                    const s = item.sets[j];
+                    if (s && !s.isWarmup && !s.isDropSet) n++;
+                }
+                workNum = n;
+                return n;
+            })()));
         html += `<div style="display:flex; flex-direction:column; margin-bottom:14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px;">
             <div class="set-row" style="margin-bottom:0;">
                 <div class="set-num" style="${set.isWarmup || set.isDropSet ? 'font-size:9px; color:var(--text-muted);' : ''}">${setLabel}</div>
@@ -894,8 +952,9 @@ export function renderExerciseSets() {
             ${set.notes && (set.isWarmup || set.isDropSet) ? `<div style="font-size:9px; color:var(--text-muted); margin-top:4px; font-family:'Roboto Mono';">${set.notes}</div>` : ''}
         </div>`;
     });
+    const hypFixed = isHypertrophyPhase();
     html += `<div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-        <button type="button" onclick="addSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD SET</button>
+        ${hypFixed ? `<div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-align:center;">Hypertrophy · 3 working sets</div>` : `<button type="button" onclick="addSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD SET</button>`}
         <button type="button" onclick="addDropSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET (80%)</button>
     </div>`;
     
@@ -1156,6 +1215,18 @@ export function startManualWorkout(buttonElement = null) {
 /** Called after Steady / Lactate / Gym is chosen for a manual session. */
 export function beginManualWorkoutSession(kind, opts = {}) {
     const normalized = kind || window.manualSessionKind || 'Full Body / Strength';
+
+    if (!opts.afterHitPicker && hasWorkoutDraft()) {
+        const draft = loadWorkoutDraft();
+        if (draftMatchesPlanEvent(normalized, draft) || !normalized) {
+            return resumeInProgressWorkout();
+        }
+        if (!confirm('You already have a workout in progress. Stop it and start this one instead?')) {
+            return;
+        }
+        discardInProgressWorkout();
+    }
+
     window.manualSessionKind = normalized;
     window.editingSessionId = null;
 
@@ -1236,9 +1307,21 @@ export function resolveActiveSessionKind() {
  * On Complete Log, treat entered sets as done so Steady Cardio etc. still save
  * even if the user skipped the checkmark.
  */
-/** Only sets the user checked (✓) are logged — do not auto-complete unchecked rows. */
+/**
+ * Lactate/HIT: include every protocol interval on Complete log (same idea as steady timer).
+ * Other workouts still require explicit ✓ on each set.
+ */
 export function finalizeSetsBeforeCommit() {
-    // Intentionally no-op: Complete log must respect checkbox state only.
+    const focus = resolveActiveSessionKind() || document.getElementById('today-focus')?.value || '';
+    const isLactate = isLactateEvent(focus) || focus === 'Lactate' || !!window._lactateHitSelection;
+    if (!isLactate) return;
+    (store.activeLog.items || []).forEach(item => {
+        if (!isLactateHitLogItem(item)) return;
+        (item.sets || []).forEach(set => {
+            if (set.isText && !/hit\s*class/i.test(item.exercise?.name || '')) return;
+            set.completed = true;
+        });
+    });
 }
 
 /** Rebuild an editable session from today's orphan workout_log rows (pre-session-snapshot logs). */
@@ -1268,7 +1351,7 @@ export function editOrphanWorkoutLogs(exerciseNamesCsv, logIdsCsv) {
         const looksCardio = rows.some(r => (r.distance_km > 0) || (r.time_minutes > 0) || String(r.type || '').toLowerCase() === 'cardio')
             || /cardio|steady|run|cycle|row|swim|bike/i.test(exName);
         const isStretch = /static\s*stretch/i.test(exName);
-        const isLactate = /lactate|sprint|interval|attack bike|skier|battle rope|rower|hill sprint|^spinning$|hit\s*class/i.test(exName)
+        const isLactate = /lactate|sprint|interval|attack bike|skier|battle rope|rower|hill sprint|^spinning$|cycling|elliptical|treadmill|hit\s*class/i.test(exName)
             || HIT_TYPE_LABELS_RE.test(exName);
         const sets = rows.map(log => {
             if (isStretch) {
@@ -1424,11 +1507,6 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
     document.querySelectorAll('.exe-btn').forEach(btn => btn.classList.remove('active-glow'));
     if (buttonElement) buttonElement.classList.add('active-glow');
 
-    // Unlogged drafts cannot be resumed — discard any leftover draft before starting
-    if (type === 'workout' && !opts.afterHitPicker && hasWorkoutDraft()) {
-        discardInProgressWorkout();
-    }
-
     window.manualWorkoutMode = false;
     window.editingSessionId = null;
 
@@ -1440,6 +1518,19 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
         const focus = (eventFocus && String(eventFocus).trim())
             || document.getElementById('today-focus')?.value
             || '';
+
+        // In-progress draft: resume matching session, or confirm before replacing
+        if (!opts.afterHitPicker && hasWorkoutDraft()) {
+            const draft = loadWorkoutDraft();
+            if (draftMatchesPlanEvent(focus, draft) || !focus) {
+                return resumeInProgressWorkout();
+            }
+            if (!confirm('You already have a workout in progress. Stop it and start this one instead?')) {
+                return;
+            }
+            discardInProgressWorkout();
+        }
+
         if (eventFocus && String(eventFocus).trim()) {
             const input = document.getElementById('today-focus');
             if (input) input.value = String(eventFocus).trim();
@@ -1533,18 +1624,102 @@ function hideExecutionZoneShell() {
     if (exSel) exSel.style.display = 'none';
 }
 
-/** Park/resume disabled — workouts must be logged in one sitting. */
+/** Park the in-progress workout (save draft) and leave the execution overlay. */
 export function parkInProgressWorkout() {
-    return false;
+    const items = store.activeLog?.type === 'workout' ? (store.activeLog.items || []) : [];
+    // Only write when we still have live items — never overwrite a parked draft with an empty log
+    if (store.activeLog?.type === 'workout' && items.length) {
+        saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+    } else if (store.activeLog?.type === 'workout'
+        && window._workoutSessionConfirmed
+        && !hasWorkoutDraft()) {
+        saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+    }
+    resetWorkoutTimer();
+    window._workoutSessionConfirmed = false;
+    if (store.activeLog?.type === 'workout') {
+        store.activeLog.items = [];
+    }
+    hideExecutionZoneShell();
+    const unconfirm = document.getElementById('btn-unconfirm-route');
+    if (unconfirm) unconfirm.classList.add('hidden');
+    try { getTodayFocus(); } catch (e) { /* refresh Plan Resume/Stop */ }
+    return true;
 }
 
-/** Resume disabled until a session is logged (use Start again). */
+/** Restore a parked workout draft into the execution overlay (same view as before ×). */
 export function resumeInProgressWorkout() {
-    alert('Workouts can’t be resumed until they’re logged. Start the session again, then Complete log when finished.');
-    clearWorkoutDraft();
-    return false;
+    const draft = loadWorkoutDraft();
+    if (!draft || !Array.isArray(draft.items) || !draft.items.length) {
+        // Clear corrupted empty drafts so Stop/Plan UI can recover
+        if (hasWorkoutDraftKey()) clearWorkoutDraft();
+        alert('No workout in progress to resume.');
+        try { getTodayFocus(); } catch (e) { /* ignore */ }
+        return false;
+    }
+
+    // Do NOT call switchLogType() — it clears activeLog.items
+    window.manualSessionKind = draft.manualSessionKind || null;
+    window.manualWorkoutMode = !!draft.manualWorkoutMode;
+    window.editingSessionId = draft.editingSessionId || null;
+    window.journalMode = draft.journalMode || 'workout';
+    window._lactateHitSelection = draft.lactateHitSelection
+        ? JSON.parse(JSON.stringify(draft.lactateHitSelection))
+        : null;
+    window._hitClassDiaryOnly = false;
+    window._workoutSessionConfirmed = true;
+    window._workoutLogFilter = draft.workoutLogFilter === 'logged' ? 'logged' : 'todo';
+    if (draft.ghostBackup) {
+        store._ghostBackupForUnconfirm = JSON.parse(JSON.stringify(draft.ghostBackup));
+    }
+
+    const focusEl = document.getElementById('today-focus');
+    if (focusEl && draft.manualSessionKind) focusEl.value = draft.manualSessionKind;
+
+    const fuelToggles = document.getElementById('fuel-toggles');
+    if (fuelToggles) fuelToggles.style.display = 'none';
+    document.getElementById('log-type-selector').value = 'workout';
+    store.activeLog.type = 'workout';
+    store.activeLog.items = JSON.parse(JSON.stringify(draft.items));
+    document.getElementById('current-route-title').innerText =
+        draft.routeTitle || getDraftSessionLabel(draft) || 'Active workout';
+
+    document.body.classList.add('workout-focus-mode');
+    updateExecutionAuxBlocks('workout');
+    refreshTemplateSelector();
+    updateSaveTemplateButtonLabel();
+    document.getElementById('ghost-template-container')?.classList.add('hidden');
+    document.getElementById('log-status').innerText = '';
+    setConfirmRouteButtons(true);
+    renderActiveLog();
+
+    const wrap = document.getElementById('workout-timer-wrap');
+    if (wrap) wrap.classList.remove('hidden');
+    const span = document.getElementById('workout-session-timer');
+    if (span) span.style.display = '';
+    const editDur = document.getElementById('workout-edit-duration-min');
+    if (editDur) editDur.style.display = 'none';
+    const unit = document.getElementById('workout-edit-duration-unit');
+    if (unit) unit.style.display = 'none';
+    const tLabel = document.querySelector('#workout-timer-wrap .workout-timer-label');
+    if (tLabel) tLabel.textContent = 'Timer';
+
+    resetWorkoutTimer();
+    const elapsed = Number(draft.elapsedMs) || 0;
+    if (elapsed > 0) setWorkoutElapsedMs(elapsed);
+    startWorkoutTimer();
+    saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+
+    const zone = document.getElementById('execution-zone');
+    if (zone) {
+        zone.style.pointerEvents = '';
+        zone.classList.remove('hidden');
+        setTimeout(() => zone.classList.add('show'), 10);
+    }
+    return true;
 }
 
+/** Discard a parked or live in-progress workout. */
 export function discardInProgressWorkout() {
     clearWorkoutDraft();
     window._workoutSessionConfirmed = false;
@@ -1562,34 +1737,49 @@ export function discardInProgressWorkout() {
     if (unconfirm) unconfirm.classList.add('hidden');
 }
 
+/** Stop (discard) a parked workout — used from Plan. */
+export function stopInProgressWorkout() {
+    const liveItems = store.activeLog?.type === 'workout' ? (store.activeLog.items || []) : [];
+    if (!hasWorkoutDraft() && !hasWorkoutDraftKey() && !liveItems.length) {
+        alert('No workout in progress.');
+        return false;
+    }
+    if (!confirm('Stop workout and discard progress? This cannot be undone.')) return false;
+    discardInProgressWorkout();
+    clearWorkoutDraft();
+    try { getTodayFocus(); } catch (e) { /* refresh Plan */ }
+    return true;
+}
+
 /**
  * Close the execution overlay.
- * Unlogged workouts are discarded (no resume) — log before leaving to keep the session.
+ * In-progress workouts are parked (resumable from Plan), not discarded.
+ * Pass { discard: true } after a successful log to clear the draft.
+ * Tab switches call this with no args — must not wipe a parked draft.
  */
 export function closeExecutionZone(opts = {}) {
     const discard = opts === true || opts?.discard === true;
-    const leavingUnloggedWorkout = !discard
-        && store.activeLog?.type === 'workout'
-        && !!(window._workoutSessionConfirmed || (store.activeLog.items || []).length);
+    const items = store.activeLog?.type === 'workout' ? (store.activeLog.items || []) : [];
+    const liveWorkout = store.activeLog?.type === 'workout'
+        && !!(window._workoutSessionConfirmed || items.length);
 
-    if (leavingUnloggedWorkout) {
-        if (!confirm('Leave without logging? Progress will be discarded — workouts can’t be resumed until logged.')) {
-            return;
-        }
+    if (!discard && liveWorkout) {
+        parkInProgressWorkout();
+        return;
     }
 
-    clearWorkoutDraft();
-    window._workoutSessionConfirmed = false;
-    resetWorkoutTimer();
-
-    if (store.activeLog?.type === 'workout') {
+    if (discard) {
+        clearWorkoutDraft();
+        window._workoutSessionConfirmed = false;
         window.manualWorkoutMode = false;
         window.manualSessionKind = null;
         window.editingSessionId = null;
         window._lactateHitSelection = null;
-        store.activeLog.items = [];
+        window._hitClassDiaryOnly = false;
+        if (store.activeLog?.type === 'workout') store.activeLog.items = [];
     }
 
+    resetWorkoutTimer();
     hideExecutionZoneShell();
     const unconfirm = document.getElementById('btn-unconfirm-route');
     if (unconfirm) unconfirm.classList.add('hidden');

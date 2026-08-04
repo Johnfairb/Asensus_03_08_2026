@@ -561,7 +561,7 @@ export function loadGhostTemplate() {
     }
 }
 
-function setConfirmRouteButtons(confirmed) {
+export function setConfirmRouteButtons(confirmed) {
     const loadRecipeBtn = document.getElementById('btn-load-recipe');
     const loadWorkoutBtn = document.getElementById('btn-load-workout-picker');
     const unconfirmBtn = document.getElementById('btn-unconfirm-route');

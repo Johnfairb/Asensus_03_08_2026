@@ -169,6 +169,15 @@ export function getRecommendedSleepHours(dateKey) {
   return sleepHoursFromTotalRpe(getDailyWorkoutRpeLoad(prev.toLocaleDateString()));
 }
 
+/**
+ * Tonight's sleep target for a plan day (driven by that day's training load).
+ * Logged the following morning via the sleep badge.
+ */
+export function getTonightSleepTargetHours(dateKey) {
+  const forDay = toDateAtNoon(dateKey || new Date());
+  return sleepHoursFromTotalRpe(getDailyWorkoutRpeLoad(forDay.toLocaleDateString()));
+}
+
 /** Yesterday's RPE load that drives today's sleep target. */
 export function getSleepDrivingRpeLoad(dateKey) {
   const forDay = toDateAtNoon(dateKey || new Date());

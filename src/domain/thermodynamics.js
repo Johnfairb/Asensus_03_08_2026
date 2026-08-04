@@ -5,6 +5,7 @@ import { generateDailyMealPlan } from './meal-planner.js';
 import { updateInjuryStatusPanel } from './periodization.js';
 import { generateFutureTimeline, invalidateWeekPlanCache } from './route-planner.js';
 import { getGymPlanPrefs } from './strength-engine.js';
+import { clearHypertrophyDayPlanCache } from './hypertrophy-engine.js';
 import { generateWorkoutTemplate } from './workout-generator.js';
 import { updateLiveDashboard } from '../ui/journey.js';
 import { applyNetworkKillSwitch, hydrateNetworkProfileDom } from '../ui/network.js';
@@ -512,6 +513,7 @@ export function syncGymPlanOptionMenus() {
 
 export function onGymDaysOrPhaseUiChange() {
     syncGymPlanOptionMenus();
+    clearHypertrophyDayPlanCache();
     saveSettings();
 }
 
@@ -520,6 +522,7 @@ export function onSeasonPhaseChange() {
     const disc = document.getElementById('strength-phase-disclaimer');
     if (disc) disc.classList.toggle('hidden', !sel || sel.value !== 'OffSeason_Strength');
     syncGymPlanOptionMenus();
+    clearHypertrophyDayPlanCache();
     saveSettings();
 }
 export function smartRoundMass(rawMass, foodName, category) {

@@ -23,9 +23,8 @@ import {
 } from './journey.js';
 import { showShopStyleInfo, toggleFoodHeading } from '../domain/food-catalog.js';
 import { cancelExEdit, cancelFoodEdit, closeLibraryDetail, deleteItem, editExercise, editFood, editFromLibraryDetail, filterBoot, loadExercises, loadInventory, openExerciseDetail, openFoodDetail, saveExerciseToCloud, saveFoodToCloud, syncPackSizeFieldMode, toggleBanFromLibraryDetail, toggleExForm, togglePantryForm } from './fuel.js';
-import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, resumeInProgressWorkout, selectCardioTypeInLog, showConstraintInfo, startExecution, startManualWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, toggleConstraint, toggleSetComplete, toggleToolsMenu, updateWorkoutSet } from './drive.js';
+import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, beginExerciseLog, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, resumeInProgressWorkout, selectCardioTypeInLog, setWorkoutLogFilter, showConstraintInfo, startExecution, startManualWorkout, stopInProgressWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, toggleConstraint, toggleSetComplete, toggleToolsMenu, updateWorkoutSet } from './drive.js';
 import { closeLactateHitPicker, confirmLactateHitPicker, filterLactateHitOptions, openLactateHitPicker, toggleLactateHitType, selectLactateDesiredRpe, confirmLactateDesiredRpe, lactateWizardBackToTypes, lactateWizardBackToRpe, openLactateBaselineRedo, toggleLactateRedoType, confirmLactateRedoSelection, submitLactateBaselineStep, adjustLactateSessionRpe, openLactateBaselineRedoFromSession, redoLactateBaselineForType } from './lactate-ui.js';
-import { clearWorkoutDraft, hasWorkoutDraft } from '../domain/workout-draft.js';
 import { exportData, injectPitchData } from './demos.js';
 import { drawExerciseChart, drawMacroChart, drawUnifiedChart, executeSundayForecast, filterExerciseChartList, onProgressRangeChange, selectExerciseForChart } from './charts.js';
 import { completeOnboarding, nextObStep, selectAuthTheme, selectObCard, triggerBootSequence } from './auth-onboarding.js';
@@ -72,8 +71,7 @@ export function bindUi() {
   window.completedStatusGlobal = { BRK: false, LUN: false, DIN: false, WRK: false };
   window.currentModalExIdx = null;
   window._journalPendingMedia = [];
-  // Unlogged drafts are not resumable — clear any leftover from a prior session
-  if (hasWorkoutDraft()) clearWorkoutDraft();
+  // Parked drafts survive reload — do not clear on boot
   window._workoutSessionConfirmed = false;
   window.acceptGhostTemplate = acceptGhostTemplate;
   window.unconfirmGhostTemplate = unconfirmGhostTemplate;
@@ -208,6 +206,8 @@ export function bindUi() {
   window.roundToEquipment = roundToEquipment;
   window.roundEquipment = roundToEquipment;
   window.openExerciseSetsModal = openExerciseSetsModal;
+  window.beginExerciseLog = beginExerciseLog;
+  window.setWorkoutLogFilter = setWorkoutLogFilter;
   window.closeExerciseSetsModal = closeExerciseSetsModal;
   window.renderExerciseSets = renderExerciseSets;
   window.saveCalendarEvent = saveCalendarEvent;
@@ -231,6 +231,7 @@ export function bindUi() {
   window.startManualWorkout = startManualWorkout;
   window.resumeInProgressWorkout = resumeInProgressWorkout;
   window.parkInProgressWorkout = parkInProgressWorkout;
+  window.stopInProgressWorkout = stopInProgressWorkout;
   window.discardInProgressWorkout = discardInProgressWorkout;
   window.openLactateHitPicker = openLactateHitPicker;
   window.closeLactateHitPicker = closeLactateHitPicker;

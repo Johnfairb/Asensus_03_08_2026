@@ -6,7 +6,7 @@ import { loadDayJournal } from '../ui/journey.js';
 import { SPORT_MATRIX } from './sports-matrix.js';
 import { buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, resolveStrengthSession } from './strength-engine.js';
 import {
-    buildHypertrophySessionRoutine,
+    getHypertrophySessionRoutine,
     isHypertrophyFocus,
     isHypertrophyPhase
 } from './hypertrophy-engine.js';
@@ -15,6 +15,11 @@ import { DAILY_HYDRATION_TARGET_L } from '../config/constants.js';
 import { estimateFoodWaterMl, getHydrationLitersForDate, parseFoodLogDetails } from '../lib/food-parse.js';
 import { computeDomainBarLayout, formatDomainAimLabel, getMacroRange } from '../lib/macro-range.js';
 import { getRecommendedSleepHours, getSleepDrivingRpeLoad, getTodaySleepHours, resolveSessionRpe } from './sleep-rpe.js';
+import {
+    draftMatchesPlanEvent,
+    getDraftSessionLabel,
+    loadWorkoutDraft
+} from './workout-draft.js';
 
 // --- THE FITNESS HUD DOMAIN MULTIPLIERS ---
 // Before the JSON seed is applied, these fallbacks convert volume into fitness scores.
@@ -79,7 +84,7 @@ export function getTodayFocus() {
                 : "Prehab, weak points, and joint integrity.";
         }
         else if (isHypertrophyFocus(focus) || (isHypertrophyPhase() && isStrengthFocus(focus))) {
-            const built = buildHypertrophySessionRoutine(focus);
+            const built = getHypertrophySessionRoutine(focus);
             descEl.innerText = `Hypertrophy — ${built.label || 'session'}. Stick to rest times so the session finishes on schedule.`;
         }
         else if (isStrengthFocus(focus)) {
@@ -261,6 +266,13 @@ export function renderWorkoutPreview(focus) {
         } catch (_) { /* preview session letter is best-effort */ }
     }
 
+    const draft = loadWorkoutDraft();
+
+    const resumeStopActions = () => `<div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;" onclick="event.stopPropagation();">
+        <button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); resumeInProgressWorkout();">Resume</button>
+        <button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); stopInProgressWorkout();">Stop</button>
+    </div>`;
+
     const buildCard = (eventName, timeLabel) => {
         const { sessionType, sessionName } = getWorkoutExerciseRows(eventName);
         const safeFocus = String(eventName || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -285,7 +297,11 @@ export function renderWorkoutPreview(focus) {
 
         let logAction = '';
         if (!isRest) {
-            logAction = `<button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); startExecution('workout', this, '${safeFocus}')">Start</button>`;
+            if (draft && draftMatchesPlanEvent(eventName, draft)) {
+                logAction = resumeStopActions();
+            } else {
+                logAction = `<button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); startExecution('workout', this, '${safeFocus}')">Start</button>`;
+            }
         }
 
         return `<div class="card" ${clickAttrs} style="${cardStyle}">
@@ -301,7 +317,18 @@ export function renderWorkoutPreview(focus) {
         </div>`;
     };
 
-    const draftBanner = '';
+    const draftBanner = draft
+        ? `<div class="card" style="padding:14px 16px; margin-bottom:12px; border-left:3px solid var(--gold-accent);">
+            <div style="display:flex; justify-content:space-between; align-items:stretch; gap:12px; min-width:0;">
+                <div style="min-width:0; flex:1;">
+                    <strong style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; letter-spacing:0.4px;">Workout in progress</strong>
+                    <div style="margin-top:4px; color:var(--text-main); font-size:12px; font-weight:600; line-height:1.35;">${getDraftSessionLabel(draft)}</div>
+                    <div style="margin-top:2px; font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">Resume to continue, or Stop to discard.</div>
+                </div>
+                ${resumeStopActions()}
+            </div>
+        </div>`
+        : '';
 
     if (allTasksDone) {
         previewEl.innerHTML = draftBanner + `<div class="card" style="padding:20px 16px; margin-bottom:12px; text-align:center;">
@@ -332,7 +359,13 @@ export function renderWorkoutPreview(focus) {
 
 /** Optional Zone 2 card shown on every Rest day. */
 function buildOptionalSteadyCard() {
-    const action = `<button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); startExecution('workout', this, 'Cardio (Steady)')">Start</button>`;
+    const draft = loadWorkoutDraft();
+    const action = (draft && draftMatchesPlanEvent('Cardio (Steady)', draft))
+        ? `<div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;" onclick="event.stopPropagation();">
+            <button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); resumeInProgressWorkout();">Resume</button>
+            <button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); stopInProgressWorkout();">Stop</button>
+        </div>`
+        : `<button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); startExecution('workout', this, 'Cardio (Steady)')">Start</button>`;
     return `<div class="card" role="button" tabindex="0" onclick="openWorkoutDomainsDetail('Cardio (Steady)')" style="padding:16px; margin-bottom:12px; cursor:pointer; border-left:3px solid var(--text-stealth);">
         <div style="display:flex; justify-content:space-between; align-items:stretch; gap:12px; min-width:0;">
             <div style="min-width:0; flex:1;">
@@ -965,7 +998,7 @@ export function getWorkoutExerciseRows(focus) {
         return { sessionType: 'Practice', sessionName: 'Practice Day', exercises: [{ name: 'Log practice when finished' }] };
     }
     if (isHypertrophyFocus(focus) || (isHypertrophyPhase() && isStrengthFocus(focus))) {
-        const built = buildHypertrophySessionRoutine(focus);
+        const built = getHypertrophySessionRoutine(focus);
         return {
             sessionType: 'Hypertrophy',
             sessionName: built.label || 'Hypertrophy',

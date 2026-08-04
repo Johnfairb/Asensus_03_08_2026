@@ -29,7 +29,8 @@ export function clearWorkoutDraft() {
 export function saveWorkoutDraft(partial = {}) {
     if (store.activeLog?.type !== 'workout') return null;
     const items = store.activeLog.items || [];
-    if (!items.length && !window._workoutSessionConfirmed) return null;
+    // Never overwrite a parked draft with an empty live log
+    if (!items.length) return loadWorkoutDraft();
 
     const draft = {
         type: 'workout',
@@ -44,6 +45,7 @@ export function saveWorkoutDraft(partial = {}) {
         ghostBackup: store._ghostBackupForUnconfirm
             ? JSON.parse(JSON.stringify(store._ghostBackupForUnconfirm))
             : null,
+        workoutLogFilter: window._workoutLogFilter === 'logged' ? 'logged' : 'todo',
         elapsedMs: typeof partial.elapsedMs === 'number'
             ? partial.elapsedMs
             : (partial.elapsedMs == null ? undefined : Number(partial.elapsedMs) || 0),
@@ -56,6 +58,15 @@ export function saveWorkoutDraft(partial = {}) {
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
     window._workoutSessionConfirmed = true;
     return draft;
+}
+
+/** True when any draft blob exists in storage (even if items were corrupted empty). */
+export function hasWorkoutDraftKey() {
+    try {
+        return !!localStorage.getItem(DRAFT_KEY);
+    } catch (e) {
+        return false;
+    }
 }
 
 /** True when the draft is for this planned event kind. */

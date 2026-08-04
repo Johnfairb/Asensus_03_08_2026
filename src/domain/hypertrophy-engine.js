@@ -4,99 +4,60 @@
  */
 import { store } from '../state/store.js';
 import { SPORT_MATRIX } from './sports-matrix.js';
+import {
+    bodyweightCompoundSet,
+    buildHypertrophyMetaMap,
+    getExerciseMeta
+} from './exercise-catalog.js';
 
 // horizontal push ↔ lower push | vertical push ↔ upper push
 // horizontal pull ↔ lower pull | vertical pull ↔ upper pull
 
-export const BODYWEIGHT_COMPOUNDS = new Set([
-    'Dips', 'Pull Ups', 'Chin Ups', 'Neutral Chin Ups'
-]);
+export const BODYWEIGHT_COMPOUNDS = bodyweightCompoundSet();
 
 /** Compound + isolation catalogue used by hypertrophy programming. */
-export const HYPERTROPHY_EXERCISE_META = {
-    // Anterior / posterior compounds (laterality kept for leg selection)
-    'Back Squat': { domain: 'strength', movement: 'flexion', laterality: 'Bilateral', dumbbell: false, grip: '', role: 'compound', muscle_group: 'quad', primary: 'quad', secondary: 'glute' },
-    'Front Squat': { domain: 'strength', movement: 'flexion', laterality: 'Bilateral', dumbbell: false, grip: '', role: 'compound', muscle_group: 'quad', primary: 'quad', secondary: 'core' },
-    'Wide Squat': { domain: 'strength', movement: 'flexion', laterality: 'Bilateral', dumbbell: false, grip: '', role: 'compound', muscle_group: 'quad', primary: 'quad', secondary: 'glute' },
-    'Safety Bar Squat': { domain: 'strength', movement: 'flexion', laterality: 'Bilateral', dumbbell: false, grip: '', role: 'compound', muscle_group: 'quad', primary: 'quad', secondary: 'glute' },
-    'Bulgarian Split Squat': { domain: 'strength', movement: 'flexion', laterality: 'Unilateral', dumbbell: true, grip: '', role: 'compound', muscle_group: 'quad', primary: 'quad', secondary: 'glute' },
-    'Split Squat': { domain: 'strength', movement: 'flexion', laterality: 'Unilateral', dumbbell: true, grip: '', role: 'compound', muscle_group: 'quad', primary: 'quad', secondary: 'glute' },
-    'Deadlift': { domain: 'strength', movement: 'hinge', laterality: 'Bilateral', dumbbell: false, grip: '', role: 'compound', muscle_group: 'hamstrings', primary: 'hamstrings', secondary: 'back' },
-    'Single Leg Deadlift': { domain: 'strength', movement: 'hinge', laterality: 'Unilateral', dumbbell: true, grip: '', role: 'compound', muscle_group: 'hamstrings', primary: 'hamstrings', secondary: 'glute' },
-    'Trap Bar Deadlift': { domain: 'strength', movement: 'hinge', laterality: 'Bilateral', dumbbell: false, grip: 'neutral', role: 'compound', muscle_group: 'hamstrings', primary: 'hamstrings', secondary: 'quad' },
-    'Romanian Deadlift': { domain: 'strength', movement: 'hinge', laterality: 'Bilateral', dumbbell: false, grip: '', role: 'compound', muscle_group: 'hamstrings', primary: 'hamstrings', secondary: 'glute' },
-
-    // Horizontal push (lower push) — criteria: dumbbell yes/no
-    'Bench Press': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: false, grip: '', role: 'compound', muscle_group: 'lower_chest', primary: 'chest', secondary: 'triceps' },
-    'DB Bench Press': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: true, grip: '', role: 'compound', muscle_group: 'lower_chest', primary: 'chest', secondary: 'triceps' },
-    'Neutral DB Bench Press': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: true, grip: 'neutral', role: 'compound', muscle_group: 'lower_chest', primary: 'chest', secondary: 'triceps' },
-    'Dips': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: false, grip: '', role: 'compound', muscle_group: 'lower_chest', primary: 'chest', secondary: 'triceps' },
-    'Decline Bench Press': { domain: 'strength', movement: 'horizontal push', laterality: '', dumbbell: false, grip: '', role: 'compound', muscle_group: 'lower_chest', primary: 'chest', secondary: 'triceps' },
-
-    // Vertical push (upper push)
-    'Seated DB Press': { domain: 'strength', movement: 'vertical push', laterality: '', dumbbell: true, grip: '', role: 'compound', muscle_group: 'shoulders', primary: 'shoulders', secondary: 'triceps' },
-    'Military Press': { domain: 'strength', movement: 'vertical push', laterality: '', dumbbell: false, grip: '', role: 'compound', muscle_group: 'shoulders', primary: 'shoulders', secondary: 'triceps' },
-    'Seated Military Press': { domain: 'strength', movement: 'vertical push', laterality: '', dumbbell: false, grip: '', role: 'compound', muscle_group: 'shoulders', primary: 'shoulders', secondary: 'triceps' },
-
-    // Horizontal pull — grip type
-    'Barbell Row': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'overhand', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-    'Single Arm DB Row': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: true, grip: 'neutral', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-    'Chest-Supported Row': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'neutral', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-    'Cable Row (Underhand)': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'underhand', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-    'Cable Row (Overhand)': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'overhand', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-    'Cable Row (Neutral)': { domain: 'strength', movement: 'horizontal pull', laterality: '', dumbbell: false, grip: 'neutral', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-
-    // Vertical pull — grip type
-    'Pull Ups': { domain: 'strength', movement: 'vertical pull', laterality: '', dumbbell: false, grip: 'overhand', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-    'Chin Ups': { domain: 'strength', movement: 'vertical pull', laterality: '', dumbbell: false, grip: 'underhand', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-    'Neutral Chin Ups': { domain: 'strength', movement: 'vertical pull', laterality: '', dumbbell: false, grip: 'neutral', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-    'Lat Pulldown': { domain: 'strength', movement: 'vertical pull', laterality: '', dumbbell: false, grip: 'overhand', role: 'compound', muscle_group: 'lats', primary: 'back', secondary: 'biceps' },
-
-    // Isolations
-    'Bicep Curls': { domain: 'lifting', movement: 'bicep isolation', laterality: '', dumbbell: true, grip: 'underhand', role: 'isolation', muscle_group: 'biceps', primary: 'biceps', secondary: 'forearm' },
-    'French Press': { domain: 'lifting', movement: 'tricep isolation', laterality: '', dumbbell: true, grip: '', role: 'isolation', muscle_group: 'triceps', primary: 'triceps', secondary: 'shoulders' },
-    'Calf Raises': { domain: 'lifting', movement: 'calf isolation', laterality: 'Bilateral', dumbbell: false, grip: '', role: 'isolation', muscle_group: 'calves', primary: 'calves', secondary: 'calves' },
-    'Adductor Machine': { domain: 'lifting', movement: 'groin isolation', laterality: '', dumbbell: false, grip: '', role: 'isolation', muscle_group: 'groin', primary: 'groin', secondary: 'glute' },
-    'Abductor Machine': { domain: 'lifting', movement: 'abductor isolation', laterality: '', dumbbell: false, grip: '', role: 'isolation', muscle_group: 'glute', primary: 'glute', secondary: 'hip' },
-    'Quad Extension': { domain: 'lifting', movement: 'quad isolation', laterality: '', dumbbell: false, grip: '', role: 'isolation', muscle_group: 'quad', primary: 'quad', secondary: 'quad' },
-    'Hamstring Curl': { domain: 'lifting', movement: 'hamstring isolation', laterality: '', dumbbell: false, grip: '', role: 'isolation', muscle_group: 'hamstrings', primary: 'hamstrings', secondary: 'calves' },
-    'Reverse Flyes': { domain: 'lifting', movement: 'rear delt isolation', laterality: '', dumbbell: true, grip: '', role: 'isolation', muscle_group: 'shoulders', primary: 'rear_delt', secondary: 'upper_back' },
-    'Front Raises': { domain: 'lifting', movement: 'front delt isolation', laterality: '', dumbbell: true, grip: '', role: 'isolation', muscle_group: 'shoulders', primary: 'front_delt', secondary: 'shoulders' },
-    'Lateral Raises': { domain: 'lifting', movement: 'side delt isolation', laterality: '', dumbbell: true, grip: '', role: 'isolation', muscle_group: 'shoulders', primary: 'side_delt', secondary: 'shoulders' },
-    'Flexion': { domain: 'lifting', movement: 'grip isolation', laterality: '', dumbbell: false, grip: '', role: 'isolation', muscle_group: 'forearm', primary: 'forearm', secondary: 'grip' },
-    'Shrugs': { domain: 'lifting', movement: 'upper trap isolation', laterality: 'Bilateral', dumbbell: true, grip: '', role: 'isolation', muscle_group: 'traps', primary: 'traps', secondary: 'shoulders' },
-    'Pec Flyes': { domain: 'lifting', movement: 'pec isolation', laterality: '', dumbbell: true, grip: '', role: 'isolation', muscle_group: 'lower_chest', primary: 'chest', secondary: 'shoulders' },
-    'Sidesit': { domain: 'strength', movement: 'core', laterality: '', dumbbell: false, grip: '', role: 'isolation', muscle_group: 'ql', primary: 'core', secondary: 'obliques' }
-};
+export const HYPERTROPHY_EXERCISE_META = buildHypertrophyMetaMap();
 
 export const HYPERTROPHY_POOLS = {
-    anterior_bilateral: ['Back Squat', 'Front Squat', 'Wide Squat', 'Safety Bar Squat'],
-    anterior_unilateral: ['Bulgarian Split Squat', 'Split Squat'],
-    posterior_bilateral: ['Deadlift', 'Trap Bar Deadlift', 'Romanian Deadlift'],
+    anterior_bilateral: ['Squat', 'Front Squat', 'Sumo Squat', 'Goblet Squat', 'Leg Press', 'Wide Leg Press'],
+    anterior_unilateral: ['Bulgarian Squat', 'Split Squat', 'Lunge', 'Walk Lunge', 'Pistol Squat'],
+    posterior_bilateral: ['Deadlift', 'Sumo Deadlift', 'Rack Deadlift', 'Romanian Deadlift'],
     posterior_unilateral: ['Single Leg Deadlift'],
-    horizontal_push_db: ['DB Bench Press', 'Neutral DB Bench Press'],
-    horizontal_push_bb: ['Bench Press', 'Decline Bench Press', 'Dips'],
-    vertical_push_db: ['Seated DB Press'],
-    vertical_push_bb: ['Military Press', 'Seated Military Press'],
-    vertical_pull: ['Pull Ups', 'Chin Ups', 'Neutral Chin Ups', 'Lat Pulldown'],
-    horizontal_pull: [
-        'Barbell Row', 'Single Arm DB Row', 'Chest-Supported Row',
-        'Cable Row (Underhand)', 'Cable Row (Overhand)', 'Cable Row (Neutral)'
+    horizontal_push_db: ['Dumbbell Bench Press', 'Neutral Bench Press'],
+    horizontal_push_bb: ['Bench Press', 'Decline Bench Press', 'Close Grip Bench Press', 'Dip', 'Press-up', 'Machine Bench Press'],
+    vertical_push_db: ['Seated Dumbbell Shoulder Press', 'Seated Dumbbell Screw Press', 'Dumbbell Incline Bench Press'],
+    vertical_push_bb: ['Barbell Military Press', 'Machine Overhead Press', 'Incline Bench Press', 'Incline Press-up'],
+    vertical_pull: [
+        'Pull Up', 'Chin Up', 'Neutral Pull Up',
+        'Lat Machine Pull', 'Lat Machine Chin-up', 'Lat Machine Close Grip',
+        'Lat Machine Single Pull', 'Low Pulley Wide Grip', 'Low Pulley Close Grip'
     ],
-    bicep_isolation: ['Bicep Curls'],
-    tricep_isolation: ['French Press'],
-    calf_isolation: ['Calf Raises'],
+    horizontal_pull: [
+        'Overhand Barbell Row', 'Underhand Barbell Row', 'Dumbbell Row',
+        'Underhand Cable Row', 'Overhand Cable Row', 'Neutral Cable Row'
+    ],
+    bicep_isolation: [
+        'Barbell Curl', 'Dumbbell Curl', 'Hammer Curl', 'Reverse Curl',
+        'Cable Curl', 'Concentration Curl', 'Preacher Curl EZ Bar', 'Dumbbell Preacher Curl'
+    ],
+    tricep_isolation: [
+        'Rope Push Down', 'Bar Push Down', 'Single Push Down', 'Cable French Press',
+        'Kick Back', 'Skull Crusher', 'Single Overhead Seated French Press', 'Reverse Dips'
+    ],
+    calf_isolation: ['Calf Raise Machine', 'Calf Raise Barbell', 'Single Calf Raise'],
     groin_isolation: ['Adductor Machine'],
     abductor_isolation: ['Abductor Machine'],
-    quad_isolation: ['Quad Extension'],
-    hamstring_isolation: ['Hamstring Curl'],
-    rear_delt_isolation: ['Reverse Flyes'],
-    front_delt_isolation: ['Front Raises'],
-    side_delt_isolation: ['Lateral Raises'],
-    grip_isolation: ['Flexion'],
-    upper_trap_isolation: ['Shrugs'],
-    pec_isolation: ['Pec Flyes'],
-    core_isolation: ['Sidesit']
+    quad_isolation: ['Leg Extension', 'Hack Squat'],
+    hamstring_isolation: ['Seated Hamstring Curl', 'Lying Hamstring Curl'],
+    rear_delt_isolation: ['Bent Over Rear Flye', 'Machine Reverse Rear Flye'],
+    front_delt_isolation: ['Standing Dumbbell Front Raise', 'Incline Dumbbell Front Raise'],
+    side_delt_isolation: [
+        'Lateral Raise', 'Lying 30 Degree Single Lateral Raise',
+        'Cable Lateral Raise (Single)', 'Cable Lateral Raise (Double)', 'Upright Row'
+    ],
+    mid_trap_isolation: ['Reverse Row'],
+    pec_isolation: ['Flye', 'Incline Flye', 'Pullover', 'Cable Crossover', 'Pec Deck'],
+    rotator_cuff_isolation: ['Lateral Rotation']
 };
 
 export const HYPERTROPHY_EVENT_TYPES = {
@@ -235,7 +196,7 @@ function timeTier(maxTime, _split) {
 function pickVerticalPull(usedGrips, exclude) {
     const noPu = !canDoPullups();
     let pool = HYPERTROPHY_POOLS.vertical_pull.slice();
-    if (noPu) pool = pool.filter(n => n === 'Lat Pulldown' || !BODYWEIGHT_COMPOUNDS.has(n));
+    if (noPu) pool = pool.filter(n => String(n).includes('Lat Machine') || String(n).includes('Low Pulley') || !BODYWEIGHT_COMPOUNDS.has(n));
     // Prefer unused grips
     const withMeta = pool.map(n => ({ n, grip: HYPERTROPHY_EXERCISE_META[n]?.grip || 'overhand' }));
     const unused = withMeta.filter(x => !usedGrips.has(x.grip) && !exclude.has(x.n));
@@ -379,14 +340,14 @@ function buildPullGroups(tier, sport) {
     const g2 = [
         makeItem(pickRandom(HYPERTROPHY_POOLS.bicep_isolation, exclude), 'Bicep Isolation'),
         makeItem(pickRandom(HYPERTROPHY_POOLS.rear_delt_isolation, exclude), 'Rear Delt Isolation'),
-        makeItem(pickRandom(HYPERTROPHY_POOLS.grip_isolation, exclude), 'Grip Isolation'),
-        makeItem(pickRandom(HYPERTROPHY_POOLS.upper_trap_isolation, exclude), 'Upper Trap Isolation')
+        makeItem(pickRandom(HYPERTROPHY_POOLS.mid_trap_isolation, exclude), 'Mid Trap Isolation'),
+        makeItem(pickRandom(HYPERTROPHY_POOLS.bicep_isolation, exclude), 'Bicep Isolation')
     ].filter(i => i && i.name);
     g2.forEach(i => exclude.add(i.name));
 
     if (tier === '90') {
-        // Sport pull specificity → else extra grip
-        let extra = pickRandom(HYPERTROPHY_POOLS.grip_isolation, exclude);
+        // Sport pull specificity → else extra rear delt / mid trap
+        let extra = pickRandom(HYPERTROPHY_POOLS.mid_trap_isolation, exclude);
         if (sport && sport.arm_imbalance) {
             extra = pickRandom(HYPERTROPHY_POOLS.rear_delt_isolation, exclude) || extra;
         }
@@ -436,7 +397,7 @@ function buildPushGroups(tier, sport) {
         if (sport && sport.shoulder) {
             extra = pickRandom(HYPERTROPHY_POOLS.rear_delt_isolation, exclude) || extra;
         } else {
-            extra = pickRandom(HYPERTROPHY_POOLS.core_isolation, exclude) || extra;
+            extra = pickRandom(HYPERTROPHY_POOLS.rotator_cuff_isolation, exclude) || extra;
         }
         if (extra) g2.push(makeItem(extra, 'Sport / Extra Isolation'));
     }
@@ -462,7 +423,7 @@ function buildUpperGroups(tier) {
     g2.forEach(i => exclude.add(i.name));
 
     if (tier === '60' || tier === '75' || tier === '90') {
-        ['pec_isolation', 'upper_trap_isolation'].forEach(slot => {
+        ['pec_isolation', 'mid_trap_isolation'].forEach(slot => {
             const n = pickRandom(HYPERTROPHY_POOLS[slot], exclude);
             if (n) { exclude.add(n); g2.push(makeItem(n, slot.replace(/_/g, ' '))); }
         });
@@ -564,8 +525,54 @@ function budgetFor(kind, tier, split) {
     return { compounds: 4, isolations: 5 }; // 90
 }
 
+const HYPERTROPHY_DAY_CACHE_KEY = 'ascensus_hypertrophy_day_plan_v1';
+
+function hypertrophyCacheDateKey(date = new Date()) {
+    const d = date instanceof Date ? date : new Date(date);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function hypertrophyPlanCacheKey(focus, date = new Date()) {
+    const kind = resolveHypertrophySessionKind(focus) || 'full';
+    const prefs = getHypertrophyPlanPrefs();
+    const tier = timeTier(prefs.maxTime, prefs.split);
+    return `${hypertrophyCacheDateKey(date)}|${kind}|${prefs.split}|${tier}|${prefs.maxTime}`;
+}
+
+/** Clear cached day plan (e.g. when prefs change). */
+export function clearHypertrophyDayPlanCache() {
+    try { localStorage.removeItem(HYPERTROPHY_DAY_CACHE_KEY); } catch (e) { /* ignore */ }
+}
+
 /**
- * Build hypertrophy routine items for a session kind.
+ * Stable hypertrophy routine for the day — same picks until date/prefs/kind change.
+ */
+export function getHypertrophySessionRoutine(focus, date = new Date()) {
+    const key = hypertrophyPlanCacheKey(focus, date);
+    try {
+        const raw = localStorage.getItem(HYPERTROPHY_DAY_CACHE_KEY);
+        if (raw) {
+            const cached = JSON.parse(raw);
+            if (cached && cached.key === key && cached.plan && Array.isArray(cached.plan.items)) {
+                window.currentHypertrophySession = cached.plan;
+                return cached.plan;
+            }
+        }
+    } catch (e) { /* rebuild */ }
+
+    const plan = buildHypertrophySessionRoutine(focus);
+    try {
+        localStorage.setItem(HYPERTROPHY_DAY_CACHE_KEY, JSON.stringify({ key, plan }));
+    } catch (e) { /* ignore */ }
+    window.currentHypertrophySession = plan;
+    return plan;
+}
+
+/**
+ * Build hypertrophy routine items for a session kind (fresh shuffle — prefer getHypertrophySessionRoutine).
  */
 export function buildHypertrophySessionRoutine(focus) {
     const kind = resolveHypertrophySessionKind(focus) || 'full';
@@ -599,7 +606,7 @@ export function buildHypertrophySessionRoutine(focus) {
         maxTime: prefs.maxTime,
         split: prefs.split,
         items,
-        note: `Hypertrophy · ${label} · ~${prefs.maxTime >= 90 && tier === '90' ? 90 : prefs.maxTime} min · Stick to rest times for accurate session length. First session: pick a weight you can do for 10 reps with 4–5 RIR.`
+        note: `Hypertrophy · ${label} · ~${prefs.maxTime >= 90 && tier === '90' ? 90 : prefs.maxTime} min · Stick to rest times for accurate session length. First time on an exercise: find a weight for 10 reps @ 5 RIR.`
     };
 }
 
@@ -895,18 +902,21 @@ export function hypertrophyEventForKind(kind) {
     return HYPERTROPHY_EVENT_TYPES[kind] || HYPERTROPHY_EVENT_TYPES.full;
 }
 
-/** Merge meta into STRENGTH_EXERCISE_META-compatible lookup for library UI. */
+/** Library criteria — logic-only fields; detail UI no longer surfaces these as labeled rows. */
 export function getExerciseCriteriaLabel(name) {
-    const meta = HYPERTROPHY_EXERCISE_META[name];
+    const meta = HYPERTROPHY_EXERCISE_META[name] || getExerciseMeta(name);
     if (!meta) return null;
     const move = meta.movement || '';
     if (/push/i.test(move)) {
         return { criteria: 'Dumbbell', value: meta.dumbbell ? 'Yes' : 'No' };
     }
-    if (/pull/i.test(move)) {
+    if (/pull/i.test(move) || /bicep isolation/i.test(move)) {
         const g = meta.grip || '—';
         const label = g === 'underhand' ? 'Underhand' : g === 'overhand' ? 'Overhand' : g === 'neutral' ? 'Neutral' : g;
         return { criteria: 'Grip', value: label };
+    }
+    if (meta.lateralityEither) {
+        return { criteria: 'Laterality', value: 'Either' };
     }
     if (meta.laterality) {
         return { criteria: 'Laterality', value: meta.laterality };

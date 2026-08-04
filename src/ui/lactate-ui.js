@@ -26,7 +26,7 @@ import { dateToISO, getLactateSlotForDate, isLactateEvent } from '../domain/rout
 let _pendingContinue = null;
 let _selectedHitIds = new Set(['treadmill_sprints']);
 let _wizardStep = 'types';
-let _desiredRpe = 8;
+let _desiredRpe = null; // user must choose (min 7)
 let _baselineQueue = [];
 let _baselineIdx = 0;
 let _redoMode = false;
@@ -45,20 +45,21 @@ function escapeHtml(s) {
 
 export function ensureLactateHitModal() {
     let modal = document.getElementById('lactate-hit-modal');
-    if (modal) return modal;
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'lactate-hit-modal';
+        glassRoot().appendChild(modal);
+    }
 
-    modal = document.createElement('div');
-    modal.id = 'lactate-hit-modal';
+    // Always refresh shell so hot-reloads / older DOM structures don't blank the list
     modal.className = 'hidden';
     modal.style.cssText = 'position:fixed; inset:0; z-index:22000; display:flex; justify-content:center; align-items:flex-end; padding:16px; box-sizing:border-box; background:rgba(0,0,0,0.45);';
     modal.onclick = (e) => { if (e.target === modal) closeLactateHitPicker(false); };
-
     modal.innerHTML = `
         <div class="modal-content stealth-panel" style="width:100%; max-width:390px; max-height:min(88%, calc(100% - 48px)); overflow:auto; background:var(--bg-surface); padding:18px 16px 16px; border-radius:16px 16px 12px 12px; box-sizing:border-box;" onclick="event.stopPropagation()">
             <div id="lactate-hit-wizard-body"></div>
         </div>
     `;
-    glassRoot().appendChild(modal);
     return modal;
 }
 
@@ -72,22 +73,29 @@ function renderWizard() {
 }
 
 function renderTypesStep(body) {
-    const todayIso = dateToISO(new Date());
-    const slot = getLactateSlotForDate(todayIso);
-    const protocol = getLactateProtocolForSlot(slot, new Date());
+    let slot = 'A';
+    let protocolSummary = 'Duration is set by desired RPE on the next step.';
+    try {
+        const todayIso = dateToISO(new Date());
+        slot = getLactateSlotForDate(todayIso) || 'A';
+        const protocol = getLactateProtocolForSlot(slot, new Date());
+        if (protocol?.summary) protocolSummary = protocol.summary;
+    } catch (e) {
+        console.warn('Lactate protocol hint failed:', e);
+    }
 
     body.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:8px;">
             <div style="min-width:0;">
                 <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing:0.4px; margin:0; font-size:14px;">Lactate/HIT type</h2>
-                <p style="font-size:11px; color:var(--text-muted); margin:6px 0 0; line-height:1.4;">Session ${escapeHtml(slot)} · duration set by desired RPE next. ${escapeHtml(protocol.summary)}</p>
+                <p style="font-size:11px; color:var(--text-muted); margin:6px 0 0; line-height:1.4;">Session ${escapeHtml(slot)} · ${escapeHtml(protocolSummary)}</p>
             </div>
             <button type="button" onclick="closeLactateHitPicker(false)" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
         <p style="font-size:11px; color:var(--text-silver); margin:0 0 12px; line-height:1.4;">Pick one or more modalities. Mixed types alternate sets. <strong style="color:var(--text-main);">HIT class</strong> skips intervals — only a diary RPE is collected.</p>
         <input type="search" id="lactate-hit-search" class="input-field" placeholder="Search HIT types…" autocomplete="off" style="margin-bottom:10px;" oninput="filterLactateHitOptions()">
         <div id="lactate-hit-selected" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; min-height:28px;"></div>
-        <div id="lactate-hit-options" style="display:flex; flex-direction:column; gap:6px; margin-bottom:14px; max-height:240px; overflow:auto;"></div>
+        <div id="lactate-hit-options" style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;"></div>
         <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="confirmLactateHitPicker()">Continue</button>
     `;
     renderSelectedChips();
@@ -95,7 +103,8 @@ function renderTypesStep(body) {
 }
 
 function renderRpeStep(body) {
-    const mins = LACTATE_DURATION_BY_RPE[_desiredRpe] || 20;
+    const hasPick = _desiredRpe != null;
+    const mins = hasPick ? (LACTATE_DURATION_BY_RPE[_desiredRpe] || 20) : null;
     body.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <div>
@@ -104,7 +113,7 @@ function renderRpeStep(body) {
             </div>
             <button type="button" onclick="closeLactateHitPicker(false)" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
-        <p style="font-size:12px; color:var(--text-silver); line-height:1.45; margin:0 0 14px;">Minimum RPE is <strong style="color:var(--text-main);">7</strong>. HIT block duration (excluding warmup &amp; stretch) follows your choice:</p>
+        <p style="font-size:12px; color:var(--text-silver); line-height:1.45; margin:0 0 14px;">Choose an RPE (minimum <strong style="color:var(--text-main);">7</strong>). HIT block duration (excluding warmup &amp; stretch) follows your choice:</p>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px;">
             ${[7, 8, 9, 10].map(r => `
                 <button type="button" onclick="selectLactateDesiredRpe(${r})" style="padding:14px 10px; border-radius:10px; border:1px solid ${r === _desiredRpe ? 'var(--gold-accent)' : 'var(--border-highlight)'}; background:${r === _desiredRpe ? 'rgba(212,175,55,0.12)' : 'var(--bg-surface-elevated)'}; cursor:pointer; text-align:center;">
@@ -112,9 +121,9 @@ function renderRpeStep(body) {
                     <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${LACTATE_DURATION_BY_RPE[r]} min HIT</div>
                 </button>`).join('')}
         </div>
-        <div style="font-size:12px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:14px;">Selected → ${_desiredRpe} · ${mins} min work block</div>
+        <div style="font-size:12px; color:${hasPick ? 'var(--gold-accent)' : 'var(--text-muted)'}; font-family:'Roboto Mono'; margin-bottom:14px;">${hasPick ? `Selected → ${_desiredRpe} · ${mins} min work block` : 'Tap an RPE to continue'}</div>
         <div style="display:flex; flex-direction:column; gap:8px;">
-            <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="confirmLactateDesiredRpe()">Continue</button>
+            <button type="button" class="btn-primary is-primary" style="margin:0; opacity:${hasPick ? '1' : '0.5'};" onclick="confirmLactateDesiredRpe()" ${hasPick ? '' : 'disabled'}>Continue</button>
             <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="lactateWizardBackToTypes()">Back</button>
         </div>`;
 }
@@ -203,10 +212,17 @@ export function filterLactateHitOptions() {
     const wrap = document.getElementById('lactate-hit-options');
     const search = document.getElementById('lactate-hit-search');
     if (!wrap) return;
+
+    const options = Array.isArray(HIT_TYPE_OPTIONS) ? HIT_TYPE_OPTIONS : [];
     const q = String(search?.value || '').trim().toLowerCase();
-    const matches = HIT_TYPE_OPTIONS.filter(opt =>
-        !q || opt.label.toLowerCase().includes(q) || opt.id.toLowerCase().includes(q)
+    const matches = options.filter(opt =>
+        !q || String(opt.label || '').toLowerCase().includes(q) || String(opt.id || '').toLowerCase().includes(q)
     );
+
+    if (!options.length) {
+        wrap.innerHTML = `<div style="font-size:12px; color:#ff6b6b; padding:8px 0;">HIT types failed to load. Refresh the page.</div>`;
+        return;
+    }
 
     if (!matches.length) {
         wrap.innerHTML = `<div style="font-size:12px; color:var(--text-muted); padding:8px 0;">No types match “${escapeHtml(q)}”.</div>`;
@@ -214,22 +230,37 @@ export function filterLactateHitOptions() {
     }
 
     wrap.innerHTML = matches.map(opt => {
-        const selected = _selectedHitIds.has(opt.id);
-        const hasBase = opt.id !== 'hit_class' && hasAnyBaseline(opt.id);
-        const showRedo = opt.id !== 'hit_class' && (hasBase || selected);
-        return `<div style="border:1px solid ${selected ? 'var(--gold-accent)' : 'var(--border-highlight)'}; border-radius:10px; background:${selected ? 'rgba(212,175,55,0.1)' : 'var(--bg-surface-elevated)'}; overflow:hidden;">
-            <button type="button" onclick="toggleLactateHitType('${opt.id}')" style="display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:10px 12px; border:none; background:transparent; cursor:pointer; text-align:left;">
+        const id = String(opt.id || '');
+        const label = String(opt.label || id);
+        const selected = _selectedHitIds.has(id);
+        const isClass = id === 'hit_class';
+        const hasBase = !isClass && hasAnyBaseline(id);
+        const border = selected ? 'var(--gold-accent)' : 'var(--border-highlight)';
+        const bg = selected ? 'rgba(212,175,55,0.1)' : 'var(--bg-surface-elevated)';
+        const status = selected ? 'ADDED' : '+ ADD';
+        const statusColor = selected ? 'var(--gold-accent)' : 'var(--text-stealth)';
+        const sub = isClass
+            ? 'Diary RPE only — no intervals'
+            : (hasBase ? 'Baseline saved' : 'No baseline yet');
+
+        const redoBtn = !isClass
+            ? `<button type="button" onclick="redoLactateBaselineForType('${escapeHtml(id)}')"
+                style="flex-shrink:0; background:transparent; border:1px solid var(--border-subtle); border-radius:6px; color:var(--text-silver); font-size:9px; font-family:'Roboto Mono',monospace; font-weight:700; padding:6px 8px; cursor:pointer; white-space:nowrap;">
+                ${hasBase ? 'REDO BASELINE' : 'SET BASELINE'}
+               </button>`
+            : '';
+
+        return `
+        <div style="display:flex; align-items:stretch; gap:8px;">
+            <button type="button" onclick="toggleLactateHitType('${escapeHtml(id)}')"
+                style="flex:1; min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px; border:1px solid ${border}; border-radius:10px; background:${bg}; cursor:pointer; text-align:left; color:inherit;">
                 <span style="min-width:0;">
-                    <span style="display:block; font-size:13px; color:var(--text-main); font-weight:600;">${escapeHtml(opt.label)}</span>
-                    ${hasBase ? `<span style="font-size:9px; color:var(--text-stealth); font-family:'Roboto Mono';">Baseline saved</span>` : (opt.id !== 'hit_class' ? `<span style="font-size:9px; color:var(--text-stealth); font-family:'Roboto Mono';">No baseline yet</span>` : '')}
+                    <span style="display:block; font-size:13px; color:var(--text-main); font-weight:700; line-height:1.3;">${escapeHtml(label)}</span>
+                    <span style="display:block; font-size:9px; color:var(--text-stealth); font-family:'Roboto Mono',monospace; margin-top:4px;">${escapeHtml(sub)}</span>
                 </span>
-                <span style="font-size:10px; font-family:'Roboto Mono'; color:${selected ? 'var(--gold-accent)' : 'var(--text-stealth)'}; font-weight:700;">${selected ? 'ADDED' : '+ ADD'}</span>
+                <span style="flex-shrink:0; font-size:10px; font-family:'Roboto Mono',monospace; color:${statusColor}; font-weight:800;">${status}</span>
             </button>
-            ${showRedo ? `<div style="display:flex; justify-content:flex-end; padding:0 10px 10px;">
-                <button type="button" onclick="event.stopPropagation(); redoLactateBaselineForType('${opt.id}')" style="background:none; border:1px solid var(--border-subtle); border-radius:6px; color:var(--text-silver); font-size:10px; font-family:'Roboto Mono'; font-weight:700; padding:6px 10px; cursor:pointer;">
-                    ${hasBase ? 'Redo baseline' : 'Enter baseline'}
-                </button>
-            </div>` : ''}
+            ${redoBtn}
         </div>`;
     }).join('');
 }
@@ -315,6 +346,10 @@ export function confirmLactateRedoSelection() {
 }
 
 export function confirmLactateDesiredRpe() {
+    if (_desiredRpe == null) {
+        alert('Choose a desired RPE (7–10) for this session.');
+        return;
+    }
     const types = [..._selectedHitIds].map(normalizeHitTypeId);
     const needing = modalitiesNeedingBaseline(types);
     if (needing.length) {
@@ -475,7 +510,7 @@ export function startHitClassDiaryOnly(selection) {
 export function openLactateHitPicker(onContinue) {
     _pendingContinue = typeof onContinue === 'function' ? onContinue : null;
     _wizardStep = 'types';
-    _desiredRpe = 8;
+    _desiredRpe = null;
     _redoMode = false;
     _forceRedoTypes = null;
     _baselineQueue = [];

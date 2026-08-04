@@ -23,6 +23,7 @@ import { persistUserConfigToCloud } from './thermodynamics.js';
 import { recordHydrationMl, specificEventName } from '../lib/food-parse.js';
 import { drawMacroChart } from '../ui/charts.js';
 import { upsertTodaySleep } from './body-metrics.js';
+import { getTonightSleepTargetHours } from './sleep-rpe.js';
 import { configureJournalModal } from '../ui/drive.js';
 import { buildDiaryEntryFromForm } from '../ui/diary-ui.js';
 import { loadDayJournal, loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveMatchJournalEntry, savePracticeJournalEntry, deleteMatchJournalEntry, deletePracticeJournalEntry } from '../ui/journey.js';
@@ -1478,6 +1479,13 @@ export function generateFutureTimeline() {
         }
         const safeRaw = String(primary).replace(/'/g, "\\'");
         const safeDay = String(dayName).replace(/'/g, "\\'");
+        let sleepLine = '';
+        try {
+            const sleepH = getTonightSleepTargetHours(futureDate);
+            if (sleepH > 0) {
+                sleepLine = `<div style="margin-top:8px; font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono',monospace;">Tonight's sleep · ${Number(sleepH).toFixed(1)} h</div>`;
+            }
+        } catch (e) { /* ignore */ }
 
         html += `<div class="card" onclick="openFuturePlan('${safeDay}', '${safeRaw}', ${macros.cals}, '${dateStr}')" style="padding:16px; margin-bottom:12px; cursor:pointer; transition:transform 0.1s ease;" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'">
             <div style="display:flex; justify-content:flex-start; align-items:center; margin-bottom:10px; border-bottom:1px solid var(--border-subtle); padding-bottom:6px; gap:8px; min-width:0;">
@@ -1485,6 +1493,7 @@ export function generateFutureTimeline() {
             </div>
             ${sessionLinesHtml}
             ${recipeLinesHtml}
+            ${sleepLine}
         </div>`;
     }
     container.innerHTML = html;
@@ -1539,6 +1548,22 @@ function buildMacroGoalBarsHtml(macros, forDate = new Date()) {
     });
     html += `</div>`;
     return html;
+}
+
+/** Tonight's sleep target for a plan day (logged the following morning). */
+function buildPlanSleepTargetHtml(forDate = new Date()) {
+    let hours = 8.5;
+    try {
+        hours = getTonightSleepTargetHours(forDate) || 8.5;
+    } catch (e) {
+        hours = 8.5;
+    }
+    const label = Number(hours).toFixed(1);
+    return `<div style="margin-bottom:16px; padding:12px 14px; border:1px solid rgba(212,175,55,0.28); border-radius:10px; background:rgba(212,175,55,0.06);">
+        <div style="font-size:9px; color:var(--gold-accent); font-family:'Roboto Mono',monospace; font-weight:800; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">Tonight's sleep target</div>
+        <div style="font-size:20px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono',monospace;">${label} h</div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:6px; line-height:1.4;">Set from this day's training load. Log it the following morning on the Sleep badge.</div>
+    </div>`;
 }
 
 function buildDomainGoalBarsHtml(targets) {
@@ -1943,7 +1968,8 @@ export function openFuturePlan(dateStr, focus, totalCals, isoDate) {
     }
 
     if (exPanel) {
-        let sessionHtml = buildDomainGoalBarsHtml(domains);
+        let sessionHtml = buildPlanSleepTargetHtml(planDate);
+        sessionHtml += buildDomainGoalBarsHtml(domains);
         if (!slots.length || slots.every(s => isRestEvent(s.event))) {
             const restFocus = dayEvents.includes('Rest (Cardio Only)') ? 'Rest (Cardio Only)' : 'Rest';
             sessionHtml += buildPlainSessionCardHtml(restFocus, '');
