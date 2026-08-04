@@ -1179,8 +1179,9 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
     -webkit-overflow-scrolling: touch;
 }
 
-/* Plan / Progress day sheet: padding outside scroll (matches macro-breakdown-panel) */
-#day-detail-modal.bottom-sheet {
+/* Plan / Progress day sheet + Assign Event: padding outside scroll (matches macro-breakdown-panel) */
+#day-detail-modal.bottom-sheet,
+#calendar-event-modal.bottom-sheet {
     background: var(--bg-surface, #0a0a0a) !important;
     max-height: min(85vh, calc(100% - 56px - env(safe-area-inset-top, 0px)));
     overflow: hidden;
@@ -1189,6 +1190,12 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
     padding: 20px 20px 32px;
     border-left: 1px solid var(--border-highlight);
     border-right: 1px solid var(--border-highlight);
+}
+#calendar-event-modal .day-detail-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 #sleep-modal.bottom-sheet,
 #weight-modal.bottom-sheet,
@@ -1379,7 +1386,8 @@ body.light-theme .stealth-panel, body.light-theme .workout-card, body.light-them
 body.light-theme .bottom-sheet { background: var(--bg-surface); border-top: 1px solid var(--border-highlight); box-shadow: 0 -10px 40px rgba(0,0,0,0.1); }
 body.light-theme #execution-zone { background: var(--bg-surface); }
 body.light-theme .execution-zone-header { border-bottom-color: var(--border-highlight); }
-body.light-theme #day-detail-modal.bottom-sheet {
+body.light-theme #day-detail-modal.bottom-sheet,
+body.light-theme #calendar-event-modal.bottom-sheet {
     border-left-color: var(--border-highlight);
     border-right-color: var(--border-highlight);
 }
@@ -1813,7 +1821,6 @@ div[id$="-modal"] .modal-content {
     #macro-breakdown-sheet,
     .detail-bottom-sheet,
     #execution-zone,
-    #calendar-event-modal,
     #exercise-sets-modal,
     #recipe-modal,
     #load-workout-modal,

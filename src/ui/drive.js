@@ -15,6 +15,7 @@ import { applyDailyModifiers, saveSettings } from '../domain/thermodynamics.js';
 import { addDropSetToExercise, addExerciseToActiveLog, addSetToExercise, addSupersetWithNext } from '../domain/workout-generator.js';
 import { applyHypertrophyFatigueFromSession, hypertrophyRestSeconds, isHypertrophyPhase } from '../domain/hypertrophy-engine.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
+import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry } from './journey.js';
@@ -974,10 +975,17 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
         // Lactate intervals: multiples of 5s, minimum 20s
         num = Math.max(20, Math.round(num / 5) * 5);
     }
-    store.activeLog.items[exIdx].sets[setIdx][field] = num;
+    const item = store.activeLog.items[exIdx];
+    const setObj = item.sets[setIdx];
+    setObj[field] = num;
+    if (field === 'reps' && setObj && !setObj.isWarmup && !setObj.isText) {
+        if (maybeRetirePressUpsFromSet(item.exercise?.name, num)) {
+            try { window.alert('Press-ups retired: logged >12 reps. Bench variants will be used going forward.'); } catch (e) { /* ignore */ }
+        }
+    }
     if (field === 'distance_km' || field === 'time_minutes') {
-        if (field === 'distance_km' && isSteadyCardioLogItem(store.activeLog.items[exIdx])) {
-            applyTimerDurationToSteadyItem(store.activeLog.items[exIdx]);
+        if (field === 'distance_km' && isSteadyCardioLogItem(item)) {
+            applyTimerDurationToSteadyItem(item);
         }
         updateCardioPaceReadout(exIdx, setIdx);
     }
@@ -1036,6 +1044,11 @@ export function toggleSetComplete(exIdx, setIdx) {
     if (setObj.completed && navigator.vibrate) navigator.vibrate([50]); 
     
     const item = store.activeLog.items[exIdx];
+    if (setObj.completed && !setObj.isWarmup && !setObj.isText) {
+        if (maybeRetirePressUpsFromSet(item.exercise?.name, setObj.reps)) {
+            try { window.alert('Press-ups retired: logged >12 reps. Bench variants will be used going forward.'); } catch (e) { /* ignore */ }
+        }
+    }
     const isLactate = isLactateHitLogItem(item);
     // Skip rest timers for text/warmup blocks and steady cardio (no RIR-based rests)
     // Lactate intervals always start their protocol rest after a logged set

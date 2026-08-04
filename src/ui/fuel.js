@@ -7,6 +7,7 @@ import {
     getExerciseSessionLabel,
     resolveCatalogName
 } from '../domain/exercise-catalog.js';
+import { getLibraryMuscleGroup, LIBRARY_MUSCLE_ORDER } from '../domain/bodyweight-lifts.js';
 import { generateGroceryList } from '../domain/grocery.js';
 import {
   isExerciseBanned,
@@ -546,14 +547,14 @@ export function openExerciseDetail(id) {
             ${label}
         </div>`;
 
-    const learningPoints = [1, 2, 3].map((n) => `
+    const teachingPoints = [1, 2, 3].map((n) => `
         <button type="button" class="detail-metric-row" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:10px; padding:12px; color:inherit;" onclick="this.nextElementSibling?.classList.toggle('hidden')">
             <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
-                <span class="hud-label" style="margin:0;">Learning point ${n}</span>
+                <span class="hud-label" style="margin:0;">Teaching point ${n}</span>
                 <span style="font-family:'Roboto Mono'; font-size:10px; color:var(--text-stealth);">Video</span>
             </div>
         </button>
-        <div class="hidden" style="margin:-2px 0 8px 0;">${videoPlaceholder('Learning point video placeholder')}</div>
+        <div class="hidden" style="margin:-2px 0 8px 0;">${videoPlaceholder('Teaching point video placeholder')}</div>
     `).join('');
 
     const bodyParts = [];
@@ -575,13 +576,8 @@ export function openExerciseDetail(id) {
             </div>`);
         bodyParts.push(`
             <div class="detail-metric-row">
-                <div class="hud-label" style="margin:0 0 8px 0;">Learning points</div>
-                <div style="display:flex; flex-direction:column; gap:8px;">${learningPoints}</div>
-            </div>`);
-        bodyParts.push(`
-            <div class="detail-metric-row">
-                <div class="hud-label" style="margin:0 0 6px 0;">Teaching points</div>
-                <div style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-stealth); min-height:28px;"></div>
+                <div class="hud-label" style="margin:0 0 8px 0;">Teaching points</div>
+                <div style="display:flex; flex-direction:column; gap:8px;">${teachingPoints}</div>
             </div>`);
         bodyParts.push(libraryDetailRow('Status', isExerciseBanned(id) ? 'Banned' : 'Allowed'));
     } else {
@@ -758,21 +754,30 @@ export async function loadExercises() {
     if (error || !data) return;
 
     const norm = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    /** Collapse aliases (e.g. Dips → Dip) so My Exercises / dropdowns show one row. */
+    const canonicalName = (name) => {
+        const meta = getExerciseMeta(name);
+        if (meta?.name) return meta.name;
+        return resolveCatalogName(name) || name;
+    };
     const preferScore = (ex) => {
         let s = 0;
-        if (ex.domain === 'strength') s += 3;
+        const canon = canonicalName(ex.name);
+        if (ex.name === canon) s += 5;
         if (STRENGTH_EXERCISE_META[ex.name]) s += 2;
+        if (getExerciseMeta(ex.name)) s += 2;
+        if (ex.domain === 'strength') s += 1;
         return s;
     };
-    const byNorm = {};
+    const byCanon = {};
     data.forEach(ex => {
-        const key = norm(ex.name);
-        if (!byNorm[key] || preferScore(ex) > preferScore(byNorm[key]) ||
-            (preferScore(ex) === preferScore(byNorm[key]) && ex.id < byNorm[key].id)) {
-            byNorm[key] = ex;
+        const key = norm(canonicalName(ex.name));
+        if (!byCanon[key] || preferScore(ex) > preferScore(byCanon[key]) ||
+            (preferScore(ex) === preferScore(byCanon[key]) && ex.id < byCanon[key].id)) {
+            byCanon[key] = ex;
         }
     });
-    const unique = Object.values(byNorm);
+    const unique = Object.values(byCanon);
     store.globalExerciseDB = unique;
     if (typeof updateExerciseDropdowns === "function") updateExerciseDropdowns();
 
@@ -784,40 +789,41 @@ export async function loadExercises() {
     };
 
     const strengthOrder = Object.keys(STRENGTH_EXERCISE_META);
-    const strengthNormSet = new Set(strengthOrder.map(norm));
     const usedIds = new Set();
+    const usedCanon = new Set();
     const strengthRows = [];
     strengthOrder.forEach(name => {
-        const row = unique.find(ex => norm(ex.name) === norm(name));
-        if (row && !usedIds.has(row.id) && isMyExercisesVisible(row)) {
-            strengthRows.push(row);
-            usedIds.add(row.id);
-        }
+        const row = unique.find(ex => norm(canonicalName(ex.name)) === norm(name));
+        if (!row || usedIds.has(row.id)) return;
+        const canon = norm(canonicalName(row.name));
+        if (usedCanon.has(canon) || !isMyExercisesVisible(row)) return;
+        strengthRows.push(row);
+        usedIds.add(row.id);
+        usedCanon.add(canon);
     });
     const otherRows = unique
-        .filter(ex => !usedIds.has(ex.id) && isMyExercisesVisible(ex))
-        .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        .filter(ex => {
+            if (usedIds.has(ex.id) || !isMyExercisesVisible(ex)) return false;
+            const canon = norm(canonicalName(ex.name));
+            if (usedCanon.has(canon)) return false;
+            usedCanon.add(canon);
+            return true;
+        })
+        .sort((a, b) => String(canonicalName(a.name)).localeCompare(String(canonicalName(b.name))));
 
     const buildExerciseRow = (ex) => {
         const catalog = getExerciseMeta(ex.name);
         const displayName = catalog?.name || resolveCatalogName(ex.name) || ex.name;
-        const sessionLabel = getExerciseSessionLabel(displayName);
         const idAttr = String(ex.id)
             .replace(/&/g, '&amp;')
             .replace(/"/g, '&quot;')
             .replace(/</g, '&lt;');
         const safeName = String(displayName || '').replace(/</g, '&lt;');
         const banned = isExerciseBanned(ex.id);
-        const sub = sessionLabel
-            ? `<div style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono'; margin-top:2px;">${sessionLabel}</div>`
-            : (String(ex.domain || '').toLowerCase() === 'power' || String(ex.domain || '').toLowerCase() === 'cardio'
-                ? `<div style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono'; margin-top:2px;">${ex.domain === 'power' ? 'Power' : 'Cardio'}</div>`
-                : '');
         return `
         <div class="inventory-row${banned ? ' is-banned' : ''}" data-exercise-id="${idAttr}" style="cursor:pointer;">
             <div class="inventory-main">
                 <div style="font-size:12px; color:var(--text-main); font-weight:600; margin-bottom:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeName}</div>
-                ${sub}
             </div>
             <div class="inventory-actions">
                 <button type="button" class="btn-ban-item${banned ? ' is-banned' : ''}" data-exercise-id="${idAttr}" title="${banned ? 'Unban exercise' : 'Ban exercise'}" aria-label="${banned ? 'Unban exercise' : 'Ban exercise'}">${banned ? 'Unban' : 'Ban'}</button>
@@ -825,25 +831,59 @@ export async function loadExercises() {
         </div>`;
     };
 
+    const headingForExercise = (ex) => {
+        const displayName = getExerciseMeta(ex.name)?.name || resolveCatalogName(ex.name) || ex.name;
+        const muscle = getLibraryMuscleGroup(displayName);
+        if (muscle) return muscle;
+        const domain = String(ex.domain || '').toLowerCase();
+        if (domain === 'power') return 'Power';
+        if (domain === 'cardio') return 'Cardio';
+        return 'Other';
+    };
+
     const activeExercises = [...strengthRows, ...otherRows].filter(ex => !isExerciseBanned(ex.id));
     const bannedExercises = [...strengthRows, ...otherRows]
         .filter(ex => isExerciseBanned(ex.id))
         .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
-    let html = activeExercises.map(buildExerciseRow).join('');
-    if (bannedExercises.length) {
-        const key = 'ex-banned';
+    const grouped = new Map();
+    activeExercises.forEach(ex => {
+        const heading = headingForExercise(ex);
+        if (!grouped.has(heading)) grouped.set(heading, []);
+        grouped.get(heading).push(ex);
+    });
+    grouped.forEach(list => list.sort((a, b) => {
+        const an = getExerciseMeta(a.name)?.name || a.name || '';
+        const bn = getExerciseMeta(b.name)?.name || b.name || '';
+        return String(an).localeCompare(String(bn));
+    }));
+
+    const EXERCISE_HEADING_ORDER = [...LIBRARY_MUSCLE_ORDER, 'Power', 'Cardio', 'Other'];
+    const orderedHeadings = [
+        ...EXERCISE_HEADING_ORDER.filter(h => (grouped.get(h) || []).length > 0),
+        ...[...grouped.keys()].filter(h => !EXERCISE_HEADING_ORDER.includes(h))
+    ];
+
+    const buildExerciseHeadingHtml = (heading, rows, key) => {
         const isOpen = openFoodHeadings.has(key);
-        html += `
-        <div class="food-heading-group" data-heading-key="${key}" style="margin-top:12px;">
+        const safeHeading = String(heading).replace(/</g, '&lt;');
+        return `
+        <div class="food-heading-group" data-heading-key="${key}">
             <button type="button" class="food-heading-toggle accordion" onclick="toggleFoodHeading('${key}')" aria-expanded="${isOpen ? 'true' : 'false'}">
-                <span class="food-heading-label">Banned</span>
+                <span class="food-heading-label">${safeHeading}</span>
                 <span id="food-heading-chevron-${key}" class="food-heading-chevron">${isOpen ? '−' : '+'}</span>
             </button>
             <div id="food-heading-${key}" class="food-heading-panel${isOpen ? '' : ' hidden'}">
-                ${bannedExercises.map(buildExerciseRow).join('')}
+                ${rows.map(buildExerciseRow).join('')}
             </div>
         </div>`;
+    };
+
+    let html = orderedHeadings.map((heading, idx) =>
+        buildExerciseHeadingHtml(heading, grouped.get(heading) || [], `ex-${idx}`)
+    ).join('');
+    if (bannedExercises.length) {
+        html += buildExerciseHeadingHtml('Banned', bannedExercises, 'ex-banned');
     }
 
     const list = document.getElementById('exercise-list');
@@ -869,6 +909,8 @@ export async function loadExercises() {
                 }
             });
         }
+        const searchEl = document.getElementById('search-ex');
+        if (searchEl && searchEl.value.trim()) filterBoot('ex');
     }
 }
 

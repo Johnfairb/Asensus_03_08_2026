@@ -14,16 +14,19 @@ try {
     store.specificSchedules = {};
 }
 
+export function closeCalendarEventModal() {
+    const eventModal = document.getElementById('calendar-event-modal');
+    if (!eventModal) return;
+    eventModal.classList.remove('show');
+    setTimeout(() => eventModal.classList.add('hidden'), 300);
+}
+
 export function closeLongTermCalendar() {
-    document.getElementById('calendar-event-modal')?.classList.add('hidden');
+    closeCalendarEventModal();
 }
 
 /** Navigate to Plan → Future and render the in-page calendar. */
 export function openLongTermCalendar() {
-    const eventModal = document.getElementById('calendar-event-modal');
-    if (eventModal && eventModal.parentElement !== document.body) {
-        document.body.appendChild(eventModal);
-    }
     const routeNav = document.querySelector('#main-nav .nav-item[onclick*="route"]');
     if (typeof window.switchTab === 'function' && routeNav) {
         window.switchTab(routeNav, 'route', 'Plan');
@@ -90,9 +93,7 @@ export function renderLongTermCalendar() {
 
 export function openCalendarEventModal(dateStr) {
     const eventModal = document.getElementById('calendar-event-modal');
-    if (eventModal && eventModal.parentElement !== document.body) {
-        document.body.appendChild(eventModal);
-    }
+    if (!eventModal) return;
     document.getElementById('cal-event-date').innerText = new Date(dateStr + 'T12:00:00').toLocaleDateString(undefined, {weekday:'long', month:'short', day:'numeric'});
     document.getElementById('cal-event-hidden-date').value = dateStr;
     const raw = store.specificSchedules[dateStr];
@@ -101,7 +102,8 @@ export function openCalendarEventModal(dateStr) {
     document.getElementById('cal-event-select').value = ev;
     const noteEl = document.getElementById('cal-event-note');
     if (noteEl) noteEl.value = note;
-    eventModal?.classList.remove('hidden');
+    eventModal.classList.remove('hidden');
+    setTimeout(() => eventModal.classList.add('show'), 10);
 }
 
 export function saveCalendarEvent() {
@@ -113,7 +115,7 @@ export function saveCalendarEvent() {
     
     localStorage.setItem('ascensus_specific_schedules', JSON.stringify(store.specificSchedules));
     invalidateWeekPlanCache();
-    document.getElementById('calendar-event-modal').classList.add('hidden');
+    closeCalendarEventModal();
     renderLongTermCalendar();
     generateFutureTimeline();
     try { getTodayFocus(); } catch(e) {}

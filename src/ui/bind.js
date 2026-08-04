@@ -1,6 +1,6 @@
 import { toggleTheme } from './theme.js';
 import { acceptGhostTemplate, addFoodToActiveLog, applyUserTemplate, deleteSavedTemplate, filterSavedLibrary, loadGhostTemplate, loadSavedTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderMyRecipes, renderMyWorkouts, saveCurrentAsTemplate, switchExercisesSubTab, switchFoodsSubTab, switchLogisticsSubTab, unconfirmGhostTemplate, updateActiveLogMass, updateGhostOverride } from './templates.js';
-import { closeLoadRecipePicker, closeLoadWorkoutPicker, closeLongTermCalendar, closeWorkoutTypePicker, openCalendarEventModal, openLoadRecipePicker, openLoadWorkoutPicker, openLongTermCalendar, openWorkoutTypePicker, renderLongTermCalendar, saveCalendarEvent, selectLoadedRecipe, selectLoadedWorkout, selectWorkoutType, beginManualWorkoutAfterType } from './route.js';
+import { closeLoadRecipePicker, closeLoadWorkoutPicker, closeCalendarEventModal, closeLongTermCalendar, closeWorkoutTypePicker, openCalendarEventModal, openLoadRecipePicker, openLoadWorkoutPicker, openLongTermCalendar, openWorkoutTypePicker, renderLongTermCalendar, saveCalendarEvent, selectLoadedRecipe, selectLoadedWorkout, selectWorkoutType, beginManualWorkoutAfterType } from './route.js';
 import { openMyExercises, openMyFoods, switchDriveSubTab, switchEngineSubTab, switchFuelSubTab, switchJourneySubTab, switchLibrarySubTab, switchNetworkTab, switchPlanSubTab, switchTab } from './navigation.js';
 import { closeGroceryDetail, executeCheckout, onShopCartToggle, openGroceryDetail, openShoppingCostBreakdown, updateShoppingSelection, wireShoppingSelectionUpdates } from './logistics.js';
 import {
@@ -56,6 +56,8 @@ import {
   maybePromptWeightFinder,
   confirmWeightFinderKnowsYes,
   confirmWeightFinderKnowsNo,
+  confirmBwGateYes,
+  confirmBwGateNo,
   submitKnownWorkWeight,
   submitFinderWorkWeight,
   dismissWeightFinder
@@ -99,6 +101,7 @@ export function bindUi() {
   window.closeLoadWorkoutPicker = closeLoadWorkoutPicker;
   window.closeWorkoutTypePicker = closeWorkoutTypePicker;
   window.closeLongTermCalendar = closeLongTermCalendar;
+  window.closeCalendarEventModal = closeCalendarEventModal;
   window.closeMacroBreakdown = closeMacroBreakdown;
   window.closeLibraryDetail = closeLibraryDetail;
   window.closeMealDetail = closeMealDetail;
@@ -278,6 +281,8 @@ export function bindUi() {
   window.maybePromptWeightFinder = maybePromptWeightFinder;
   window.confirmWeightFinderKnowsYes = confirmWeightFinderKnowsYes;
   window.confirmWeightFinderKnowsNo = confirmWeightFinderKnowsNo;
+  window.confirmBwGateYes = confirmBwGateYes;
+  window.confirmBwGateNo = confirmBwGateNo;
   window.submitKnownWorkWeight = submitKnownWorkWeight;
   window.submitFinderWorkWeight = submitFinderWorkWeight;
   window.dismissWeightFinder = dismissWeightFinder;

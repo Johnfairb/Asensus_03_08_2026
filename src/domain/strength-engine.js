@@ -2,6 +2,7 @@ import { store } from '../state/store.js';
 import { buildWeeklyTrainingPlan, getMondayISO, isStrengthEvent } from './route-planner.js';
 import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, SPORT_MATRIX } from './sports-matrix.js';
 import { isHypertrophyPhase } from './hypertrophy-engine.js';
+import { resolveProgrammedBwName } from './bodyweight-lifts.js';
 import { buildStrengthMetaMap } from './exercise-catalog.js';
 import { loadExercises } from '../ui/fuel.js';
 
@@ -97,13 +98,13 @@ export function pickStrengthPoolExercise(poolId, overrides = {}) {
     }
 
     if (store[poolId] && options.some(o => o.n === store[poolId])) {
-        return store[poolId];
+        return resolveProgrammedBwName(store[poolId]);
     }
 
     const pick = getStrengthWeightedPick(options);
     store[poolId] = pick;
     localStorage.setItem('ascensus_strength_month_picks', JSON.stringify(store));
-    return pick;
+    return resolveProgrammedBwName(pick);
 }
 
 export function resolveStrengthSession(focus) {

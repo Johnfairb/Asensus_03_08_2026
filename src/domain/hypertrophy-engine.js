@@ -9,6 +9,7 @@ import {
     buildHypertrophyMetaMap,
     getExerciseMeta
 } from './exercise-catalog.js';
+import { resolveProgrammedBwName } from './bodyweight-lifts.js';
 
 // horizontal push ↔ lower push | vertical push ↔ upper push
 // horizontal pull ↔ lower pull | vertical pull ↔ upper pull
@@ -140,9 +141,23 @@ function shuffle(arr) {
 }
 
 function pickRandom(list, exclude = new Set()) {
-    const pool = (list || []).filter(n => !exclude.has(n));
-    if (!pool.length) return (list || [])[0] || null;
+    // Apply monthly / permanent BW swaps so we don't programme banned press-ups etc.
+    const mapped = (list || []).map(n => resolveProgrammedBwName(n));
+    const pool = mapped.filter(n => n && !exclude.has(n));
+    if (!pool.length) return mapped[0] || (list || [])[0] || null;
     return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** Former grip-isolation slot → mid trap or rotator cuff. */
+function pickMidTrapOrRotatorCuff(exclude = new Set()) {
+    const combined = [
+        ...(HYPERTROPHY_POOLS.mid_trap_isolation || []),
+        ...(HYPERTROPHY_POOLS.rotator_cuff_isolation || [])
+    ];
+    const n = pickRandom(combined, exclude);
+    if (!n) return null;
+    const isMid = (HYPERTROPHY_POOLS.mid_trap_isolation || []).includes(n);
+    return makeItem(n, isMid ? 'Mid Trap Isolation' : 'Rotator Cuff Isolation');
 }
 
 function getSportData() {
@@ -341,17 +356,21 @@ function buildPullGroups(tier, sport) {
         makeItem(pickRandom(HYPERTROPHY_POOLS.bicep_isolation, exclude), 'Bicep Isolation'),
         makeItem(pickRandom(HYPERTROPHY_POOLS.rear_delt_isolation, exclude), 'Rear Delt Isolation'),
         makeItem(pickRandom(HYPERTROPHY_POOLS.mid_trap_isolation, exclude), 'Mid Trap Isolation'),
-        makeItem(pickRandom(HYPERTROPHY_POOLS.bicep_isolation, exclude), 'Bicep Isolation')
+        pickMidTrapOrRotatorCuff(exclude)
     ].filter(i => i && i.name);
     g2.forEach(i => exclude.add(i.name));
 
     if (tier === '90') {
-        // Sport pull specificity → else extra rear delt / mid trap
-        let extra = pickRandom(HYPERTROPHY_POOLS.mid_trap_isolation, exclude);
+        // Sport pull specificity → else former grip slot (mid trap or rotator cuff)
+        let extraItem = null;
         if (sport && sport.arm_imbalance) {
-            extra = pickRandom(HYPERTROPHY_POOLS.rear_delt_isolation, exclude) || extra;
+            const extra = pickRandom(HYPERTROPHY_POOLS.rear_delt_isolation, exclude);
+            if (extra) extraItem = makeItem(extra, 'Sport / Extra Isolation');
+        } else {
+            extraItem = pickMidTrapOrRotatorCuff(exclude);
+            if (extraItem) extraItem.slotLabel = 'Sport / Extra Isolation';
         }
-        if (extra) g2.push(makeItem(extra, 'Sport / Extra Isolation'));
+        if (extraItem) g2.push(extraItem);
     }
 
     return { g1, g2 };
@@ -683,37 +702,67 @@ export function isPrimaryMuscleBlocked(muscle) {
     return elapsedHrs < st.blockPrimaryHours;
 }
 
-// ---------- Warmup sets ----------
+function isBodyweightWarmupLift(exName) {
+    if (BODYWEIGHT_COMPOUNDS.has(exName)) return true;
+    const meta = getExerciseMeta(exName);
+    return !!(meta && meta.bodyweight);
+}
+
+// ---------- Warmup sets (strength + hypertrophy) ----------
 export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsolation) {
     const eq = equipmentForExercise(exName);
     const w = Number(workWeight) || 0;
     const reps = Number(workReps) || 10;
     const sets = [];
 
-    if (BODYWEIGHT_COMPOUNDS.has(exName)) {
-        if (w > 0 && w < 10) {
-            sets.push({ weight: 0, reps, rpe: 5, completed: false, isWarmup: true, partName: 'Warmup · Shrugs', notes: 'Shrugs warmup', restTime: 60 });
-            sets.push({ weight: 0, reps: Math.max(1, Math.ceil(reps / 2)), rpe: 5, completed: false, isWarmup: true, partName: 'Warmup · Bodyweight', notes: 'Bodyweight', restTime: 60 });
-            sets.push({ weight: 0, reps: Math.max(1, Math.ceil(reps / 2)), rpe: 5, completed: false, isWarmup: true, partName: 'Warmup · Bodyweight', notes: 'Bodyweight', restTime: 90 });
-        } else if (w <= 0) {
-            sets.push({ weight: 0, reps, rpe: 5, completed: false, isWarmup: true, partName: 'Warmup · Shrugs', notes: 'Shrugs', restTime: 60 });
-            sets.push({ weight: 0, reps: Math.max(1, Math.ceil(reps / 2)), rpe: 5, completed: false, isWarmup: true, partName: 'Warmup · Half reps', notes: 'Half reps bodyweight', restTime: 90 });
-        } else if (w <= 20) {
-            sets.push({ weight: 0, reps, rpe: 5, completed: false, isWarmup: true, partName: 'Warmup · Bodyweight', notes: 'Bodyweight', restTime: 60 });
+    // Bodyweight compounds / Reverse Dips / press-ups / pistol, etc.
+    if (isBodyweightWarmupLift(exName)) {
+        // Reverse Dips at pure bodyweight: single BW warmup only
+        if (exName === 'Reverse Dips' && w <= 0) {
+            sets.push({
+                weight: 0, reps, rpe: 5, completed: false, isWarmup: true,
+                partName: 'Warmup · Bodyweight', notes: 'Bodyweight', restTime: 60
+            });
+            return sets;
+        }
+        if (w < 10) {
+            // Half ROM (same rep count) → bodyweight
+            sets.push({
+                weight: 0, reps, rpe: 5, completed: false, isWarmup: true,
+                partName: 'Warmup · Half ROM', notes: 'Reduced range · same reps', restTime: 30
+            });
+            sets.push({
+                weight: 0, reps, rpe: 5, completed: false, isWarmup: true,
+                partName: 'Warmup · Bodyweight', notes: 'Bodyweight', restTime: 60
+            });
+            return sets;
+        }
+        if (w <= 20) {
+            sets.push({
+                weight: 0, reps, rpe: 5, completed: false, isWarmup: true,
+                partName: 'Warmup · Bodyweight', notes: 'Bodyweight', restTime: 30
+            });
             sets.push({
                 weight: roundUpLoad(w * 0.5, eq),
-                reps: Math.max(1, Math.ceil(reps / 2)),
-                rpe: 5, completed: false, isWarmup: true, partName: 'Warmup · 50%', notes: 'Half load / half reps', restTime: 90
+                reps,
+                rpe: 5, completed: false, isWarmup: true,
+                partName: 'Warmup · ½ load', notes: 'Half work weight', restTime: 60
             });
-        } else {
-            // Normal compound warmups
-            sets.push({ weight: roundUpLoad(w, eq), reps, rpe: 5, completed: false, isWarmup: true, partName: 'Warmup · Full', notes: 'Work weight · full reps', restTime: 60 });
-            sets.push({
-                weight: roundUpLoad(w * 0.75, eq),
-                reps: Math.max(1, Math.ceil(reps / 2)),
-                rpe: 5, completed: false, isWarmup: true, partName: 'Warmup · 75%', notes: '75% · half reps', restTime: 90
-            });
+            return sets;
         }
+        // >20 kg added: same as normal compounds (½ then ¼)
+        sets.push({
+            weight: roundUpLoad(w * 0.5, eq),
+            reps,
+            rpe: 5, completed: false, isWarmup: true,
+            partName: 'Warmup · ½', notes: 'Half work weight', restTime: 30
+        });
+        sets.push({
+            weight: roundUpLoad(w * 0.25, eq),
+            reps,
+            rpe: 5, completed: false, isWarmup: true,
+            partName: 'Warmup · ¼', notes: 'Quarter work weight', restTime: 60
+        });
         return sets;
     }
 
@@ -731,26 +780,26 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
         return sets;
     }
 
-    // Standard compounds: 2 warmups
+    // Standard compounds: ½ then ¼ work weight (not full work weight first)
     sets.push({
-        weight: roundUpLoad(w, eq),
+        weight: roundUpLoad(w * 0.5, eq),
         reps,
         rpe: 5,
         completed: false,
         isWarmup: true,
-        partName: 'Warmup · Full',
-        notes: 'Work weight · full reps',
-        restTime: 60
+        partName: 'Warmup · ½',
+        notes: 'Half work weight',
+        restTime: 30
     });
     sets.push({
-        weight: roundUpLoad(w * 0.75, eq),
-        reps: Math.max(1, Math.ceil(reps / 2)),
+        weight: roundUpLoad(w * 0.25, eq),
+        reps,
         rpe: 5,
         completed: false,
         isWarmup: true,
-        partName: 'Warmup · 75%',
-        notes: '75% · half reps',
-        restTime: 90
+        partName: 'Warmup · ¼',
+        notes: 'Quarter work weight',
+        restTime: 60
     });
     return sets;
 }
@@ -834,16 +883,19 @@ export function roundHypertrophyWorkWeight(kg, exName) {
 }
 
 /**
- * Apply a hypertrophy work weight to an active-log item:
+ * Apply a work weight to an active-log item:
  * rebuild warmups and set all non-warmup working sets to that load.
+ * Bodyweight work is allowed (0 kg).
+ * Returns applied kg, or -1 on failure.
  */
 export function applyHypertrophyWorkWeight(item, workKg) {
-    if (!item || !item.exercise) return 0;
+    if (!item || !item.exercise) return -1;
     const exName = item.exercise.name || '';
-    const w = roundHypertrophyWorkWeight(workKg, exName);
-    if (w <= 0) return 0;
+    const raw = Number(workKg);
+    if (!Number.isFinite(raw) || raw < 0) return -1;
+    const w = raw === 0 ? 0 : roundHypertrophyWorkWeight(raw, exName);
 
-    const workReps = 10;
+    const workReps = (item.sets || []).find(s => s && !s.isWarmup && !s.isText)?.reps || 10;
     const isIso = !!(item.isIsolation || HYPERTROPHY_EXERCISE_META[exName]?.role === 'isolation');
     const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
     const planned = typeof item.plannedSets === 'number' ? item.plannedSets : Math.max(3, workSets.length || 3);
@@ -866,6 +918,8 @@ export function applyHypertrophyWorkWeight(item, workKg) {
     item.sets = [...warmups, ...working];
     item.weightFinderResolved = true;
     item.needsWeightFind = false;
+    item.needsBwGate = false;
+    item.bwGateResolved = true;
     item.workWeightKg = w;
     return w;
 }

@@ -1702,28 +1702,6 @@
 
 </div>
 
-<!-- CALENDAR EVENT ACTION SHEET -->
-<div id="calendar-event-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: transparent; z-index: 12050; display: flex; justify-content: center; align-items: center; padding: 20px;" onclick="if(event.target===this) this.classList.add('hidden')">
-    <div class="card" style="width: 100%; max-width: 320px; background: var(--bg-surface-elevated);" onclick="event.stopPropagation()">
-        <div id="cal-event-date" style="font-family:'Roboto Mono'; font-size:10px; color:var(--gold-accent); margin-bottom:10px; text-transform:uppercase;">DATE</div>
-        <h3 style="color:var(--text-main); margin-bottom:15px; margin-top:0;">Assign Event</h3>
-        <input type="hidden" id="cal-event-hidden-date">
-        <label style="margin-top:0;">Event type</label>
-        <select id="cal-event-select" class="input-field">
-            <option value="Match">Match / Game</option>
-            <option value="Practice">Heavy Practice</option>
-            <option value="Rest">Forced Rest Day</option>
-            <option value="None">Clear Event</option>
-        </select>
-        <label style="margin-top:12px;">Notes / details (optional)</label>
-        <input type="text" id="cal-event-note" class="input-field" placeholder="e.g. Away fixture 15:00" style="margin-bottom:0;">
-        <div style="display:flex; gap:10px; margin-top:14px;">
-            <button type="button" class="btn-primary" style="flex:1; border-color:#333; color:#aaa; margin-top:0;" onclick="document.getElementById('calendar-event-modal').classList.add('hidden')">Cancel</button>
-            <button type="button" class="btn-primary" style="flex:1; border-color:var(--gold-accent); color:var(--gold-accent); margin-top:0;" onclick="saveCalendarEvent()">Save</button>
-        </div>
-    </div>
-</div>
-
 <!-- TACTICAL HUD ALERT -->
 <div id="tactical-alert-box" style="position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background: var(--bg-surface); border: 1px solid var(--gold-accent); border-radius: 8px; padding: 16px 20px; z-index: 10000; display: flex; align-items: center; gap: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.4), 0 0 15px var(--gold-glow); transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); max-width: 90%; width: 350px;">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--gold-accent)" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -1792,6 +1770,33 @@
         <div id="workout-domains-exercises"></div>
     </div>
 </div>
+
+<!-- ASSIGN EVENT (Plan → Future calendar) — phone bottom sheet -->
+    <div id="calendar-event-modal" class="bottom-sheet hidden">
+        <div class="sheet-handle" onclick="closeCalendarEventModal()"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-shrink:0; gap:12px;">
+            <button type="button" onclick="closeCalendarEventModal()" style="background:none; border:none; color:var(--text-stealth); font-size:28px; cursor:pointer; line-height:1; padding:0 4px;" title="Close" aria-label="Close">&times;</button>
+            <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; margin:0; flex:1; text-align:center; font-size:16px;">ASSIGN EVENT</h2>
+            <span style="width:28px;"></span>
+        </div>
+        <div class="day-detail-body">
+            <div id="cal-event-date" style="font-family:'Roboto Mono'; font-size:10px; color:var(--gold-accent); margin-bottom:12px; text-transform:uppercase;">DATE</div>
+            <input type="hidden" id="cal-event-hidden-date">
+            <label style="margin-top:0;">Event type</label>
+            <select id="cal-event-select" class="input-field">
+                <option value="Match">Match / Game</option>
+                <option value="Practice">Heavy Practice</option>
+                <option value="Rest">Forced Rest Day</option>
+                <option value="None">Clear Event</option>
+            </select>
+            <label style="margin-top:12px;">Notes / details (optional)</label>
+            <input type="text" id="cal-event-note" class="input-field" placeholder="e.g. Away fixture 15:00" style="margin-bottom:0;">
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="button" class="btn-primary" style="flex:1; border-color:#333; color:#aaa; margin-top:0;" onclick="closeCalendarEventModal()">Cancel</button>
+                <button type="button" class="btn-primary" style="flex:1; border-color:var(--gold-accent); color:var(--gold-accent); margin-top:0;" onclick="saveCalendarEvent()">Save</button>
+            </div>
+        </div>
+    </div>
 
 <!-- DAY DETAIL MODAL (Plan forecast + Progress history) -->
     <div id="day-detail-modal" class="bottom-sheet hidden">

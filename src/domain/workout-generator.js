@@ -15,6 +15,12 @@ import {
     progressHypertrophyWeight,
     roundUpLoad
 } from './hypertrophy-engine.js';
+import {
+    isBwGateExercise,
+    isPressUpVariant,
+    needsBwCompetencyAsk,
+    resolveProgrammedBwName
+} from './bodyweight-lifts.js';
 import { roundToEquipment } from './thermodynamics.js';
 import { renderActiveLog } from '../ui/templates.js';
 
@@ -379,6 +385,11 @@ export async function generateWorkoutTemplate() {
             return;
         }
 
+        // Bodyweight competency: monthly / permanent swaps before catalogue lookup
+        const programmedName = item.isText ? item.name : resolveProgrammedBwName(item.name);
+        if (!item.isText && programmedName !== item.name) {
+            item = { ...item, name: programmedName, notes: ((item.notes || '') + ` (swapped from bodyweight variant for this month)`).trim() };
+        }
         let exObj = getEx(item.name);
         let latestLog = hist.find(l => l.exercise === exObj.name) || null;
         
@@ -415,25 +426,36 @@ export async function generateWorkoutTemplate() {
         const eqType = equipmentForExercise(exObj.name);
         let itemNoteExtra = '';
 
+        // Bodyweight competency ask (hypertrophy 8 / strength 4) — unless already answered this month
+        let needsBwGate = false;
+        if (!item.isText && !isCardioEx && isBwGateExercise(exObj.name) && needsBwCompetencyAsk(exObj.name)) {
+            needsBwGate = true;
+            itemNoteExtra = ` Bodyweight check: can you do the required reps? If not, we swap for this month.`;
+        }
+
         // First time THIS exact exercise name is logged — ask for work weight / 10@5 RIR finder
+        // History at 0 kg (pure BW) still counts so we don't re-ask every session.
         let needsWeightFind = false;
-        if (useHypertrophy && !item.isText && !isCardioEx) {
+        if (!item.isText && !isCardioEx && (useHypertrophy || isBwGateExercise(exObj.name))) {
             const exName = String(exObj.name || '').toLowerCase();
-            const hasHist = (hist || []).some(l => String(l.exercise || '').toLowerCase() === exName && Number(l.weight_kg) > 0);
+            const nameMatch = (n) => String(n || '').toLowerCase() === exName;
+            const hasHist = (hist || []).some(l => nameMatch(l.exercise) && (l.weight_kg != null && Number(l.weight_kg) >= 0) && (Number(l.reps) > 0 || Number(l.weight_kg) > 0));
             let hasLocal = false;
             try {
                 const grouped = store.globalGroupedHistory || {};
                 for (const day of Object.values(grouped)) {
                     const rows = day?.items || [];
-                    if (rows.some(l => String(l.exercise || '').toLowerCase() === exName && Number(l.weight_kg) > 0)) {
+                    if (rows.some(l => nameMatch(l.exercise) && l.weight_kg != null && Number(l.weight_kg) >= 0 && (Number(l.reps) > 0 || Number(l.weight_kg) > 0))) {
                         hasLocal = true;
                         break;
                     }
                 }
             } catch (e) { /* ignore */ }
-            if (!hasHist && !hasLocal && !latestLog) {
+            if (isPressUpVariant(exObj.name) && !needsBwGate) {
+                tWeight = 0;
+            } else if (!needsBwGate && !hasHist && !hasLocal && !latestLog) {
                 needsWeightFind = true;
-                itemNoteExtra = ' First time on this exercise: we will ask for your work weight (or help you find 10 reps @ 5 RIR).';
+                itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + 'First time on this exercise: we will ask for your work weight (or help you find 10 reps @ 5 RIR).';
             }
         }
 
@@ -499,8 +521,8 @@ export async function generateWorkoutTemplate() {
         const itemReps = item.isAux ? 12 : (useHypertrophy ? 10 : pData.reps);
         const itemRest = item.isAux ? 60 : (useHypertrophy ? 90 : pData.rest_sec);
 
-        // Hypertrophy per-exercise warmups (compounds 2 / isolations 1)
-        if (useHypertrophy && !item.isText && !isCardioEx && !item.isLactateHit) {
+        // Per-exercise warmups (strength + hypertrophy)
+        if (!item.isText && !isCardioEx && !item.isLactateHit) {
             const wu = buildHypertrophyWarmupSets(exObj.name, tWeight, itemReps, !!item.isIsolation);
             setsArray.push(...wu);
         }
@@ -572,7 +594,9 @@ export async function generateWorkoutTemplate() {
             isLactateHit: !!item.isLactateHit,
             lactateRows: item.lactateRows || null,
             needsWeightFind: !!needsWeightFind,
-            weightFinderResolved: false
+            needsBwGate: !!needsBwGate,
+            weightFinderResolved: false,
+            bwGateResolved: false
         });
     });
 
