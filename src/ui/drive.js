@@ -11,19 +11,20 @@ const HIT_TYPE_LABELS_RE = new RegExp(
     (HIT_TYPE_OPTIONS || []).map(o => String(o.label || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).filter(Boolean).join('|') || 'HIT class',
     'i'
 );
-import { applyDailyModifiers, saveSettings } from '../domain/thermodynamics.js';
-import { addDropSetToExercise, addExerciseToActiveLog, addSetToExercise, addSupersetWithNext } from '../domain/workout-generator.js';
-import { applyHypertrophyFatigueFromSession, hypertrophyRestSeconds, isHypertrophyPhase } from '../domain/hypertrophy-engine.js';
+import { saveSettings } from '../domain/thermodynamics.js';
+import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, canSupersetPair, createSupersetFromIndices, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem } from '../domain/workout-generator.js';
+import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase } from '../domain/hypertrophy-engine.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
-import { loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry } from './journey.js';
+import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry } from './journey.js';
 import { notifyRestTimerDone } from './notifications.js';
-import { addFoodToActiveLog, loadGhostTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderActiveLog, setConfirmRouteButtons, switchLogType, updateExecutionAuxBlocks, updateSaveTemplateButtonLabel } from './templates.js';
+import { addFoodToActiveLog, loadGhostTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderActiveLog, setConfirmRouteButtons, switchLogType, updateExecutionAuxBlocks, updateExerciseDropdowns, updateSaveTemplateButtonLabel } from './templates.js';
 import {
     clearWorkoutDraft,
     draftMatchesPlanEvent,
+    getDraftRunningElapsedMs,
     getDraftSessionLabel,
     hasWorkoutDraft,
     hasWorkoutDraftKey,
@@ -189,18 +190,27 @@ export function renderWorkoutLog() {
         }
         let domainTag = item.isWarmupGroup ? 'WARMUP' : (item.exercise.domain ? item.exercise.domain.toUpperCase() : 'CUSTOM');
         let domainColor = item.isWarmupGroup ? 'var(--gold-accent)' : (isCardio ? 'var(--text-stealth)' : 'var(--gold-accent)');
-        if (item.supersetId) domainTag = 'SUPERSET';
+        if (item.isSuperset || item.supersetId) domainTag = 'SUPERSET';
+        if (item.isStretchGroup || isStaticStretchingLogItem(item)) {
+            domainTag = 'STRETCH';
+            domainColor = 'var(--gold-accent)';
+        }
         
-        const workSets = (item.sets || []).filter(s => !s.isWarmup);
-        let completedSets = workSets.filter(s => s.completed).length;
-        let totalSets = typeof item.plannedSets === 'number'
-            ? item.plannedSets
-            : workSets.length;
+        const workSets = (item.sets || []).filter(s => !s.isWarmup && !(item.isSuperset && s.side === 'A' && !s.isDropSet));
+        // For supersets, count B rounds (or unique rounds) as "sets"
+        let completedSets = item.isSuperset
+            ? (item.sets || []).filter(s => s.side === 'B' && !s.isWarmup && !s.isDropSet && s.completed).length
+            : workSets.filter(s => s.completed).length;
+        let totalSets = item.isSuperset
+            ? (typeof item.plannedSets === 'number'
+                ? item.plannedSets
+                : (item.sets || []).filter(s => s.side === 'B' && !s.isWarmup && !s.isDropSet).length)
+            : (typeof item.plannedSets === 'number' ? item.plannedSets : workSets.length);
         let checkIcon = isAllCompleted ? `<span style="color:var(--gold-accent); margin-left:8px;">✓</span>` : '';
         const isLactateHit = isLactateHitLogItem(item);
         let unitLabel = item.isWarmupGroup
             ? 'Parts'
-            : (isSteadyCardioLogItem(item) || isStaticStretchingLogItem(item) ? 'Session' : 'Sets');
+            : (item.isSuperset ? 'Rounds' : (isSteadyCardioLogItem(item) || isStaticStretchingLogItem(item) ? 'Session' : 'Sets'));
         if (isLactateHit) {
             domainTag = 'LACTATE/HIT';
             domainColor = 'var(--gold-accent)';
@@ -208,29 +218,70 @@ export function renderWorkoutLog() {
             totalSets = (item.sets || []).length;
             completedSets = (item.sets || []).filter(s => s.completed).length;
         }
-        const canSuperset = !isLactateHit && !item.isWarmupGroup && !isStaticStretchingLogItem(item)
-            && store.activeLog.items[exIdx + 1]
-            && !store.activeLog.items[exIdx + 1].isWarmupGroup
-            && !store.activeLog.items[exIdx + 1].isLactateHit
-            && !item.supersetId;
+
+        let subtitle = `${completedSets} / ${totalSets} ${unitLabel} Logged`;
+        if (item.isStretchGroup || isStaticStretchingLogItem(item)) {
+            subtitle = isAllCompleted ? 'Done' : 'Tap Log when finished';
+        } else if (item.isWarmupGroup) {
+            subtitle = `${completedSets} / ${totalSets} parts`;
+        } else if (item.isSuperset) {
+            subtitle = `${completedSets}/${totalSets} rounds`;
+        } else if (!isLactateHit && !isCardio && !item.isSportSessionBlock) {
+            const lifting = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText);
+            if (lifting.length) {
+                const sample = lifting[0];
+                const n = typeof item.plannedSets === 'number' ? item.plannedSets : lifting.length;
+                const reps = sample.reps || 10;
+                const load = Number(sample.weight) > 0 ? `${sample.weight}kg` : 'BW';
+                subtitle = `${load} · ${n}×${reps}`;
+                if (completedSets > 0) subtitle += ` · ${completedSets}/${n}`;
+            }
+        } else if (item.isSportSessionBlock) {
+            subtitle = isAllCompleted ? 'Done' : 'Tap Log when finished';
+        }
+        const nextItem = store.activeLog.items[exIdx + 1];
+        const canSuperset = !item.isSuperset && !isLactateHit && !item.isWarmupGroup && !isStaticStretchingLogItem(item)
+            && nextItem && canSupersetPair(item, nextItem);
         const restSlot = isLactateHit
             ? lactateRestSlotHtml(item, exIdx)
             : (canSuperset
                 ? `<button type="button" onclick="addSupersetWithNext(${exIdx})" style="width:100%; margin-top:10px; background:transparent; color:var(--text-silver); border:1px dashed var(--border-subtle); padding:8px; border-radius:6px; cursor:pointer; font-size:10px; font-family:'Roboto Mono';">+ Superset with next</button>`
                 : '');
 
-        html += `<div class="workout-card" style="padding: 16px;" data-ex-idx="${exIdx}">
+        const displayName = (item.isStretchGroup || isStaticStretchingLogItem(item))
+            ? 'Stretching'
+            : (item.isSuperset
+                ? (supersetTitleFromItem(item) || item.exercise.name)
+                : item.exercise.name);
+
+        const removeAction = item.isWarmupGroup
+            ? `dismissPlannedWarmupFromLog(${exIdx})`
+            : ((item.isStretchGroup || isStaticStretchingLogItem(item)) && !item.isCustomStretch
+                ? `dismissPlannedStretchFromLog(${exIdx})`
+                : `removeFoodFromActiveLog(${exIdx})`);
+
+        html += `<div class="workout-card" style="padding: 16px;" data-ex-idx="${exIdx}"
+            draggable="${!item.isWarmupGroup && !item.isStretchGroup && !isLactateHit && !item.isSportSessionBlock ? 'true' : 'false'}"
+            ondragstart="workoutCardDragStart(event, ${exIdx})"
+            ondragover="workoutCardDragOver(event, ${exIdx})"
+            ondragleave="workoutCardDragLeave(event)"
+            ondrop="workoutCardDrop(event, ${exIdx})"
+            ontouchstart="workoutCardTouchStart(event, ${exIdx})"
+            ontouchend="workoutCardTouchEnd(event, ${exIdx})">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); padding:4px 8px; border-radius:4px; font-size:9px; font-family:'Roboto Mono'; color:${domainColor}; font-weight:bold; letter-spacing:1px;">
-                    [ ${domainTag} ]
+                <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+                    <span class="superset-drag-handle" title="Drag onto another exercise to superset" style="cursor:grab; color:var(--text-stealth); font-size:14px; letter-spacing:-2px; user-select:none; touch-action:none;">⠿</span>
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); padding:4px 8px; border-radius:4px; font-size:9px; font-family:'Roboto Mono'; color:${domainColor}; font-weight:bold; letter-spacing:1px;">
+                        [ ${domainTag} ]
+                    </div>
                 </div>
-                <button onclick="removeFoodFromActiveLog(${exIdx})" style="background:none; border:none; color:var(--text-stealth); font-size:14px; cursor:pointer; display:flex; align-items:center;"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+                <button type="button" onclick="${removeAction}" style="background:none; border:none; color:var(--text-stealth); font-size:14px; cursor:pointer; display:flex; align-items:center;" aria-label="Remove"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
             </div>
             
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
-                    <div class="workout-title" style="color:var(--text-main); margin-bottom:4px; font-size: 15px;">${item.exercise.name}${checkIcon}</div>
-                    <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${completedSets} / ${totalSets} ${unitLabel} Logged</div>
+                    <div class="workout-title" style="color:var(--text-main); margin-bottom:4px; font-size: 15px;">${displayName}${checkIcon}</div>
+                    <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${subtitle}</div>
                 </div>
                 <button class="btn-primary is-primary" style="width:auto; margin:0; padding:10px 20px; font-size:12px;" onclick="window.beginExerciseLog(${exIdx})">${isAllCompleted ? 'Edit' : 'Log'}</button>
             </div>
@@ -262,6 +313,94 @@ export function setWorkoutLogFilter(filter) {
     renderWorkoutLog();
 }
 
+/** Drag an exercise card onto another to create a merged superset. */
+export function workoutCardDragStart(event, exIdx) {
+    window._supersetDragIdx = exIdx;
+    try {
+        event.dataTransfer.setData('text/plain', String(exIdx));
+        event.dataTransfer.effectAllowed = 'move';
+    } catch (e) { /* ignore */ }
+    event.currentTarget?.classList?.add('superset-dragging');
+}
+
+export function workoutCardDragOver(event, exIdx) {
+    const from = window._supersetDragIdx;
+    if (from == null || from === exIdx) return;
+    event.preventDefault();
+    try { event.dataTransfer.dropEffect = 'move'; } catch (e) { /* ignore */ }
+    event.currentTarget?.classList?.add('superset-drop-target');
+}
+
+export function workoutCardDragLeave(event) {
+    event.currentTarget?.classList?.remove('superset-drop-target');
+}
+
+export function workoutCardDrop(event, targetIdx) {
+    event.preventDefault();
+    event.currentTarget?.classList?.remove('superset-drop-target');
+    document.querySelectorAll('.superset-dragging').forEach(el => el.classList.remove('superset-dragging'));
+    let from = window._supersetDragIdx;
+    try {
+        const raw = event.dataTransfer.getData('text/plain');
+        if (raw !== '' && raw != null) from = Number(raw);
+    } catch (e) { /* ignore */ }
+    window._supersetDragIdx = null;
+    if (from == null || Number.isNaN(from) || from === targetIdx) return;
+    const items = store.activeLog?.items || [];
+    if (!canSupersetPair(items[from], items[targetIdx])) {
+        alert('Those exercises cannot be supersetted. Drag one lifting exercise onto another.');
+        return;
+    }
+    // Dropped exercise becomes A; target becomes B (order: dragged first)
+    createSupersetFromIndices(from, targetIdx);
+}
+
+/** Mobile: tap ⠿ on one exercise, then ⠿ on another to pair. */
+export function workoutCardTouchStart(event, exIdx) {
+    const handle = event.target?.closest?.('.superset-drag-handle');
+    if (!handle) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const from = window._supersetTouchSelect;
+    if (from != null && from !== exIdx) {
+        const items = store.activeLog?.items || [];
+        window._supersetTouchSelect = null;
+        document.querySelectorAll('.workout-card.superset-selected').forEach(el => el.classList.remove('superset-selected'));
+        if (!canSupersetPair(items[from], items[exIdx])) {
+            alert('Those exercises cannot be supersetted.');
+            return;
+        }
+        createSupersetFromIndices(from, exIdx);
+        return;
+    }
+    window._supersetTouchSelect = exIdx;
+    document.querySelectorAll('.workout-card.superset-selected').forEach(el => el.classList.remove('superset-selected'));
+    event.currentTarget?.classList?.add('superset-selected');
+}
+
+export function workoutCardTouchEnd(event, exIdx) {
+    // Selection is confirmed on the second ⠿ tap (touchstart); nothing to do here.
+}
+
+/** Expand/collapse a warmup or stretch parent part (shows children only when open). */
+export function togglePrepPartExpand(exIdx, setIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    const set = item?.sets?.[setIdx];
+    if (!set) return;
+    set._uiExpanded = !set._uiExpanded;
+    renderExerciseSets();
+}
+
+/** Expand/collapse a child drill/joint under a warmup part. */
+export function togglePrepChildExpand(exIdx, setIdx, childIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    const set = item?.sets?.[setIdx];
+    const child = set?.children?.[childIdx];
+    if (!child) return;
+    child._uiExpanded = !child._uiExpanded;
+    renderExerciseSets();
+}
+
 /** Ask for work weight (first time on this exercise) before opening the sets log. */
 export function beginExerciseLog(exIdx) {
     if (maybePromptWeightFinder(exIdx, { openLogAfter: true })) return;
@@ -275,15 +414,72 @@ export function openExerciseSetsModal(exIdx) {
     if (!isLactateHitLogItem(item) && isSteadyCardioLogItem(item) && Array.isArray(item.sets) && item.sets.length > 1) {
         item.sets = [item.sets[0]];
     }
-    document.getElementById('sets-modal-title').innerText = item.exercise.name;
+    maybeFixStaleWarmupLoads(item);
+    if (item.isSuperset) repairSupersetWarmups(item);
+    const title = item.isSuperset
+        ? (supersetTitleFromItem(item) || item.exercise.name)
+        : item.exercise.name;
+    document.getElementById('sets-modal-title').innerText = title;
     renderExerciseSets();
     populateSwapDropdown(exIdx);
     populateCardioTypePicker(exIdx);
+    const chartName = item.isSuperset
+        ? (item.sides?.[0]?.exercise?.name || item.exercise.name)
+        : item.exercise.name;
     drawModalExerciseChart(
-        item.exercise.name,
-        item.isWarmupGroup || isStaticStretchingLogItem(item) || isSteadyCardioLogItem(item) || isLactateHitLogItem(item)
+        chartName,
+        item.isWarmupGroup || item.isSuperset || isStaticStretchingLogItem(item) || isSteadyCardioLogItem(item) || isLactateHitLogItem(item)
     );
     document.getElementById('exercise-sets-modal').classList.remove('hidden');
+}
+
+/** True if no warmup set has been completed yet. */
+function warmupsStillEditable(item) {
+    return !(item?.sets || []).some(s => s && s.isWarmup && s.completed);
+}
+
+/**
+ * Rebuild per-lift warmups from current working weight when warmups are not started.
+ * Also self-heals drafts where warmup 1 was incorrectly set to the work weight.
+ */
+function maybeRebuildLiftWarmups(item, workKg) {
+    if (!item || item.isWarmupGroup || item.isSuperset || isStaticStretchingLogItem(item) || isSteadyCardioLogItem(item) || isLactateHitLogItem(item)) {
+        return false;
+    }
+    if (!warmupsStillEditable(item)) return false;
+    const domain = (item.exercise?.domain || '').toLowerCase();
+    if (domain === 'cardio' || domain === 'warmup') return false;
+    const w = Number(workKg);
+    if (!Number.isFinite(w) || w < 0) return false;
+
+    const nonWarmup = (item.sets || []).filter(s => s && !s.isWarmup);
+    const workSets = nonWarmup.filter(s => !s.isText && !s.isLactateHit);
+    const reps = Number(workSets[0]?.reps) || 10;
+    const isIso = !!(item.isIsolation);
+    const warmups = buildHypertrophyWarmupSets(item.exercise?.name || '', w, reps, isIso);
+    const updatedWork = nonWarmup.map(s => {
+        if (s.isText || s.isLactateHit || s.isDropSet) return s;
+        return { ...s, weight: w };
+    });
+    item.sets = [...warmups, ...updatedWork];
+    item.workWeightKg = w;
+    return true;
+}
+
+function maybeFixStaleWarmupLoads(item) {
+    if (!item || !warmupsStillEditable(item)) return;
+    if (item.isSuperset) {
+        repairSupersetWarmups(item);
+        return;
+    }
+    const working = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
+    const warmups = (item.sets || []).filter(s => s && s.isWarmup);
+    if (!working.length) return;
+    const workW = Number(working[0].weight) || 0;
+    if (workW <= 0) return;
+    const stale = warmups.some(wu => Math.abs((Number(wu.weight) || 0) - workW) < 0.01)
+        || (warmups.length >= 2 && (Number(warmups[1].weight) || 0) + 0.01 < (Number(warmups[0].weight) || 0));
+    if (stale || !warmups.length) maybeRebuildLiftWarmups(item, workW);
 }
 
 /** Steady duration always comes from the session timer (minutes, floored by rounding). */
@@ -355,7 +551,8 @@ export function isSteadyCardioLogItem(item) {
 /** Cool-down static stretching block — duration + log only. */
 export function isStaticStretchingLogItem(item) {
     if (!item?.exercise) return false;
-    return /static\s*stretch/i.test(item.exercise.name || '');
+    if (item.isStretchGroup || item.isCustomStretch) return true;
+    return /stretch/i.test(item.exercise.name || '');
 }
 
 /** Lactate/HIT interval block — duration + rest timer, no load/RIR. */
@@ -466,6 +663,9 @@ export async function drawModalExerciseChart(exerciseName, hideChart = false) {
     const canvas = document.getElementById('sets-modal-exercise-chart');
     if (!wrap || !canvas) return;
 
+    window._modalChartExerciseName = exerciseName || window._modalChartExerciseName || '';
+    window._modalChartHidden = !!hideChart;
+
     if (hideChart || !exerciseName || exerciseName === 'Warmup') {
         wrap.style.display = 'none';
         return;
@@ -476,15 +676,24 @@ export async function drawModalExerciseChart(exerciseName, hideChart = false) {
         const { data: workoutData } = await store.supabaseClient.from('workout_logs').select('*').order('created_at', { ascending: true });
         let actualData = [];
         let isCardio = false;
+        const rangeEl = document.getElementById('sets-modal-chart-range');
+        const range = rangeEl?.value || 'all';
+        const now = Date.now();
+        const cutoffMs = range === 'month'
+            ? now - (30 * 24 * 60 * 60 * 1000)
+            : range === 'year'
+                ? now - (365 * 24 * 60 * 60 * 1000)
+                : 0;
 
         if (workoutData) {
             let exLogs = workoutData.filter(l => l.exercise === exerciseName);
             if (exLogs.length > 0 && exLogs[0].type === 'cardio') isCardio = true;
 
             const grouped = exLogs.reduce((acc, log) => {
-                const ts = new Date(log.created_at).setHours(0, 0, 0, 0);
+                const ms = new Date(log.created_at).setHours(0, 0, 0, 0);
+                if (cutoffMs && ms < cutoffMs) return acc;
                 const val = isCardio ? log.distance_km : log.weight_kg;
-                if (!acc[ts] || val > acc[ts]) acc[ts] = val;
+                if (!acc[ms] || val > acc[ms]) acc[ms] = val;
                 return acc;
             }, {});
 
@@ -496,6 +705,24 @@ export async function drawModalExerciseChart(exerciseName, hideChart = false) {
                     y: grouped[ts]
                 };
             }).sort((a, b) => a.ms - b.ms);
+
+            // If user has less history than the selected window, chart is effectively all-time
+            if ((range === 'month' || range === 'year') && actualData.length === 0 && exLogs.length) {
+                const allGrouped = exLogs.reduce((acc, log) => {
+                    const ms = new Date(log.created_at).setHours(0, 0, 0, 0);
+                    const val = isCardio ? log.distance_km : log.weight_kg;
+                    if (!acc[ms] || val > acc[ms]) acc[ms] = val;
+                    return acc;
+                }, {});
+                actualData = Object.keys(allGrouped).map(ts => {
+                    const ms = parseInt(ts, 10);
+                    return {
+                        ms,
+                        label: new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                        y: allGrouped[ts]
+                    };
+                }).sort((a, b) => a.ms - b.ms);
+            }
         }
 
         if (store.modalExerciseChartInstance) store.modalExerciseChartInstance.destroy();
@@ -554,6 +781,12 @@ export async function drawModalExerciseChart(exerciseName, hideChart = false) {
         console.warn('drawModalExerciseChart', e);
         wrap.style.display = 'none';
     }
+}
+
+export function redrawModalExerciseChart() {
+    const name = window._modalChartExerciseName;
+    if (!name) return;
+    drawModalExerciseChart(name, !!window._modalChartHidden);
 }
 
 export function populateSwapDropdown(exIdx) {
@@ -734,20 +967,47 @@ export function renderExerciseSets() {
     let exIdx = window.currentModalExIdx;
     let item = store.activeLog.items[exIdx];
     
-    // Warmup group: expand into four named parts
+    // Warmup group: top-level parts only; children expand on part tap
     if (item.isWarmupGroup) {
-        let html = `<div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:16px;">Complete each warmup block, then confirm.</div>`;
+        let html = `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:16px;">
+            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Complete each warmup block, then confirm.</div>
+            ${item.isCustomWarmup ? '' : `<button type="button" onclick="dismissPlannedWarmupFromLog(${exIdx})" style="background:none; border:none; color:var(--text-stealth); font-size:22px; cursor:pointer; line-height:1;" aria-label="Dismiss warmup">&times;</button>`}
+        </div>`;
         item.sets.forEach((set, setIdx) => {
+            const kids = Array.isArray(set.children) ? set.children : null;
+            const expanded = !!set._uiExpanded;
+            const hasKids = !!(kids && kids.length);
+            const chevron = hasKids ? (expanded ? '−' : '+') : '';
             html += `<div style="display:flex; flex-direction:column; margin-bottom:14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <div style="font-size:13px; font-weight:800; color:var(--text-main); margin-bottom:4px;">${set.partName || ('Part ' + (setIdx+1))}</div>
-                        <div style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono';">${set.reps || ''}</div>
-                        ${set.notes ? `<div style="font-size:10px; color:var(--text-muted); margin-top:4px;">${set.notes}</div>` : ''}
-                    </div>
-                    <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0;" onclick="toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
-                </div>
-            </div>`;
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <button type="button" ${hasKids ? `onclick="togglePrepPartExpand(${exIdx}, ${setIdx})"` : ''}
+                        style="flex:1; min-width:0; text-align:left; background:none; border:none; padding:0; cursor:${hasKids ? 'pointer' : 'default'}; color:inherit;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <div style="font-size:13px; font-weight:800; color:var(--text-main);">${set.partName || ('Part ' + (setIdx+1))}</div>
+                            ${chevron ? `<span style="font-family:'Roboto Mono'; font-size:14px; color:var(--gold-accent);">${chevron}</span>` : ''}
+                        </div>
+                        <div style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:4px;">${set.reps || ''}</div>
+                    </button>
+                    <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0;" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
+                </div>`;
+            if (hasKids && expanded) {
+                html += `<div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">`;
+                if (set.notes) {
+                    html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:2px; line-height:1.4;">${set.notes}</div>`;
+                }
+                kids.forEach((child, cIdx) => {
+                    const safe = String(child.name || '').replace(/</g, '&lt;');
+                    const childOpen = !!child._uiExpanded;
+                    html += `<button type="button" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:8px; padding:10px; color:inherit;" onclick="togglePrepChildExpand(${exIdx}, ${setIdx}, ${cIdx})">
+                        <div style="display:flex; justify-content:space-between; gap:8px;"><span style="font-size:12px; font-weight:600;">${safe}</span><span style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">${childOpen ? '−' : '+'} Video</span></div>
+                    </button>`;
+                    if (childOpen) {
+                        html += `<div style="border:1px dashed var(--border-highlight); border-radius:8px; min-height:72px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono';">Teaching point video placeholder</div>`;
+                    }
+                });
+                html += `</div>`;
+            }
+            html += `</div>`;
         });
         document.getElementById('sets-modal-content').innerHTML = html;
         return;
@@ -809,24 +1069,54 @@ export function renderExerciseSets() {
         return;
     }
 
-    // Static stretching: duration + log only (no kg / reps / RIR / add set)
+    // Stretching: list stretch names; tap a name to reveal its video/teaching point
     if (isStaticStretchingLogItem(item)) {
-        const set = item.sets[0] || { completed: false, reps: '~12 mins' };
-        const durationLabel = set.reps || '~12 mins';
-        const note = item.note || 'Hold stretches for about 30s each.';
-        const html = `
-            <div style="font-size:11px; color:var(--text-muted); margin-bottom:16px; line-height:1.45;">Cool-down block. No load tracking — mark when finished.</div>
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; padding:18px 16px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-surface-elevated);">
-                <div style="min-width:0; flex:1;">
-                    <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:6px;">Duration</div>
-                    <div style="font-size:22px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono'; letter-spacing:0.5px;">${durationLabel}</div>
-                    <div style="font-size:11px; color:var(--text-silver); margin-top:8px; line-height:1.4;">${note}</div>
+        const parts = (item.sets || []).filter(s => s && (s.partName || s.isText));
+        const useAccordion = item.isStretchGroup || parts.length > 1;
+        if (!useAccordion) {
+            const set = item.sets[0] || { completed: false, reps: 'Log when done' };
+            const html = `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:16px;">
+                    <div style="font-size:11px; color:var(--text-muted); line-height:1.45;">Cool-down block. Mark when finished.</div>
+                    ${item.isCustomStretch ? '' : `<button type="button" onclick="dismissPlannedStretchFromLog(${exIdx})" style="background:none; border:none; color:var(--text-stealth); font-size:22px; cursor:pointer; line-height:1;" aria-label="Dismiss stretching">&times;</button>`}
                 </div>
-                <div style="flex-shrink:0; text-align:center;">
-                    <div style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:8px; text-transform:uppercase;">Log</div>
-                    <div class="check-btn ${set.completed ? 'completed' : ''}" id="btn-check-${exIdx}-0" style="width:48px; height:48px; font-size:18px;" onclick="toggleSetComplete(${exIdx}, 0)">${set.completed ? '✓' : ''}</div>
-                </div>
-            </div>`;
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; padding:18px 16px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-surface-elevated);">
+                    <div style="min-width:0; flex:1;">
+                        <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:6px;">Stretching</div>
+                        <div style="font-size:16px; font-weight:800; color:var(--text-main);">${set.reps || 'Log when done'}</div>
+                    </div>
+                    <div style="flex-shrink:0; text-align:center;">
+                        <div style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:8px; text-transform:uppercase;">Log</div>
+                        <div class="check-btn ${set.completed ? 'completed' : ''}" id="btn-check-${exIdx}-0" style="width:48px; height:48px; font-size:18px;" onclick="toggleSetComplete(${exIdx}, 0)">${set.completed ? '✓' : ''}</div>
+                    </div>
+                </div>`;
+            document.getElementById('sets-modal-content').innerHTML = html;
+            return;
+        }
+
+        let html = `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:16px;">
+            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Tap a stretch for its teaching point. Check each when done.</div>
+            ${item.isCustomStretch ? '' : `<button type="button" onclick="dismissPlannedStretchFromLog(${exIdx})" style="background:none; border:none; color:var(--text-stealth); font-size:22px; cursor:pointer; line-height:1;" aria-label="Dismiss stretching">&times;</button>`}
+        </div>`;
+        parts.forEach((set, setIdx) => {
+            const expanded = !!set._uiExpanded;
+            const label = set.partName || set.reps || `Stretch ${setIdx + 1}`;
+            html += `<div style="display:flex; flex-direction:column; margin-bottom:12px; border-bottom:1px solid var(--border-subtle); padding-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <button type="button" onclick="togglePrepPartExpand(${exIdx}, ${setIdx})"
+                        style="flex:1; min-width:0; text-align:left; background:none; border:none; padding:0; cursor:pointer; color:inherit;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <div style="font-size:13px; font-weight:800; color:var(--text-main);">${String(label).replace(/</g, '&lt;')}</div>
+                            <span style="font-family:'Roboto Mono'; font-size:14px; color:var(--gold-accent);">${expanded ? '−' : '+'}</span>
+                        </div>
+                    </button>
+                    <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0;" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
+                </div>`;
+            if (expanded) {
+                html += `<div style="margin-top:10px; border:1px dashed var(--border-highlight); border-radius:8px; min-height:72px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono';">Teaching point video placeholder</div>`;
+            }
+            html += `</div>`;
+        });
         document.getElementById('sets-modal-content').innerHTML = html;
         return;
     }
@@ -930,21 +1220,50 @@ export function renderExerciseSets() {
         }
 
         let workNum = 0;
-        const setLabel = set.isWarmup
-            ? 'WU'
-            : (set.isDropSet ? 'DS' : String((() => {
-                // Number working sets 1–3 excluding warmups
-                let n = 0;
+        let setLabel;
+        if (item.isSuperset) {
+            const side = set.side || '?';
+            const sideName = (item.sides || []).find(s => s.key === side)?.exercise?.name || side;
+            if (set.isWarmup) {
+                let wuNum = 0;
                 for (let j = 0; j <= setIdx; j++) {
                     const s = item.sets[j];
-                    if (s && !s.isWarmup && !s.isDropSet) n++;
+                    if (s && s.side === side && s.isWarmup) wuNum++;
                 }
-                workNum = n;
-                return n;
-            })()));
+                setLabel = `${side}·WU${wuNum}`;
+            } else if (set.isDropSet) {
+                setLabel = `${side}·DS`;
+            } else {
+                const round = set.round || (() => {
+                    let n = 0;
+                    for (let j = 0; j <= setIdx; j++) {
+                        const s = item.sets[j];
+                        if (s && s.side === side && !s.isWarmup && !s.isDropSet) n++;
+                    }
+                    return n;
+                })();
+                setLabel = `${round}${side}`;
+            }
+            if (!set.isWarmup) set._sideCaption = sideName;
+        } else {
+            setLabel = set.isWarmup
+                ? 'WU'
+                : (set.isDropSet ? 'DS' : String((() => {
+                    let n = 0;
+                    for (let j = 0; j <= setIdx; j++) {
+                        const s = item.sets[j];
+                        if (s && !s.isWarmup && !s.isDropSet) n++;
+                    }
+                    workNum = n;
+                    return n;
+                })()));
+        }
+        const sideCaption = item.isSuperset && set._sideCaption
+            ? `<div style="font-size:8px; color:var(--text-stealth); font-family:'Roboto Mono'; margin-top:2px; max-width:48px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${set._sideCaption}</div>`
+            : '';
         html += `<div style="display:flex; flex-direction:column; margin-bottom:14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px;">
             <div class="set-row" style="margin-bottom:0;">
-                <div class="set-num" style="${set.isWarmup || set.isDropSet ? 'font-size:9px; color:var(--text-muted);' : ''}">${setLabel}</div>
+                <div class="set-num" style="${set.isWarmup || set.isDropSet || item.isSuperset ? 'font-size:9px; color:var(--text-muted);' : ''}">${setLabel}${sideCaption}</div>
                 <div class="set-input-group">${inputGroupHtml}</div>
                 <div class="set-check"><div class="check-btn ${set.completed ? 'completed' : ''} ${lockOutClass}" id="btn-check-${exIdx}-${setIdx}" onclick="toggleSetComplete(${exIdx}, ${setIdx})">${btnText}</div></div>
             </div>
@@ -954,10 +1273,22 @@ export function renderExerciseSets() {
         </div>`;
     });
     const hypFixed = isHypertrophyPhase();
-    html += `<div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-        ${hypFixed ? `<div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-align:center;">Hypertrophy · 3 working sets</div>` : `<button type="button" onclick="addSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD SET</button>`}
-        <button type="button" onclick="addDropSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET (80%)</button>
-    </div>`;
+    const nameA = item.sides?.[0]?.exercise?.name || 'A';
+    const nameB = item.sides?.[1]?.exercise?.name || 'B';
+    if (item.isSuperset) {
+        html += `<div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-align:center; line-height:1.4;">A · ${nameA}<br>B · ${nameB}<br>Rest after B only · 100s +10s per 0 RIR</div>
+            <button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'A')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · A</button>
+            <button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'B')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · B</button>
+            <button type="button" onclick="addSupersetRound(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD ROUND (A+B)</button>
+        </div>`;
+    } else {
+        html += `<div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+            ${hypFixed ? `<div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-align:center;">Hypertrophy · 3 working sets prescribed</div>` : ''}
+            <button type="button" onclick="addDropSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET (80%)</button>
+            <button type="button" onclick="addSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD SET</button>
+        </div>`;
+    }
     
     document.getElementById('sets-modal-content').innerHTML = html;
 };
@@ -978,8 +1309,48 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
     const item = store.activeLog.items[exIdx];
     const setObj = item.sets[setIdx];
     setObj[field] = num;
+    if (field === 'weight' && setObj && !setObj.isWarmup && !setObj.isText) {
+        if (item.isSuperset && setObj.side) {
+            (item.sets || []).forEach(s => {
+                if (s && s.side === setObj.side && !s.isWarmup && !s.isText && !s.isDropSet) s.weight = num;
+            });
+            // Rebuild that side's warmups if none completed yet
+            const sideWarmDone = (item.sets || []).some(s => s.side === setObj.side && s.isWarmup && s.completed);
+            if (!sideWarmDone) {
+                const sideMeta = (item.sides || []).find(s => s.key === setObj.side);
+                const exName = sideMeta?.exercise?.name || '';
+                const reps = Number((item.sets || []).find(s => s.side === setObj.side && !s.isWarmup)?.reps) || 10;
+                const isIso = !!sideMeta?.isIsolation;
+                const newWu = buildHypertrophyWarmupSets(exName, num, reps, isIso).map(s => ({
+                    ...s, side: setObj.side, completed: false, locked: false
+                }));
+                const withoutOldWu = (item.sets || []).filter(s => !(s.side === setObj.side && s.isWarmup));
+                const otherWu = withoutOldWu.filter(s => s.isWarmup);
+                const work = withoutOldWu.filter(s => !s.isWarmup);
+                // Keep order: A warmups, B warmups, then work
+                const aWu = setObj.side === 'A' ? newWu : otherWu.filter(s => s.side === 'A');
+                const bWu = setObj.side === 'B' ? newWu : otherWu.filter(s => s.side === 'B');
+                item.sets = [...aWu, ...bWu, ...work];
+                item.exercise = {
+                    ...item.exercise,
+                    name: supersetTitleFromItem(item)
+                };
+                if (window.currentModalExIdx != null) renderExerciseSets();
+            }
+        } else {
+            (item.sets || []).forEach(s => {
+                if (s && !s.isWarmup && !s.isText && !s.isLactateHit && !s.isDropSet) s.weight = num;
+            });
+            if (maybeRebuildLiftWarmups(item, num) && window.currentModalExIdx != null) {
+                renderExerciseSets();
+            }
+        }
+    }
     if (field === 'reps' && setObj && !setObj.isWarmup && !setObj.isText) {
-        if (maybeRetirePressUpsFromSet(item.exercise?.name, num)) {
+        const exName = item.isSuperset
+            ? ((item.sides || []).find(s => s.key === setObj.side)?.exercise?.name)
+            : item.exercise?.name;
+        if (maybeRetirePressUpsFromSet(exName, num)) {
             try { window.alert('Press-ups retired: logged >12 reps. Bench variants will be used going forward.'); } catch (e) { /* ignore */ }
         }
     }
@@ -1045,7 +1416,10 @@ export function toggleSetComplete(exIdx, setIdx) {
     
     const item = store.activeLog.items[exIdx];
     if (setObj.completed && !setObj.isWarmup && !setObj.isText) {
-        if (maybeRetirePressUpsFromSet(item.exercise?.name, setObj.reps)) {
+        const retireName = item.isSuperset
+            ? ((item.sides || []).find(s => s.key === setObj.side)?.exercise?.name)
+            : item.exercise?.name;
+        if (maybeRetirePressUpsFromSet(retireName, setObj.reps)) {
             try { window.alert('Press-ups retired: logged >12 reps. Bench variants will be used going forward.'); } catch (e) { /* ignore */ }
         }
     }
@@ -1068,6 +1442,32 @@ export function toggleSetComplete(exIdx, setIdx) {
                     startRestOnSet(j, 0, setObj.restTime);
                     break;
                 }
+            }
+        }
+    } else if (setObj.completed && !skipRest && item.isSuperset) {
+        if (setObj.isWarmup) {
+            const wuRest = Number(setObj.restTime) || 0;
+            if (item.sets[setIdx + 1] && wuRest > 0) startRestOnSet(exIdx, setIdx + 1, wuRest);
+        } else if (setObj.side === 'A') {
+            // No rest between A and B — unlock the partner set immediately
+            const next = item.sets[setIdx + 1];
+            if (next) {
+                next.locked = false;
+                delete next.lockTimeLeft;
+                try { clearInterval(store.restIntervals[`${exIdx}-${setIdx + 1}`]); } catch (e) { /* ignore */ }
+            }
+        } else if (setObj.side === 'B') {
+            let partnerA = null;
+            if (!setObj.isDropSet && setObj.round) {
+                partnerA = (item.sets || []).find(s =>
+                    s.side === 'A' && !s.isWarmup && !s.isDropSet && s.round === setObj.round
+                );
+            }
+            const restSec = setObj.isDropSet
+                ? (100 + (parseFloat(setObj.rpe) === 0 ? 10 : 0))
+                : supersetRestAfterB(partnerA, setObj);
+            if (item.sets[setIdx + 1] && restSec > 0) {
+                startRestOnSet(exIdx, setIdx + 1, restSec);
             }
         }
     } else if (setObj.completed && !skipRest && item.sets[setIdx + 1]) {
@@ -1188,6 +1588,7 @@ export function toggleToolsMenu() {
     }
     refreshTemplateSelector();
     if (store.activeLog.type === 'workout') {
+        try { updateExerciseDropdowns(); } catch (e) { /* ignore */ }
         if (foodSel) foodSel.style.display = 'none';
         if (exSel) exSel.style.display = 'block';
     } else if (['breakfast', 'lunch', 'dinner', 'snack'].includes(store.activeLog.type)) {
@@ -1295,10 +1696,14 @@ export function beginManualWorkoutSession(kind, opts = {}) {
 window._beginManualWorkoutSession = beginManualWorkoutSession;
 
 export function resolveActiveSessionKind() {
-    const fromManual = normalizeLoggedSessionKind(window.manualSessionKind) || window.manualSessionKind;
+    // Prefer the exact planned label (e.g. Hypertrophy / Push, Strength A) — do not
+    // collapse to Full Body / Strength here; week-plan credits normalize separately.
+    const fromManual = window.manualSessionKind || null;
     if (fromManual) return fromManual;
     const focus = document.getElementById('today-focus')?.value || '';
-    const fromFocus = normalizeLoggedSessionKind(focus) || (focus && focus !== 'Rest' && focus !== 'Practice' && focus !== 'Game' && focus !== 'Match' ? focus : null);
+    const fromFocus = (focus && focus !== 'Rest' && focus !== 'Practice' && focus !== 'Game' && focus !== 'Match')
+        ? focus
+        : null;
     if (fromFocus) return fromFocus;
     const items = store.activeLog?.items || [];
     // Lactate/HIT before generic cardio — HIT modalities use domain "cardio"
@@ -1548,13 +1953,12 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
             const input = document.getElementById('today-focus');
             if (input) input.value = String(eventFocus).trim();
         }
-        if (focus === 'Game' || focus === 'Match') {
-            resetWorkoutTimer();
-            startWorkoutTimer();
-            return openMatchLogModal();
-        }
-        // Rest days never force lifting; optional steady is always allowed
-        if (focus === 'Rest' || focus === 'Rest (Cardio Only)') {
+        if (focus === 'Game' || focus === 'Match' || isPracticeEvent(focus) || focus === 'Practice') {
+            // Practice / match run as a timed workout (warmup → session → stretch); diary after Complete log
+            const input = document.getElementById('today-focus');
+            if (input) input.value = focus === 'Game' ? 'Match' : focus;
+            window.manualSessionKind = (focus === 'Game' || focus === 'Match') ? 'Match' : 'Practice';
+        } else if (focus === 'Rest' || focus === 'Rest (Cardio Only)') {
             if (isSteadyCardio(eventFocus) || eventFocus === 'Cardio (Steady)') {
                 const input = document.getElementById('today-focus');
                 if (input) input.value = 'Cardio (Steady)';
@@ -1565,19 +1969,16 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
                 if (input) input.value = 'Cardio (Steady)';
             }
         }
-        if (isPracticeEvent(focus) || focus === 'Practice') {
-            resetWorkoutTimer();
-            startWorkoutTimer();
-            return openPracticeLogModal();
-        }
         // Lactate/HIT: ask modality before building the 10-min protocol
         if (shouldPromptLactateHitTypes(focus) && !opts.afterHitPicker && !window.editingSessionId) {
             openLactateHitPicker(() => startExecution(type, buttonElement, eventFocus || focus, { afterHitPicker: true }));
             return;
         }
-        // Planned GPS session — always stamp a kind so the Log tab gets a session card
+        // Planned GPS session — keep the exact plan label (not credit-collapsed Full Body)
         const focusNow = document.getElementById('today-focus')?.value || focus || '';
-        window.manualSessionKind = normalizeLoggedSessionKind(focusNow) || focusNow || 'Full Body / Strength';
+        if (window.manualSessionKind !== 'Practice' && window.manualSessionKind !== 'Match') {
+            window.manualSessionKind = focusNow || 'Full Body / Strength';
+        }
     } else {
         window.manualSessionKind = null;
         window._lactateHitSelection = null;
@@ -1593,8 +1994,12 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
             ? 'HIT class'
             : `RPE ${window._lactateHitSelection.sessionRpe ?? window._lactateHitSelection.desiredRpe ?? ''} · ${window._lactateHitSelection.blockMinutes || ''} min`}`
         : null;
+    const workoutTitle = (type === 'workout' && window.manualSessionKind)
+        ? prettyWorkoutTypeLabel(window.manualSessionKind)
+        : null;
     document.getElementById('current-route-title').innerText = lactateTitle
         || titleMap[type]
+        || workoutTitle
         || (type.charAt(0).toUpperCase() + type.slice(1));
     
     document.body.classList.add('workout-focus-mode');
@@ -1637,16 +2042,28 @@ function hideExecutionZoneShell() {
     if (exSel) exSel.style.display = 'none';
 }
 
-/** Park the in-progress workout (save draft) and leave the execution overlay. */
+/** Park the in-progress workout (save draft) and leave the execution overlay.
+ *  Timer keeps advancing via a wall-clock anchor stored on the draft.
+ */
 export function parkInProgressWorkout() {
     const items = store.activeLog?.type === 'workout' ? (store.activeLog.items || []) : [];
+    const elapsed = getWorkoutElapsedMs();
+    const anchorAt = Date.now() - elapsed;
     // Only write when we still have live items — never overwrite a parked draft with an empty log
     if (store.activeLog?.type === 'workout' && items.length) {
-        saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+        saveWorkoutDraft({
+            elapsedMs: elapsed,
+            timerRunning: true,
+            timerAnchorAt: anchorAt
+        });
     } else if (store.activeLog?.type === 'workout'
         && window._workoutSessionConfirmed
         && !hasWorkoutDraft()) {
-        saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+        saveWorkoutDraft({
+            elapsedMs: elapsed,
+            timerRunning: true,
+            timerAnchorAt: anchorAt
+        });
     }
     resetWorkoutTimer();
     window._workoutSessionConfirmed = false;
@@ -1718,10 +2135,15 @@ export function resumeInProgressWorkout() {
     if (tLabel) tLabel.textContent = 'Timer';
 
     resetWorkoutTimer();
-    const elapsed = Number(draft.elapsedMs) || 0;
+    // Continue from wall-clock anchor so time away still counts
+    const elapsed = getDraftRunningElapsedMs(draft);
     if (elapsed > 0) setWorkoutElapsedMs(elapsed);
     startWorkoutTimer();
-    saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+    saveWorkoutDraft({
+        elapsedMs: getWorkoutElapsedMs(),
+        timerRunning: true,
+        timerAnchorAt: Date.now() - getWorkoutElapsedMs()
+    });
 
     const zone = document.getElementById('execution-zone');
     if (zone) {
@@ -1971,6 +2393,37 @@ export async function submitLog() {
             }
             return;
         }
+        const isPracticeOrMatch = isPracticeEvent(focus) || focus === 'Practice'
+            || focus === 'Game' || focus === 'Match'
+            || window.manualSessionKind === 'Practice' || window.manualSessionKind === 'Match';
+        if (isPracticeOrMatch) {
+            const matchMode = focus === 'Game' || focus === 'Match' || window.manualSessionKind === 'Match';
+            window.journalMode = matchMode ? 'match' : 'practice';
+            configureJournalModal(window.journalMode);
+            const eyebrow = document.getElementById('journal-modal-eyebrow');
+            const title = document.getElementById('journal-modal-title');
+            if (eyebrow) eyebrow.innerText = matchMode ? 'Match Complete' : 'Practice Complete';
+            if (title) title.innerText = 'THE BRAIN DUMP';
+            ['journal-rpe','journal-athletic','journal-mental','journal-notes','journal-match-perf','journal-injury-pain'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            resetJournalMedia();
+            renderJournalMediaPreview();
+            const zone = document.getElementById('execution-zone');
+            if (zone) zone.style.pointerEvents = 'none';
+            const modal = document.getElementById('post-session-modal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                const content = modal.querySelector('.modal-content');
+                if (content) {
+                    content.style.animation = 'none';
+                    void content.offsetHeight;
+                    content.style.animation = '';
+                }
+            }
+            return;
+        }
         if (skipDiary && needsInjuryPainFollowUp()) {
             window.journalMode = 'workout';
             configureJournalModal('pain-only');
@@ -2074,7 +2527,6 @@ export async function commitWorkoutSession() {
     // (timer capture below — need previousSnap first for edit fallback)
 
     let logsToSave = [];
-    let sessionBurn = 0;
     let saveError = null;
     const sessionKind = resolveActiveSessionKind();
     const dateIso = dateToISO(new Date());
@@ -2160,6 +2612,42 @@ export async function commitWorkoutSession() {
     applyInjuryPainFollowUpFromJournal();
 
     store.activeLog.items.forEach(item => {
+        if (item.isSuperset && Array.isArray(item.sides)) {
+            item.sides.forEach(sideInfo => {
+                const sideKey = sideInfo.key;
+                const exName = sideInfo.exercise?.name || `Side ${sideKey}`;
+                const baseDomain = (sideInfo.exercise?.domain || '').toLowerCase();
+                const isCardio = baseDomain === 'cardio';
+                const sideCompleted = (item.sets || []).filter(s =>
+                    s.side === sideKey && s.completed && !s.isWarmup && !s.isText
+                );
+                sideCompleted.forEach((set, i) => {
+                    const rpeVal = (set.rpe === '' || set.rpe === undefined || set.rpe === null)
+                        ? 0
+                        : Math.round(Number(set.rpe)) || 0;
+                    logsToSave.push({
+                        exercise: exName,
+                        sets: i + 1,
+                        reps: Math.round(set.reps) || 0,
+                        weight_kg: set.weight || 0,
+                        distance_km: 0,
+                        time_minutes: 0,
+                        rpe: rpeVal,
+                        type: baseDomain || 'strength',
+                        session_duration_min: timedMinutes || 0
+                    });
+                    if (!isCardio && set.rpe <= 1 && isHypertrophyPhase()) {
+                        store.fatigueLockouts[sideInfo.exercise?.muscle_group] = true;
+                    }
+                });
+                const last = sideCompleted[sideCompleted.length - 1];
+                if (last && last.rpe > 2 && !isCardio && last.weight > 0) {
+                    alert(`RIR Auto-Progression: ${exName} felt easy (RIR > 2). +2.5kg applied for next session.`);
+                }
+            });
+            return;
+        }
+
         let baseDomain = (item.exercise?.domain || '').toLowerCase();
         let isCardio = baseDomain === 'cardio' || globalRPE > 6 || isSteadyCardio(sessionKind) || isLactateEvent(sessionKind);
 
@@ -2191,7 +2679,6 @@ export async function commitWorkoutSession() {
                     type: isCardio || set.isLactateHit ? 'cardio' : (baseDomain || 'strength'),
                     session_duration_min: timedMinutes || 0
                 });
-                if (isCardio && set.distance_km) sessionBurn += (set.distance_km * store.userConfig.weight * 1.036);
 
                 if (!isCardio && set.rpe <= 1 && isHypertrophyPhase()) {
                     store.fatigueLockouts[item.exercise?.muscle_group] = true;
@@ -2331,11 +2818,6 @@ export async function commitWorkoutSession() {
         console.warn('Optimistic log refresh failed:', e);
     }
 
-    if (!saveError && sessionBurn > 0) {
-        store.currentRefund.cals += sessionBurn;
-        store.currentRefund.carbs += Math.round(sessionBurn / 4);
-        applyDailyModifiers();
-    }
     if (!saveError || saveError === 'offline') {
         let currentIdx = parseInt(localStorage.getItem('ascensus_gps_index')) || 0;
         localStorage.setItem('ascensus_gps_index', currentIdx + 1);
@@ -2345,9 +2827,20 @@ export async function commitWorkoutSession() {
 
     // Persist gym / lactate diary (custom fields + media)
     if (window.journalMode === 'workout' || window.journalMode === 'lactate') {
+        let media = [];
         try {
-            const media = await persistPendingJournalMedia(dateIso);
-            const entry = buildDiaryEntryFromForm({ notes: jNotes, mental: mentFat, media, type: window.journalMode === 'lactate' ? 'lactate' : 'gym' });
+            media = await persistPendingJournalMedia(dateIso);
+        } catch (e) {
+            console.warn('Gym journal media save failed', e);
+        }
+        try {
+            const entry = buildDiaryEntryFromForm({
+                notes: jNotes,
+                mental: mentFat,
+                rpe: globalRPE,
+                media,
+                type: window.journalMode === 'lactate' ? 'lactate' : 'gym'
+            });
             if (window._lactateHitSelection) {
                 entry.hitTypes = window._lactateHitSelection.types || [];
                 entry.lactateSlot = window._lactateHitSelection.slot || null;
@@ -2355,8 +2848,9 @@ export async function commitWorkoutSession() {
                 entry.lactateSummary = window._lactateHitSelection.summary || '';
             }
             saveGymJournalEntry(dateIso, entry);
+            try { renderAdherenceCalendar(); } catch (e) { /* ignore */ }
         } catch (e) {
-            console.warn('Gym journal media save failed', e);
+            console.warn('Gym journal save failed', e);
             if (jNotes) localStorage.setItem('ascensus_journal_' + new Date().toLocaleDateString(), jNotes);
         }
         resetJournalMedia();
@@ -2468,10 +2962,15 @@ export async function finalizeWorkoutLog() {
     try {
         // Keep mode stable for the whole commit (finally must not clear it early)
         window.journalMode = modeAtStart;
-        if (modeAtStart === 'practice') {
-            await commitPracticeSession();
-        } else if (modeAtStart === 'match') {
-            await commitMatchSession();
+        if (modeAtStart === 'practice' || modeAtStart === 'match') {
+            const notes = document.getElementById('journal-notes')?.value || '';
+            const entry = buildDiaryEntryFromForm({ notes, type: modeAtStart });
+            window._sportDiaryStash = { mode: modeAtStart, entry, notes };
+            window.journalMode = 'workout-silent';
+            await commitWorkoutSession();
+            window.journalMode = modeAtStart;
+            if (modeAtStart === 'practice') await commitPracticeSession();
+            else await commitMatchSession();
         } else {
             await commitWorkoutSession();
         }

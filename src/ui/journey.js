@@ -394,9 +394,10 @@ export async function openDayDetail(dateStr, isoHint) {
 
         let html = '';
 
-        // Practice / Match diary blocks (same events as Drive → Log)
+        // Practice / Match / Gym diary blocks (same events as Drive → Log)
         html += renderSportDiaryBlockHtml('Match', matchJournal, wks);
         html += renderSportDiaryBlockHtml('Practice', practiceJournal, wks);
+        html += renderGymDiaryBlockHtml(gymJournal);
 
         foods.forEach(log => {
             let preview = '';
@@ -472,7 +473,8 @@ export async function openDayDetail(dateStr, isoHint) {
         document.getElementById('modal-log-list').innerHTML = html;
 
         const mediaJournal = matchJournal?.media?.length ? matchJournal
-            : (practiceJournal?.media?.length ? practiceJournal : null);
+            : (practiceJournal?.media?.length ? practiceJournal
+                : (gymJournal?.media?.length && gymJournal.type !== 'lactate' && !(gymJournal.hitTypes?.length) ? gymJournal : null));
         if (mediaJournal?.media?.length) {
             const slot = document.getElementById('day-journal-media-slot');
             if (slot) slot.innerHTML = await buildJournalMediaGalleryHtml(mediaJournal.media);
@@ -615,6 +617,41 @@ function renderSportDiaryBlockHtml(kind, journal, workoutLogs = []) {
     </div>`;
 }
 
+/** Gym / strength diary on adherence day detail (lactate uses session sheet View diary). */
+function renderGymDiaryBlockHtml(journal) {
+    if (!journal) return '';
+    if (journal.type === 'lactate' || (Array.isArray(journal.hitTypes) && journal.hitTypes.length)) return '';
+
+    const fields = journal.fields || {};
+    const fieldLines = Object.keys(fields)
+        .filter(k => fields[k] != null && fields[k] !== '' && !['rpe', 'mental', 'athletic', 'matchPerformance'].includes(k))
+        .map(k => `<div style="display:flex; justify-content:space-between; gap:10px; margin-top:8px; font-size:12px;">
+            <span style="color:var(--text-muted);">${escapeHtml(k)}</span>
+            <span style="color:var(--text-main); font-weight:700;">${escapeHtml(fields[k])}</span>
+        </div>`).join('');
+
+    const hasContent = journal.notes
+        || journal.rpe != null
+        || journal.mental != null
+        || fieldLines
+        || (journal.media && journal.media.length);
+    if (!hasContent) return '';
+
+    const metaBits = [];
+    if (journal.mental != null) metaBits.push(`Mental ${journal.mental}`);
+
+    return `<div style="margin-bottom:16px; padding:14px; border:1px solid rgba(212,175,55,0.35); border-radius:10px; background:rgba(212,175,55,0.06);">
+        <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">[ WORKOUT DIARY ]</div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:${journal.notes || fieldLines ? '10px' : '0'}; font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);">
+            ${journal.rpe != null ? `<span>RPE <strong style="color:var(--text-main);">${journal.rpe}</strong></span>` : ''}
+            ${metaBits.map(b => `<span>${escapeHtml(b)}</span>`).join('')}
+        </div>
+        ${journal.notes ? `<div style="font-size:13px; color:var(--text-main); line-height:1.5; white-space:pre-wrap;">${escapeHtml(journal.notes)}</div>` : ''}
+        ${fieldLines}
+        ${journal.media?.length ? `<div id="day-journal-media-slot"></div>` : ''}
+    </div>`;
+}
+
 function summarizeAdherenceSnapshotSets(sets, { lactate = false } = {}) {
     const rows = (sets || []).filter(s => s && s.completed !== false);
     if (!rows.length) return 'No sets';
@@ -722,15 +759,51 @@ export function openAdherenceSessionDetail(sessionId, dateStr) {
             <div style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; line-height:1.5;">${summarizeAdherenceSnapshotSets(item.sets || [], { lactate: isLactate || !!item.isLactateHit })}</div>
         </div>`;
     });
-    foodsEl.innerHTML = body || `<div style="font-size:12px; color:var(--text-muted);">No sets stored</div>`;
+    foodsEl.innerHTML = (body || `<div style="font-size:12px; color:var(--text-muted);">No sets stored</div>`)
+        + `<div id="gym-session-diary-panel" style="margin-top:12px;"></div>`;
+    window._gymSessionDiaryOpen = false;
+    window._openGymSessionSnap = snap;
 
     if (actionsEl) {
         const sid = String(sessionId).replace(/'/g, "\\'");
+        const safeDate = String(dateStr || snap.dateIso || '').replace(/'/g, "\\'");
         actionsEl.classList.remove('hidden');
         actionsEl.innerHTML = `
-            <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="editLoggedWorkoutSession('${sid}')">Edit workout</button>`;
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="editLoggedWorkoutSession('${sid}')">Edit workout</button>
+                <button type="button" id="btn-gym-diary" class="btn-primary is-secondary" style="margin:0;" onclick="showGymSessionDiary('${safeDate}')">View diary</button>
+            </div>`;
     }
     sheet.classList.remove('hidden');
+}
+
+/** Toggle gym/workout diary inside the adherence session sheet. */
+export async function showGymSessionDiary(dateStr) {
+    const panel = document.getElementById('gym-session-diary-panel');
+    const diaryBtn = document.getElementById('btn-gym-diary');
+    const snap = window._openGymSessionSnap;
+    if (!panel) return;
+
+    if (window._gymSessionDiaryOpen) {
+        window._gymSessionDiaryOpen = false;
+        panel.innerHTML = '';
+        if (diaryBtn) diaryBtn.textContent = 'View diary';
+        return;
+    }
+
+    window._gymSessionDiaryOpen = true;
+    if (diaryBtn) diaryBtn.textContent = 'Hide diary';
+
+    const entry = loadGymJournalEntry(dateStr)
+        || loadGymJournalEntry(snap?.dateIso)
+        || loadGymJournalEntry(resolveIsoFromDateStr(dateStr));
+    panel.innerHTML = `
+        <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:12px;">Diary entry</div>
+        ${buildLactateDiaryHtml(entry)}`;
+    if (entry?.media?.length) {
+        const slot = document.getElementById('lactate-diary-media-slot');
+        if (slot) slot.innerHTML = await buildJournalMediaGalleryHtml(entry.media);
+    }
 }
 
 function parseSecLabel(label) {

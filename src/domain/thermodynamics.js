@@ -3,12 +3,24 @@ import { getTodayFocus, syncTrackerPillUI } from './fitness-hud.js';
 import { generateGroceryList } from './grocery.js';
 import { generateDailyMealPlan } from './meal-planner.js';
 import { updateInjuryStatusPanel } from './periodization.js';
-import { generateFutureTimeline, invalidateWeekPlanCache } from './route-planner.js';
+import {
+    dateToISO,
+    generateFutureTimeline,
+    getPlannedDayEvents,
+    invalidateWeekPlanCache,
+    isGameEvent,
+    isLactateEvent,
+    isPracticeEvent,
+    isStrengthEvent,
+    listWorkoutSessionsForDate
+} from './route-planner.js';
 import { getGymPlanPrefs } from './strength-engine.js';
 import { clearHypertrophyDayPlanCache } from './hypertrophy-engine.js';
 import { generateWorkoutTemplate } from './workout-generator.js';
 import { updateLiveDashboard } from '../ui/journey.js';
 import { applyNetworkKillSwitch, hydrateNetworkProfileDom } from '../ui/network.js';
+
+const DEFAULT_EVENT_RPE = 7;
 
 // ==========================================
 // 4. THERMODYNAMICS & ETA ENGINE
@@ -97,7 +109,6 @@ export function applyUserConfigToDom() {
     setVal('set-height', store.userConfig.height);
     setVal('set-age', store.userConfig.age);
     setVal('set-sex', store.userConfig.sex);
-    setVal('set-activity', store.userConfig.activity);
     setVal('set-goal', store.userConfig.goal);
     setVal('set-diet', store.userConfig.diet);
     setVal('set-shop-style', store.userConfig.shopStyle || 'Cheap');
@@ -111,6 +122,13 @@ export function applyUserConfigToDom() {
     setVal('set-budget', store.userConfig.budget);
     setVal('set-training-freq', store.userConfig.trainingFreq);
     setVal('set-db-increment', store.userConfig.dumbbellIncrement != null ? store.userConfig.dumbbellIncrement : 2);
+    try {
+        const prefs = JSON.parse(localStorage.getItem('ascensus_session_prep_prefs_v1') || '{}') || {};
+        setVal('set-gym-warmup', prefs.gymWarmup || 'planned');
+        setVal('set-gym-stretch', prefs.gymStretch || 'planned');
+        setVal('set-practice-warmup', prefs.practiceWarmup || 'planned');
+        setVal('set-practice-stretch', prefs.practiceStretch || 'planned');
+    } catch (e) { /* ignore */ }
     const disc = document.getElementById('strength-phase-disclaimer');
     if (disc) disc.classList.toggle('hidden', (store.userConfig.seasonPhase || '') !== 'OffSeason_Strength');
     // Day/time menus depend on phase — rebuild, preserving saved willingness/time when valid
@@ -168,7 +186,6 @@ export function saveSettings() {
     store.userConfig.height = parseFloat(document.getElementById('set-height').value) || 180;
     store.userConfig.age = parseInt(document.getElementById('set-age').value) || 25;
     store.userConfig.sex = document.getElementById('set-sex').value;
-    store.userConfig.activity = parseFloat(document.getElementById('set-activity').value) || 1.55;
     store.userConfig.goal = document.getElementById('set-goal').value;
     store.userConfig.mealsPerDay = parseInt(document.getElementById('set-meals-per-day').value) || 3;
     store.userConfig.budget = parseFloat(document.getElementById('set-budget').value) || 15.00;
@@ -264,57 +281,162 @@ export function handleSportChange() {
     saveSettings();
 }
 
+/** BMR: Katch-McArdle when BF% is known and < 20%, otherwise Mifflin–St Jeor. */
+export function computeBmr(config = store.userConfig) {
+    const weight = Number(config.weight) || 80;
+    const height = Number(config.height) || 180;
+    const age = Number(config.age) || 25;
+    const bodyFat = Number(config.bodyFat) || 0;
+    if (bodyFat > 0 && bodyFat < 20) {
+        const leanBodyMass = weight * (1 - (bodyFat / 100));
+        return 370 + (21.6 * leanBodyMass);
+    }
+    let bmr = (10 * weight) + (6.25 * height) - (5 * age);
+    bmr += (config.sex === 'Male') ? 5 : -161;
+    return bmr;
+}
+
+function journalLookupKeys(dateIso) {
+    const keys = [];
+    if (!dateIso) return keys;
+    keys.push(String(dateIso));
+    try {
+        const d = new Date(String(dateIso).includes('T') ? dateIso : dateIso + 'T12:00:00');
+        if (!Number.isNaN(d.getTime())) keys.push(d.toLocaleDateString());
+    } catch (e) { /* ignore */ }
+    return [...new Set(keys)];
+}
+
+function readLocalJournal(prefix, dateIso) {
+    for (const key of journalLookupKeys(dateIso)) {
+        try {
+            const raw = localStorage.getItem(prefix + key);
+            if (!raw) continue;
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') return parsed;
+        } catch (e) { /* ignore */ }
+    }
+    return null;
+}
+
+function readNumericRpe(journal) {
+    if (!journal || journal.rpe == null || journal.rpe === '') return null;
+    const n = Number(journal.rpe);
+    return Number.isFinite(n) ? n : null;
+}
+
+function resolveLactateRpe(dateIso) {
+    try {
+        const sessions = listWorkoutSessionsForDate(dateIso) || [];
+        for (const s of sessions) {
+            if (!s) continue;
+            if (isLactateEvent(s.kind) || s.kind === 'Lactate' || s.isHitClass) {
+                const rpe = readNumericRpe(s);
+                if (rpe != null) return rpe;
+            }
+        }
+    } catch (e) { /* ignore */ }
+    const gym = readLocalJournal('ascensus_gym_journal_', dateIso);
+    if (gym && (gym.type === 'lactate' || (Array.isArray(gym.hitTypes) && gym.hitTypes.length))) {
+        const rpe = readNumericRpe(gym);
+        if (rpe != null) return rpe;
+    }
+    return null;
+}
+
+/** RPE multipliers for practice / match / lactate (missing RPE → 7). */
+function eventRpeMultiplier(rpe) {
+    const r = rpe == null || !Number.isFinite(Number(rpe)) ? DEFAULT_EVENT_RPE : Number(rpe);
+    if (r <= 5) return 1.2;
+    if (r <= 7) return 1.3;
+    return 1.5;
+}
+
+/** Collect planned sport-event RPEs for a calendar day (one entry per event type on the plan). */
+function collectPlannedEventRpes(dateObj) {
+    const events = getPlannedDayEvents(dateObj) || [];
+    const dateIso = dateToISO(dateObj);
+    const rpes = [];
+    if (events.some(isPracticeEvent)) {
+        rpes.push(readNumericRpe(readLocalJournal('ascensus_practice_journal_', dateIso)) ?? DEFAULT_EVENT_RPE);
+    }
+    if (events.some(isGameEvent)) {
+        rpes.push(readNumericRpe(readLocalJournal('ascensus_match_journal_', dateIso)) ?? DEFAULT_EVENT_RPE);
+    }
+    if (events.some(isLactateEvent)) {
+        rpes.push(resolveLactateRpe(dateIso) ?? DEFAULT_EVENT_RPE);
+    }
+    return rpes;
+}
+
+function macrosFromCalories(targetCals) {
+    const cals = Math.max(0, Math.round(targetCals));
+    const pro = Math.round((cals * 0.40) / 4);
+    const carb = Math.round((cals * 0.40) / 4);
+    const fat = Math.round((cals * 0.20) / 9);
+    return { cals, pro, carb, fat };
+}
+
+/**
+ * Daily maintenance calories from BMR × 1.3, stacked with prior-day load and today's plan.
+ * Same-day logs do not affect that day's target — only the week plan does for "today".
+ */
+export function computeDayNutritionTargets(dateObj = new Date(), config = store.userConfig) {
+    const day = dateObj instanceof Date ? new Date(dateObj) : new Date(dateObj);
+    day.setHours(12, 0, 0, 0);
+    const dayIso = dateToISO(day);
+    const yesterday = new Date(dayIso + 'T12:00:00');
+    yesterday.setDate(yesterday.getDate() - 1);
+    const twoDaysAgo = new Date(dayIso + 'T12:00:00');
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+    const BMR = computeBmr(config);
+    let mult = 1.3; // baseline (no prior activity)
+
+    const yesterdayEvents = getPlannedDayEvents(yesterday) || [];
+    if (yesterdayEvents.some(isStrengthEvent)) mult *= 1.3;
+
+    for (const rpe of collectPlannedEventRpes(yesterday)) {
+        mult *= eventRpeMultiplier(rpe);
+    }
+
+    // Day after an RPE 8+ event (event was two days ago → today gets ×1.2 each)
+    for (const rpe of collectPlannedEventRpes(twoDaysAgo)) {
+        if (rpe >= 8) mult *= 1.2;
+    }
+
+    const todayEvents = getPlannedDayEvents(day) || [];
+    if (todayEvents.some(isStrengthEvent)) mult *= 1.1;
+    if (todayEvents.some(isPracticeEvent)) mult *= 1.1;
+
+    let maintenanceCals = BMR * mult;
+
+    let targetCals = maintenanceCals;
+    if (!config.restStop) {
+        if (config.goal === 'Fat_Loss') targetCals = maintenanceCals * 0.9;
+        else if (config.goal === 'Muscle_Gain') targetCals = maintenanceCals * 1.1;
+    }
+
+    return macrosFromCalories(targetCals);
+}
+
 export function calculateTDEE() {
-    let BMR;
-    if (store.userConfig.bodyFat > 0) {
-        // Katch-McArdle Formula (Highly accurate if BF% is known)
-        let leanBodyMass = store.userConfig.weight * (1 - (store.userConfig.bodyFat / 100));
-        BMR = 370 + (21.6 * leanBodyMass);
-    } else {
-        // Mifflin-St Jeor Formula
-        BMR = (10 * store.userConfig.weight) + (6.25 * store.userConfig.height) - (5 * store.userConfig.age);
-        BMR += (store.userConfig.sex === 'Male') ? 5 : -161;
-    }
-    
-    let TDEE = BMR * store.userConfig.activity;
-    let targetCals = TDEE;
-
-    if (store.userConfig.restStop) { targetCals = TDEE; } 
-    else {
-        if (store.userConfig.goal === 'Fat_Loss') targetCals = Math.max(BMR, TDEE - 500 - (store.userConfig.tdeePenalty || 0)); 
-        else if (store.userConfig.goal === 'Muscle_Gain') targetCals = TDEE + 300 - (store.userConfig.tdeePenalty || 0); 
-    }
-
-    const heightM = store.userConfig.height / 100;
-    const BMI = store.userConfig.weight / (heightM * heightM);
-    let macroWeight = BMI > 28 ? 25 * (heightM * heightM) : store.userConfig.weight; 
-
-    const targetPro = Math.round(macroWeight * 2.0); 
-    const targetFat = Math.round(macroWeight * 1.0); 
-    const targetCarb = Math.max(0, Math.round((targetCals - (targetPro * 4) - (targetFat * 9)) / 4));
-
-    store.userConfig.baselineTargets = { cals: Math.round(targetCals), pro: targetPro, fat: targetFat, carb: targetCarb };
+    const targets = computeDayNutritionTargets(new Date());
+    store.userConfig.baselineTargets = { ...targets };
+    store.userConfig.targets = { ...targets };
+    localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig));
     applyDailyModifiers();
 }
 
 export function applyDailyModifiers() {
-    if(!store.userConfig.baselineTargets) return;
-    let t = { ...store.userConfig.baselineTargets };
-    const focus = document.getElementById('today-focus') ? document.getElementById('today-focus').value : 'push';
-
-    if (focus === 'Rest') {
-        const carbReduction = Math.round(t.carb * 0.20); 
-        t.carb -= carbReduction; t.fat += Math.round((carbReduction * 4) / 9); 
+    if (!store.userConfig.baselineTargets) {
+        store.userConfig.baselineTargets = computeDayNutritionTargets(new Date());
     }
+    store.userConfig.targets = { ...store.userConfig.baselineTargets };
 
-    t.cals += store.currentRefund.cals; t.carb += store.currentRefund.carbs;
-    
     const notice = document.getElementById('refund-notice');
-    if(store.currentRefund.cals > 0) {
-        notice.style.display = 'block'; notice.innerText = `+${Math.round(store.currentRefund.cals)} kcal from cardio added today`;
-    } else { notice.style.display = 'none'; }
+    if (notice) notice.style.display = 'none';
 
-    store.userConfig.targets = t;
     localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig));
     updateMacroDashboard();
 }
@@ -327,7 +449,11 @@ export function updateMacroDashboard() {
     generateDailyMealPlan(); // Auto-generate the visual dashboard
 }
 
-export function handleFocusChange() { applyDailyModifiers(); document.getElementById('ghost-template-container').classList.add('hidden'); generateDailyMealPlan(); }
+export function handleFocusChange() {
+    calculateTDEE();
+    document.getElementById('ghost-template-container').classList.add('hidden');
+    generateDailyMealPlan();
+}
 
 // --- SMART ROUNDING ENGINE ---
 export function roundToEquipment(val, type) {

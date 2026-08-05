@@ -17,9 +17,11 @@ import { computeDomainBarLayout, formatDomainAimLabel, getMacroRange } from '../
 import { getRecommendedSleepHours, getSleepDrivingRpeLoad, getTodaySleepHours, resolveSessionRpe } from './sleep-rpe.js';
 import {
     draftMatchesPlanEvent,
+    getDraftRunningElapsedMs,
     getDraftSessionLabel,
     loadWorkoutDraft
 } from './workout-draft.js';
+import { formatDurationMs } from '../ui/workout-timer.js';
 
 // --- THE FITNESS HUD DOMAIN MULTIPLIERS ---
 // Before the JSON seed is applied, these fallbacks convert volume into fitness scores.
@@ -297,11 +299,8 @@ export function renderWorkoutPreview(focus) {
 
         let logAction = '';
         if (!isRest) {
-            if (draft && draftMatchesPlanEvent(eventName, draft)) {
-                logAction = resumeStopActions();
-            } else {
-                logAction = `<button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); startExecution('workout', this, '${safeFocus}')">Start</button>`;
-            }
+            // Matching in-progress session is shown only via the draft banner below
+            logAction = `<button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); startExecution('workout', this, '${safeFocus}')">Start</button>`;
         }
 
         return `<div class="card" ${clickAttrs} style="${cardStyle}">
@@ -323,6 +322,7 @@ export function renderWorkoutPreview(focus) {
                 <div style="min-width:0; flex:1;">
                     <strong style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; letter-spacing:0.4px;">Workout in progress</strong>
                     <div style="margin-top:4px; color:var(--text-main); font-size:12px; font-weight:600; line-height:1.35;">${getDraftSessionLabel(draft)}</div>
+                    <div style="margin-top:2px; font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">Timer ${formatDurationMs(getDraftRunningElapsedMs(draft))} · still running</div>
                     <div style="margin-top:2px; font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">Resume to continue, or Stop to discard.</div>
                 </div>
                 ${resumeStopActions()}
@@ -330,30 +330,41 @@ export function renderWorkoutPreview(focus) {
         </div>`
         : '';
 
-    if (allTasksDone) {
-        previewEl.innerHTML = draftBanner + `<div class="card" style="padding:20px 16px; margin-bottom:12px; text-align:center;">
+    // Hide the plan card that matches the in-progress draft — only the banner should show
+    const slotsForDisplay = draft
+        ? remainingSlots.filter(s => !draftMatchesPlanEvent(s.event, draft))
+        : remainingSlots;
+    const allCoveredByDraft = draft && remainingSlots.length > 0 && slotsForDisplay.length === 0
+        && remainingSlots.every(s => draftMatchesPlanEvent(s.event, draft));
+
+    if (allTasksDone || allCoveredByDraft) {
+        previewEl.innerHTML = draftBanner + (allTasksDone ? `<div class="card" style="padding:20px 16px; margin-bottom:12px; text-align:center;">
             <div style="font-family:'Roboto Mono'; font-size:12px; font-weight:600; color:var(--gold-accent); letter-spacing:0.3px; line-height:1.5;">
                 Congrats, you have completed all tasks set for today
             </div>
-        </div>`;
+        </div>` : '');
         updatePreviousMatchEntryButton(dayEvents);
         return;
     }
 
-    if (!remainingSlots.length) {
+    if (!slotsForDisplay.length) {
         const restFocus = (dayEvents || []).includes('Rest (Cardio Only)') ? 'Rest (Cardio Only)' : 'Rest';
         const steadyAlreadyLogged = (loggedCredits['Cardio (Steady)'] || 0) > 0;
-        let html = draftBanner + buildCard(restFocus, '');
-        // Rest days always offer optional steady (unless already logged today)
-        if (!steadyAlreadyLogged) {
-            html += buildOptionalSteadyCard();
+        const draftIsSteady = draft && draftMatchesPlanEvent('Cardio (Steady)', draft);
+        let html = draftBanner;
+        // True rest day (nothing planned left) — show Rest + optional steady
+        if (!remainingSlots.length) {
+            html += buildCard(restFocus, '');
+            if (!steadyAlreadyLogged && !draftIsSteady) {
+                html += buildOptionalSteadyCard();
+            }
         }
         previewEl.innerHTML = html;
         updatePreviousMatchEntryButton(dayEvents);
         return;
     }
 
-    previewEl.innerHTML = draftBanner + remainingSlots.map(s => buildCard(s.event, s.time)).join('');
+    previewEl.innerHTML = draftBanner + slotsForDisplay.map(s => buildCard(s.event, s.time)).join('');
     updatePreviousMatchEntryButton(dayEvents);
 }
 
@@ -1075,76 +1086,9 @@ export function buildPlainSessionCardHtml(focus, _timeLabel) {
 }
 
 export function calculateLiveFitnessScores() {
-    store.currentFitnessScore = { str: 0, pow: 0, spd: 0, crd: 0, end: 0 };
-    const daysToCheck = [new Date().toLocaleDateString()];
-
-    const processSetMath = (domain, rpe, isCardio, durationMins) => {
-        let actualDomain = domain;
-        if (isCardio && domain !== 'sprint') actualDomain = 'cardio';
-        if (!FITNESS_MULTIPLIERS[actualDomain]) actualDomain = 'custom';
-        
-        let pts = { str:0, pow:0, spd:0, crd:0, end:0 };
-        const mults = FITNESS_MULTIPLIERS[actualDomain];
-        
-        // Strain Unit: 1 Set of lifting OR 1 minute of cardio
-        let units = isCardio ? Math.max(1, durationMins) : 1; 
-
-        pts.str += (units * mults.str);
-        pts.pow += (units * mults.pow);
-        pts.spd += (units * mults.spd);
-        pts.crd += (units * mults.crd);
-        pts.end += (units * mults.end);
-
-        // LACTATE RULE: If RPE > 6 on a lifting set, it bleeds heavily into Endurance/Metabolic
-        if (!isCardio && rpe > 6) {
-            pts.end += 2.0; 
-            pts.crd += 0.5;
-        }
-
-        return pts;
-    };
-
-    // 1. Add points from ALREADY SAVED workouts
-    daysToCheck.forEach(dateStr => {
-        const data = store.globalGroupedHistory[dateStr];
-        if (data && data.items) {
-            let wks = data.items.filter(i => i.type === 'workout');
-            wks.forEach(log => {
-                let exObj = store.globalExerciseDB.find(e => e.name === log.exercise);
-                let domain = (exObj && exObj.domain ? exObj.domain : (log.type || 'custom')).toLowerCase();
-                let isCardio = domain === 'cardio' || log.type === 'cardio';
-                if (log.exercise.toLowerCase().includes('sprint')) domain = 'sprint';
-
-                // Saved DB rows are basically 1 set per row in our structure
-                let pts = processSetMath(domain, log.rpe, isCardio, log.time_minutes);
-                store.currentFitnessScore.str += pts.str;
-                store.currentFitnessScore.pow += pts.pow;
-                store.currentFitnessScore.spd += pts.spd;
-                store.currentFitnessScore.crd += pts.crd;
-                store.currentFitnessScore.end += pts.end;
-            });
-        }
-    });
-
-    // 2. Add points from the LIVE UNSAVED workout
-    if (store.activeLog.type === 'workout') {
-        store.activeLog.items.forEach(item => {
-            let domain = (item.exercise.domain || 'custom').toLowerCase();
-            let isCardio = domain === 'cardio';
-            if (item.exercise.name.toLowerCase().includes('sprint')) domain = 'sprint';
-            
-            item.sets.forEach(set => {
-                if (set.completed && !set.isText) {
-                    let pts = processSetMath(domain, set.rpe, isCardio, set.time_minutes);
-                    store.currentFitnessScore.str += pts.str;
-                    store.currentFitnessScore.pow += pts.pow;
-                    store.currentFitnessScore.spd += pts.spd;
-                    store.currentFitnessScore.crd += pts.crd;
-                    store.currentFitnessScore.end += pts.end;
-                }
-            });
-        });
-    }
+    import('./weekly-goals.js')
+        .then(m => { try { m.renderWeeklyExerciseGoals(); } catch (e) { console.warn(e); } })
+        .catch(() => {});
     updateFitnessHUD();
 }
 

@@ -3,7 +3,15 @@
  * after Confirm workout, until Complete log or Back to plan.
  */
 import { store } from '../state/store.js';
-import { isLactateEvent, isSteadyCardio, normalizeLoggedSessionKind } from './route-planner.js';
+import { isHypertrophyEvent } from './hypertrophy-engine.js';
+import {
+    isGameEvent,
+    isLactateEvent,
+    isPracticeEvent,
+    isSteadyCardio,
+    normalizeLoggedSessionKind,
+    prettyFocusName
+} from './route-planner.js';
 
 const DRAFT_KEY = 'ascensus_workout_draft_v1';
 
@@ -32,6 +40,10 @@ export function saveWorkoutDraft(partial = {}) {
     // Never overwrite a parked draft with an empty live log
     if (!items.length) return loadWorkoutDraft();
 
+    const prev = (() => {
+        try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) { return null; }
+    })();
+
     const draft = {
         type: 'workout',
         items: JSON.parse(JSON.stringify(items)),
@@ -51,9 +63,24 @@ export function saveWorkoutDraft(partial = {}) {
             : (partial.elapsedMs == null ? undefined : Number(partial.elapsedMs) || 0),
         routeTitle: document.getElementById('current-route-title')?.innerText || '',
         confirmed: true,
+        timerRunning: true,
         savedAt: new Date().toISOString(),
         ...partial
     };
+    if (draft.elapsedMs == null && prev && typeof prev.elapsedMs === 'number') {
+        draft.elapsedMs = prev.elapsedMs;
+    }
+    // Wall-clock anchor so elapsed keeps advancing while the user is away from the workout page
+    if (draft.timerRunning !== false) {
+        draft.timerRunning = true;
+        const elapsed = Math.max(0, Number(draft.elapsedMs) || 0);
+        if (partial.timerAnchorAt != null && Number.isFinite(Number(partial.timerAnchorAt))) {
+            draft.timerAnchorAt = Number(partial.timerAnchorAt);
+        } else {
+            draft.timerAnchorAt = Date.now() - elapsed;
+        }
+        draft.elapsedMs = elapsed;
+    }
     if (draft.elapsedMs == null) delete draft.elapsedMs;
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
     window._workoutSessionConfirmed = true;
@@ -72,15 +99,26 @@ export function hasWorkoutDraftKey() {
 /** True when the draft is for this planned event kind. */
 export function draftMatchesPlanEvent(eventName, draft = loadWorkoutDraft()) {
     if (!draft || !eventName) return false;
-    const draftKind = normalizeLoggedSessionKind(draft.manualSessionKind)
-        || draft.manualSessionKind
-        || '';
+    const draftRaw = draft.manualSessionKind || '';
+    if (!draftRaw) return false;
+    if (draftRaw === eventName) return true;
+
+    if (isLactateEvent(draftRaw) && isLactateEvent(eventName)) return true;
+    if (isSteadyCardio(draftRaw) && isSteadyCardio(eventName)) return true;
+    if ((isPracticeEvent(draftRaw) || draftRaw === 'Practice')
+        && (isPracticeEvent(eventName) || eventName === 'Practice')) return true;
+    if ((isGameEvent(draftRaw) || draftRaw === 'Match' || draftRaw === 'Game')
+        && (isGameEvent(eventName) || eventName === 'Match' || eventName === 'Game')) return true;
+
+    // Hypertrophy must not collapse into generic strength matching
+    if (isHypertrophyEvent(draftRaw) || isHypertrophyEvent(eventName)) {
+        return isHypertrophyEvent(draftRaw) && isHypertrophyEvent(eventName) && draftRaw === eventName;
+    }
+
+    const draftKind = normalizeLoggedSessionKind(draftRaw) || draftRaw;
     const eventKind = normalizeLoggedSessionKind(eventName) || eventName;
-    if (!draftKind) return false;
     if (draftKind === eventKind) return true;
-    if (isLactateEvent(draftKind) && isLactateEvent(eventName)) return true;
-    if (isSteadyCardio(draftKind) && isSteadyCardio(eventName)) return true;
-    if ((draftKind.includes('Strength') || draftKind === 'Full Body / Strength')
+    if ((draftRaw.includes('Strength') || draftKind === 'Full Body / Strength')
         && (String(eventName).includes('Strength') || eventName === 'Full Body / Strength')) {
         return true;
     }
@@ -89,11 +127,33 @@ export function draftMatchesPlanEvent(eventName, draft = loadWorkoutDraft()) {
 
 export function getDraftSessionLabel(draft = loadWorkoutDraft()) {
     if (!draft) return 'Workout';
-    const kind = draft.manualSessionKind || 'Workout';
     if (draft.lactateHitSelection?.summary) {
         return draft.lactateHitSelection.isHitClass
             ? 'Lactate/HIT · HIT class'
             : `Lactate/HIT · Session ${draft.lactateHitSelection.slot || 'A'}`;
     }
-    return kind;
+    // Prefer the title shown while training; fall back to the planned event label
+    const titled = (draft.routeTitle || '').trim();
+    if (titled && !/^workout$/i.test(titled) && !/^active workout$/i.test(titled)) {
+        return titled;
+    }
+    const kind = draft.manualSessionKind || 'Workout';
+    try {
+        return prettyFocusName(kind) || kind;
+    } catch (e) {
+        return kind;
+    }
+}
+
+/**
+ * Live elapsed for a parked/in-progress draft.
+ * Uses wall-clock anchor so time keeps advancing after leaving the workout page.
+ */
+export function getDraftRunningElapsedMs(draft = loadWorkoutDraft()) {
+    if (!draft) return 0;
+    const anchor = Number(draft.timerAnchorAt);
+    if (draft.timerRunning !== false && Number.isFinite(anchor) && anchor > 0) {
+        return Math.max(0, Date.now() - anchor);
+    }
+    return Math.max(0, Number(draft.elapsedMs) || 0);
 }

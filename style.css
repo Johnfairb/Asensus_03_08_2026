@@ -855,6 +855,9 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 /* ========================================== */
 .stealth-panel { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 20px; }
 .workout-card { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+.workout-card.superset-drop-target { border-color: var(--gold-accent); box-shadow: 0 0 0 1px rgba(212,175,55,0.35); }
+.workout-card.superset-selected { border-color: var(--gold-accent); }
+.workout-card.superset-dragging { opacity: 0.55; }
 .workout-title { font-size: 16px; font-weight: 800; margin-bottom: 4px; color: #fff; }
 .workout-subtitle { font-size: 10px; color: var(--text-muted); margin-bottom: 16px; font-weight: 700; letter-spacing: 0.4px; font-family: 'Roboto Mono', monospace; }
 .set-header { display: flex; font-size: 11px; color: #7a7a7a; font-weight: 800; margin-bottom: 10px; padding: 0 4px; }

@@ -1,6 +1,8 @@
 import { store } from '../state/store.js';
 import { applyDietFilter } from '../domain/food-catalog.js';
 import { excludeBannedExercises, excludeBannedFoods } from '../domain/bans.js';
+import { getLibraryMuscleGroup, LIBRARY_MUSCLE_ORDER } from '../domain/bodyweight-lifts.js';
+import { getExerciseMeta } from '../domain/exercise-catalog.js';
 import { isGuidanceOff } from '../domain/fitness-hud.js';
 import { getVisualPortion, resolveDayMealItems } from '../domain/meal-planner.js';
 import { smartRoundMass } from '../domain/thermodynamics.js';
@@ -316,10 +318,44 @@ export function updateFoodDropdowns() {
 }
 
 export function updateExerciseDropdowns() {
-    let options = '<option value="">+ Manual Exercise...</option>';
-    excludeBannedExercises(store.globalExerciseDB).forEach(ex => options += `<option value="${ex.id}">${ex.name}</option>`);
     const select = document.getElementById('select-exercise');
-    if(select) select.innerHTML = options;
+    if (!select) return;
+
+    const exercises = excludeBannedExercises(store.globalExerciseDB || []);
+    const grouped = new Map();
+    exercises.forEach(ex => {
+        const displayName = getExerciseMeta(ex.name)?.name || ex.name;
+        let heading = getLibraryMuscleGroup(displayName);
+        if (!heading) {
+            const domain = String(ex.domain || '').toLowerCase();
+            if (domain === 'power') heading = 'Power';
+            else if (domain === 'cardio') heading = 'Cardio';
+            else heading = 'Other';
+        }
+        if (!grouped.has(heading)) grouped.set(heading, []);
+        grouped.get(heading).push({ ex, displayName });
+    });
+    grouped.forEach(list => list.sort((a, b) =>
+        String(a.displayName || '').localeCompare(String(b.displayName || ''))
+    ));
+
+    const order = [...LIBRARY_MUSCLE_ORDER, 'Power', 'Cardio', 'Other'];
+    const headings = [
+        ...order.filter(h => (grouped.get(h) || []).length > 0),
+        ...[...grouped.keys()].filter(h => !order.includes(h))
+    ];
+
+    let options = '<option value="">+ Manual Exercise...</option>';
+    headings.forEach(heading => {
+        const safeLabel = String(heading).replace(/"/g, '&quot;');
+        options += `<optgroup label="${safeLabel}">`;
+        (grouped.get(heading) || []).forEach(({ ex, displayName }) => {
+            const safeName = String(displayName || ex.name || '').replace(/</g, '&lt;');
+            options += `<option value="${ex.id}">${safeName}</option>`;
+        });
+        options += '</optgroup>';
+    });
+    select.innerHTML = options;
 }
 
 export function updateGhostOverride(slotKey, foodId) { 

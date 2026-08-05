@@ -645,19 +645,22 @@ export function applyHypertrophyFatigueFromSession(items) {
     const map = loadHypertrophyFatigue();
     const now = Date.now();
     (items || []).forEach(it => {
-        const name = it.exercise?.name || it.name;
-        const meta = HYPERTROPHY_EXERCISE_META[name];
-        if (!meta) return;
-        const add = (muscle, pts) => {
-            if (!muscle) return;
-            if (!map[muscle]) map[muscle] = { points: 0, updatedAt: now };
-            // Decay old points before adding
-            map[muscle].points = decayPoints(map[muscle].points, map[muscle].updatedAt, now);
-            map[muscle].points += pts;
-            map[muscle].updatedAt = now;
-        };
-        add(meta.primary, 3);
-        add(meta.secondary, 1);
+        const names = it.isSuperset && Array.isArray(it.sides)
+            ? it.sides.map(s => s.exercise?.name).filter(Boolean)
+            : [it.exercise?.name || it.name];
+        names.forEach(name => {
+            const meta = HYPERTROPHY_EXERCISE_META[name];
+            if (!meta) return;
+            const add = (muscle, pts) => {
+                if (!muscle) return;
+                if (!map[muscle]) map[muscle] = { points: 0, updatedAt: now };
+                map[muscle].points = decayPoints(map[muscle].points, map[muscle].updatedAt, now);
+                map[muscle].points += pts;
+                map[muscle].updatedAt = now;
+            };
+            add(meta.primary, 3);
+            add(meta.secondary, 1);
+        });
     });
     saveHypertrophyFatigue(map);
 
@@ -750,7 +753,7 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
             });
             return sets;
         }
-        // >20 kg added: same as normal compounds (½ then ¼)
+        // >20 kg added: same as normal compounds (½ then ¾)
         sets.push({
             weight: roundUpLoad(w * 0.5, eq),
             reps,
@@ -758,10 +761,10 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
             partName: 'Warmup · ½', notes: 'Half work weight', restTime: 30
         });
         sets.push({
-            weight: roundUpLoad(w * 0.25, eq),
+            weight: roundUpLoad(w * 0.75, eq),
             reps,
             rpe: 5, completed: false, isWarmup: true,
-            partName: 'Warmup · ¼', notes: 'Quarter work weight', restTime: 60
+            partName: 'Warmup · ¾', notes: 'Three-quarter work weight', restTime: 60
         });
         return sets;
     }
@@ -780,7 +783,7 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
         return sets;
     }
 
-    // Standard compounds: ½ then ¼ work weight (not full work weight first)
+    // Standard compounds: ½ then ¾ work weight (ascending to work sets)
     sets.push({
         weight: roundUpLoad(w * 0.5, eq),
         reps,
@@ -792,13 +795,13 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
         restTime: 30
     });
     sets.push({
-        weight: roundUpLoad(w * 0.25, eq),
+        weight: roundUpLoad(w * 0.75, eq),
         reps,
         rpe: 5,
         completed: false,
         isWarmup: true,
-        partName: 'Warmup · ¼',
-        notes: 'Quarter work weight',
+        partName: 'Warmup · ¾',
+        notes: 'Three-quarter work weight',
         restTime: 60
     });
     return sets;
@@ -890,6 +893,7 @@ export function roundHypertrophyWorkWeight(kg, exName) {
  */
 export function applyHypertrophyWorkWeight(item, workKg) {
     if (!item || !item.exercise) return -1;
+    if (item.isSuperset) return -1;
     const exName = item.exercise.name || '';
     const raw = Number(workKg);
     if (!Number.isFinite(raw) || raw < 0) return -1;
@@ -899,7 +903,7 @@ export function applyHypertrophyWorkWeight(item, workKg) {
     const isIso = !!(item.isIsolation || HYPERTROPHY_EXERCISE_META[exName]?.role === 'isolation');
     const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
     const planned = typeof item.plannedSets === 'number' ? item.plannedSets : Math.max(3, workSets.length || 3);
-    const rest = hypertrophyRestSeconds(4);
+    const rest = hypertrophyRestSeconds(2);
 
     const warmups = buildHypertrophyWarmupSets(exName, w, workReps, isIso);
     const working = [];
@@ -909,7 +913,7 @@ export function applyHypertrophyWorkWeight(item, workKg) {
             ...prev,
             weight: w,
             reps: prev.reps || workReps,
-            rpe: prev.rpe === '' || prev.rpe == null ? 4 : prev.rpe,
+            rpe: prev.rpe === '' || prev.rpe == null ? 2 : prev.rpe,
             completed: false,
             restTime: prev.restTime != null ? prev.restTime : rest,
             isWarmup: false
@@ -921,6 +925,106 @@ export function applyHypertrophyWorkWeight(item, workKg) {
     item.needsBwGate = false;
     item.bwGateResolved = true;
     item.workWeightKg = w;
+    return w;
+}
+
+/**
+ * Apply work weight to one side of a merged superset (rebuild that side's warmups + work loads).
+ * Leaves the partner side untouched.
+ */
+export function applyWorkWeightToSupersetSide(item, sideKey, workKg) {
+    if (!item?.isSuperset || (sideKey !== 'A' && sideKey !== 'B')) return -1;
+    const sideMeta = (item.sides || []).find(s => s.key === sideKey);
+    if (!sideMeta?.exercise) return -1;
+    const exName = sideMeta.exercise.name || '';
+    const raw = Number(workKg);
+    if (!Number.isFinite(raw) || raw < 0) return -1;
+    const w = raw === 0 ? 0 : roundHypertrophyWorkWeight(raw, exName);
+
+    const sideWork = (item.sets || []).filter(s =>
+        s && s.side === sideKey && !s.isWarmup && !s.isText && !s.isLactateHit
+    );
+    const sideWorkMain = sideWork.filter(s => !s.isDropSet);
+    const sideDrops = sideWork.filter(s => s.isDropSet);
+    const workReps = Number(sideWorkMain[0]?.reps) || 10;
+    const isIso = !!(sideMeta.isIsolation || HYPERTROPHY_EXERCISE_META[exName]?.role === 'isolation');
+    const planned = typeof sideMeta.plannedSets === 'number'
+        ? sideMeta.plannedSets
+        : Math.max(3, sideWorkMain.length || 3);
+    const restWork = sideKey === 'B' ? 100 : 0;
+
+    const newWu = buildHypertrophyWarmupSets(exName, w, workReps, isIso).map(s => ({
+        ...s,
+        side: sideKey,
+        completed: false
+    }));
+    const newWork = [];
+    for (let i = 0; i < planned; i++) {
+        const prev = sideWorkMain[i] || {};
+        newWork.push({
+            weight: w,
+            reps: prev.reps || workReps,
+            rpe: prev.rpe === '' || prev.rpe == null ? 2 : prev.rpe,
+            completed: false,
+            isWarmup: false,
+            isDropSet: false,
+            side: sideKey,
+            round: i + 1,
+            restTime: restWork,
+            prevWeight: prev.prevWeight || 0
+        });
+    }
+    const keptDrops = sideDrops.map(d => ({
+        ...d,
+        weight: roundUpLoad((w || 0) * 0.8, equipmentForExercise(exName)),
+        side: sideKey,
+        completed: false
+    }));
+
+    const otherKey = sideKey === 'A' ? 'B' : 'A';
+    const otherWu = (item.sets || []).filter(s => s.side === otherKey && s.isWarmup);
+    const otherWork = (item.sets || []).filter(s => s.side === otherKey && !s.isWarmup);
+
+    // Re-interleave work rounds: 1A, 1B, 2A, 2B…
+    const otherMain = otherWork.filter(s => !s.isDropSet);
+    const otherDrops = otherWork.filter(s => s.isDropSet);
+    const rounds = Math.max(newWork.length, otherMain.length, 1);
+    const interleaved = [];
+    for (let i = 0; i < rounds; i++) {
+        const aSet = sideKey === 'A'
+            ? (newWork[i] || newWork[newWork.length - 1])
+            : (otherMain[i] || otherMain[otherMain.length - 1]);
+        const bSet = sideKey === 'B'
+            ? (newWork[i] || newWork[newWork.length - 1])
+            : (otherMain[i] || otherMain[otherMain.length - 1]);
+        if (aSet) interleaved.push({ ...aSet, side: 'A', round: i + 1, restTime: 0 });
+        if (bSet) interleaved.push({ ...bSet, side: 'B', round: i + 1, restTime: 100 });
+    }
+
+    const aWu = sideKey === 'A' ? newWu : otherWu;
+    const bWu = sideKey === 'B' ? newWu : otherWu;
+    const aDrops = sideKey === 'A' ? keptDrops : otherDrops;
+    const bDrops = sideKey === 'B' ? keptDrops : otherDrops;
+
+    item.sets = [...aWu, ...bWu, ...interleaved, ...aDrops, ...bDrops];
+    // Clear any rest locks after structural rebuild
+    (item.sets || []).forEach(s => {
+        if (!s) return;
+        s.locked = false;
+        delete s.lockTimeLeft;
+    });
+    item.plannedSets = rounds;
+    sideMeta.workWeightKg = w;
+    sideMeta.weightFinderResolved = true;
+    sideMeta.needsWeightFind = false;
+    sideMeta.needsBwGate = false;
+    sideMeta.bwGateResolved = true;
+    const nA = item.sides?.[0]?.exercise?.name || 'Exercise A';
+    const nB = item.sides?.[1]?.exercise?.name || 'Exercise B';
+    item.exercise = {
+        ...item.exercise,
+        name: `A · ${nA} / B · ${nB}`
+    };
     return w;
 }
 

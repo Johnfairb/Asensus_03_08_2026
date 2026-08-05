@@ -1,10 +1,12 @@
 /**
  * First-time / bodyweight competency prompts before logging sets:
  * BW gate → work weight (0 kg allowed) or 10@5 RIR finder (+10%).
+ * Supersets: ask each new side one after the other (A then B).
  */
 import { store } from '../state/store.js';
 import {
     applyHypertrophyWorkWeight,
+    applyWorkWeightToSupersetSide,
     workWeightFromFinder
 } from '../domain/hypertrophy-engine.js';
 import {
@@ -19,6 +21,8 @@ import { excludeBannedExercises } from '../domain/bans.js';
 
 let _finderOpen = false;
 let _finderExIdx = null;
+/** @type {null|'A'|'B'} */
+let _finderSide = null;
 let _openLogAfterFinder = false;
 
 function ensureWeightFinderSheet() {
@@ -45,8 +49,18 @@ function exerciseItem(exIdx) {
     return store.activeLog?.items?.[exIdx] || null;
 }
 
+function activeSideMeta(item = exerciseItem(_finderExIdx)) {
+    if (!item?.isSuperset || !_finderSide) return null;
+    return (item.sides || []).find(s => s.key === _finderSide) || null;
+}
+
 function exerciseNameForIdx(exIdx) {
-    return exerciseItem(exIdx)?.exercise?.name || 'this exercise';
+    const item = exerciseItem(exIdx);
+    if (!item) return 'this exercise';
+    if (item.isSuperset && _finderSide) {
+        return activeSideMeta(item)?.exercise?.name || `Side ${_finderSide}`;
+    }
+    return item.exercise?.name || 'this exercise';
 }
 
 function escapeHtml(str) {
@@ -81,6 +95,32 @@ function resolveDbExercise(name) {
         || { id: 'TMP_' + Date.now(), name, domain: 'strength', muscle_group: 'custom' };
 }
 
+function sideNeedsBw(side) {
+    if (!side) return false;
+    const name = side.exercise?.name || '';
+    return !side.bwGateResolved && (side.needsBwGate || needsBwCompetencyAsk(name));
+}
+
+function sideNeedsWeight(side) {
+    if (!side) return false;
+    return !side.weightFinderResolved && !!side.needsWeightFind;
+}
+
+function sideNeedsPrompt(side) {
+    return sideNeedsBw(side) || sideNeedsWeight(side);
+}
+
+/** First unresolved side in A→B order. */
+function nextSupersetSideNeedingPrompt(item) {
+    if (!item?.isSuperset) return null;
+    return (item.sides || []).find(sideNeedsPrompt) || null;
+}
+
+function supersetEyebrow() {
+    if (!_finderSide) return '';
+    return `<div style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono',monospace; margin-bottom:4px;">Superset · exercise ${_finderSide}</div>`;
+}
+
 function renderBwCompetencyQuestion(exIdx) {
     const body = document.getElementById('weight-finder-body');
     if (!body) return;
@@ -89,6 +129,7 @@ function renderBwCompetencyQuestion(exIdx) {
     body.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <div>
+                ${supersetEyebrow()}
                 <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">Bodyweight check</div>
                 <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">Can you do ${n} bodyweight reps of ${escapeHtml(name)}?</div>
             </div>
@@ -110,6 +151,7 @@ function renderKnowWeightQuestion(exIdx) {
     body.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <div>
+                ${supersetEyebrow()}
                 <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">First time on this exercise</div>
                 <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">Do you know what weight to use for ${escapeHtml(name)}?</div>
             </div>
@@ -131,6 +173,7 @@ function renderKnownWeightEntry(exIdx) {
     body.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <div>
+                ${supersetEyebrow()}
                 <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">Work weight</div>
                 <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">Enter your work weight for ${escapeHtml(name)}</div>
             </div>
@@ -157,6 +200,7 @@ function renderFinderEntry(exIdx) {
     body.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <div>
+                ${supersetEyebrow()}
                 <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">Find a starting load</div>
                 <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">${escapeHtml(name)}</div>
             </div>
@@ -208,28 +252,83 @@ function openSheet(exIdx, renderFn) {
     _finderOpen = true;
 }
 
+function openPromptForCurrentTarget(exIdx) {
+    const item = exerciseItem(exIdx);
+    if (!item) return false;
+
+    if (item.isSuperset) {
+        const side = _finderSide
+            ? (item.sides || []).find(s => s.key === _finderSide)
+            : nextSupersetSideNeedingPrompt(item);
+        if (!side) return false;
+        _finderSide = side.key;
+        if (sideNeedsBw(side)) {
+            openSheet(exIdx, renderBwCompetencyQuestion);
+            return true;
+        }
+        if (sideNeedsWeight(side)) {
+            openSheet(exIdx, renderKnowWeightQuestion);
+            return true;
+        }
+        return false;
+    }
+
+    const name = item.exercise?.name || '';
+    const needsBw = !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
+    const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;
+    if (needsBw) {
+        openSheet(exIdx, renderBwCompetencyQuestion);
+        return true;
+    }
+    if (needsWeight) {
+        openSheet(exIdx, renderKnowWeightQuestion);
+        return true;
+    }
+    return false;
+}
+
 /** Open prompt before the sets log (BW gate and/or first-time weight). */
 export function maybePromptWeightFinder(exIdx, opts = {}) {
     const item = exerciseItem(exIdx);
     if (!item) return false;
     if (item.isWarmupGroup || item.isLactateHit) return false;
     const domain = (item.exercise?.domain || '').toLowerCase();
-    if (domain === 'cardio' || domain === 'warmup') return false;
+    if (!item.isSuperset && (domain === 'cardio' || domain === 'warmup')) return false;
     if (_finderOpen) return true;
+
+    if (item.isSuperset) {
+        const next = nextSupersetSideNeedingPrompt(item);
+        if (!next) return false;
+        _finderSide = next.key;
+        _openLogAfterFinder = !!opts.openLogAfter;
+        return openPromptForCurrentTarget(exIdx);
+    }
 
     const name = item.exercise?.name || '';
     const needsBw = !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
     const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;
-
     if (!needsBw && !needsWeight) return false;
 
+    _finderSide = null;
     _openLogAfterFinder = !!opts.openLogAfter;
-    if (needsBw) {
-        openSheet(exIdx, renderBwCompetencyQuestion);
-        return true;
+    return openPromptForCurrentTarget(exIdx);
+}
+
+function applyWorkWeight(item, kg) {
+    if (item.isSuperset && _finderSide) {
+        return applyWorkWeightToSupersetSide(item, _finderSide, kg);
     }
-    openSheet(exIdx, renderKnowWeightQuestion);
-    return true;
+    return applyHypertrophyWorkWeight(item, kg);
+}
+
+function markSideBwResolved(side, opts = {}) {
+    if (!side) return;
+    side.needsBwGate = false;
+    side.bwGateResolved = true;
+    if (opts.needsWeight) {
+        side.needsWeightFind = true;
+        side.weightFinderResolved = false;
+    }
 }
 
 export function confirmBwGateYes() {
@@ -239,12 +338,26 @@ export function confirmBwGateYes() {
         dismissWeightFinder();
         return;
     }
+
+    if (item.isSuperset && _finderSide) {
+        const side = activeSideMeta(item);
+        const name = side?.exercise?.name || '';
+        recordBwCanDo(name);
+        markSideBwResolved(side, { needsWeight: !isPressUpVariant(name) });
+        if (isPressUpVariant(name)) {
+            applyWorkWeightToSupersetSide(item, _finderSide, 0);
+            finishWeightFinderAndMaybeOpenLog();
+            return;
+        }
+        renderKnownWeightEntry(exIdx);
+        return;
+    }
+
     const name = item.exercise?.name || '';
     recordBwCanDo(name);
     item.needsBwGate = false;
     item.bwGateResolved = true;
 
-    // Press-ups: no added weight — apply 0 kg and open log
     if (isPressUpVariant(name)) {
         applyHypertrophyWorkWeight(item, 0);
         item.needsWeightFind = false;
@@ -252,7 +365,6 @@ export function confirmBwGateYes() {
         return;
     }
 
-    // Other BW lifts: ask for work weight (0 allowed)
     item.needsWeightFind = true;
     item.weightFinderResolved = false;
     renderKnownWeightEntry(exIdx);
@@ -265,6 +377,31 @@ export function confirmBwGateNo() {
         dismissWeightFinder();
         return;
     }
+
+    if (item.isSuperset && _finderSide) {
+        const side = activeSideMeta(item);
+        const original = side?.exercise?.name || '';
+        const swapName = recordBwCannotDo(original, swapTargetFor(original));
+        const swapped = resolveDbExercise(swapName);
+        side.exercise = { ...swapped };
+        side.needsBwGate = false;
+        side.bwGateResolved = true;
+        side.needsWeightFind = true;
+        side.weightFinderResolved = false;
+        item.note = ((item.note || '') + ` ${_finderSide}: swapped from ${original}.`).trim();
+        item.exercise = {
+            ...item.exercise,
+            name: `A · ${item.sides?.[0]?.exercise?.name || 'Exercise A'} / B · ${item.sides?.[1]?.exercise?.name || 'Exercise B'}`
+        };
+        // Zero that side's work loads until weight is set
+        (item.sets || []).forEach(s => {
+            if (s.side === _finderSide && !s.isWarmup) s.weight = 0;
+        });
+        renderKnowWeightQuestion(exIdx);
+        refreshSetsUi();
+        return;
+    }
+
     const original = item.exercise?.name || '';
     const swapName = recordBwCannotDo(original, swapTargetFor(original));
     const swapped = resolveDbExercise(swapName);
@@ -279,7 +416,7 @@ export function confirmBwGateNo() {
     const reps = workSets[0]?.reps || 10;
     const rest = workSets[0]?.restTime != null ? workSets[0].restTime : 90;
     item.sets = Array.from({ length: planned }, () => ({
-        weight: 0, reps, rpe: 4, completed: false, restTime: rest, isWarmup: false
+        weight: 0, reps, rpe: 2, completed: false, restTime: rest, isWarmup: false
     }));
     renderKnowWeightQuestion(exIdx);
     refreshSetsUi();
@@ -307,7 +444,7 @@ export function submitKnownWorkWeight() {
         dismissWeightFinder();
         return;
     }
-    const applied = applyHypertrophyWorkWeight(item, kg);
+    const applied = applyWorkWeight(item, kg);
     if (applied < 0) {
         showError('Could not apply that weight.');
         return;
@@ -327,21 +464,42 @@ export function submitFinderWorkWeight() {
         dismissWeightFinder();
         return;
     }
-    const work = finder === 0 ? 0 : workWeightFromFinder(finder, item.exercise?.name || '');
-    const applied = applyHypertrophyWorkWeight(item, work);
+    const exName = item.isSuperset
+        ? (activeSideMeta(item)?.exercise?.name || '')
+        : (item.exercise?.name || '');
+    const work = finder === 0 ? 0 : workWeightFromFinder(finder, exName);
+    const applied = applyWorkWeight(item, work);
     if (applied < 0) {
         showError('Could not apply that weight.');
         return;
     }
-    item.finderWeightKg = finder;
+    if (item.isSuperset && _finderSide) {
+        const side = activeSideMeta(item);
+        if (side) side.finderWeightKg = finder;
+    } else {
+        item.finderWeightKg = finder;
+    }
     finishWeightFinderAndMaybeOpenLog();
 }
 
 function finishWeightFinderAndMaybeOpenLog() {
     const exIdx = _finderExIdx;
     const openAfter = _openLogAfterFinder;
-    dismissWeightFinder();
+    const item = exerciseItem(exIdx);
     refreshSetsUi();
+
+    // Superset: if the partner is also new, ask that question next (same sheet)
+    if (item?.isSuperset) {
+        const next = nextSupersetSideNeedingPrompt(item);
+        if (next) {
+            _finderSide = next.key;
+            _openLogAfterFinder = openAfter;
+            openPromptForCurrentTarget(exIdx);
+            return;
+        }
+    }
+
+    dismissWeightFinder();
     if (openAfter && exIdx != null && typeof window.openExerciseSetsModal === 'function') {
         window.openExerciseSetsModal(exIdx);
     }
@@ -352,5 +510,6 @@ export function dismissWeightFinder() {
     if (sheet) sheet.classList.add('hidden');
     _finderOpen = false;
     _finderExIdx = null;
+    _finderSide = null;
     _openLogAfterFinder = false;
 }

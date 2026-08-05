@@ -63,11 +63,10 @@ export async function injectPitchData(filename) {
 
             let BMR = (10 * currentW) + (6.25 * store.userConfig.height) - (5 * store.userConfig.age);
             BMR += (store.userConfig.sex === 'Male') ? 5 : -161;
-            let historicalTDEE = BMR * store.userConfig.activity;
-            let historicalTargetCals = historicalTDEE;
+            let historicalTargetCals = BMR * 1.3;
             
-            if (store.userConfig.goal === 'Fat_Loss') historicalTargetCals = Math.max(BMR, historicalTDEE - 500); 
-            else if (store.userConfig.goal === 'Muscle_Gain') historicalTargetCals = historicalTDEE + 300;
+            if (store.userConfig.goal === 'Fat_Loss') historicalTargetCals *= 0.9; 
+            else if (store.userConfig.goal === 'Muscle_Gain') historicalTargetCals *= 1.1;
             
             let calorieScale = historicalTargetCals / baseTotalCals;
 

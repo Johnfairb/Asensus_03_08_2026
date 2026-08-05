@@ -1,7 +1,7 @@
 import { store } from '../state/store.js';
 import { excludeBannedExercises } from './bans.js';
 import { PERIODIZATION, getPhaseLoadMultiplier, getSeasonPhase, isGuidanceOff } from './fitness-hud.js';
-import { buildLactateIntervalPlan, getLactateWarmupParts } from './lactate-engine.js';
+import { buildLactateIntervalPlan } from './lactate-engine.js';
 import { dateToISO, getLactateSlotForDate, isLactateEvent, isLiftingEvent, isSteadyCardio, openVideoModal } from './route-planner.js';
 import { SPORT_MATRIX } from './sports-matrix.js';
 import { buildAuxiliaryExerciseList, buildStrengthSessionRoutine, getAttachedAuxForStrengthDay, getGymPlanPrefs, isStrengthFocus } from './strength-engine.js';
@@ -21,6 +21,12 @@ import {
     needsBwCompetencyAsk,
     resolveProgrammedBwName
 } from './bodyweight-lifts.js';
+import {
+    prepContextForFocus,
+    resolveStretchBlock,
+    resolveWarmupBlock,
+    buildSportSessionBlock
+} from './session-prep.js';
 import { roundToEquipment } from './thermodynamics.js';
 import { renderActiveLog } from '../ui/templates.js';
 
@@ -42,19 +48,32 @@ export function addExerciseToActiveLog() {
 export function addSetToExercise(exIdx) {
     const exItem = store.activeLog.items[exIdx];
     if (!exItem) return;
+    if (exItem.isSuperset) {
+        addSupersetRound(exIdx);
+        return;
+    }
     const domain = (exItem.exercise?.domain || '').toLowerCase();
     const name = exItem.exercise?.name || '';
     // Lactate/HIT intervals are protocol-fixed; steady cardio is a single session
     if (exItem.isLactateHit || (exItem.sets || []).some(s => s.isLactateHit)) return;
     if (domain === 'cardio' && !/sprint|lactate|interval|30s\s*on/i.test(name)) return;
     if (/static\s*stretch/i.test(name)) return;
-    // Hypertrophy protocol is fixed at 3 working sets
-    if (isHypertrophyPhase()) {
-        const workCount = (exItem.sets || []).filter(s => !s.isWarmup && !s.isText && !s.isDropSet).length;
-        if (workCount >= 3) return;
-    }
-    const lastSet = exItem.sets[exItem.sets.length - 1] || { weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2 };
-    exItem.sets.push({ ...lastSet, completed: false, isDropSet: false }); 
+    const workSets = (exItem.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isDropSet);
+    const lastWork = workSets[workSets.length - 1]
+        || (exItem.sets || []).filter(s => s && !s.isWarmup && !s.isText).slice(-1)[0]
+        || { weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, restTime: 90 };
+    exItem.sets.push({
+        weight: lastWork.weight || 0,
+        reps: lastWork.reps || 0,
+        distance_km: lastWork.distance_km || 0,
+        time_minutes: lastWork.time_minutes || 0,
+        rpe: 2,
+        completed: false,
+        isDropSet: false,
+        isWarmup: false,
+        restTime: lastWork.restTime != null ? lastWork.restTime : 90,
+        prevWeight: lastWork.prevWeight || lastWork.weight || 0
+    });
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
     else renderActiveLog();
 }
@@ -86,26 +105,321 @@ export function addDropSetToExercise(exIdx) {
     else renderActiveLog();
 }
 
-/** Pair this exercise with the next as a superset (minimal rest between). */
+/** Pair this exercise with the next as a merged superset (one log card, A/B rows). */
 export function addSupersetWithNext(exIdx) {
     const items = store.activeLog.items;
     if (!items[exIdx] || !items[exIdx + 1]) {
         alert('Add another exercise below this one first, then tap Add Superset.');
         return;
     }
-    if (items[exIdx].isWarmupGroup || items[exIdx + 1].isWarmupGroup) return;
-    if (items[exIdx].isLactateHit || items[exIdx + 1].isLactateHit) return;
-    const a = items[exIdx];
-    const b = items[exIdx + 1];
-    const id = `ss_${Date.now()}`;
-    a.supersetId = id;
-    b.supersetId = id;
-    a.note = ((a.note || '') + ' · Superset A').replace(/^ · /, '');
-    b.note = ((b.note || '') + ' · Superset B').replace(/^ · /, '');
-    (a.sets || []).forEach(s => { if (!s.isWarmup) s.restTime = 30; });
-    (b.sets || []).forEach(s => { if (!s.isWarmup) s.restTime = 90; });
+    createSupersetFromIndices(exIdx, exIdx + 1);
+}
+
+/**
+ * Merge two lifting items into one superset card:
+ * warmups A → warmups B → alternating work rounds (1A, 1B, 2A, 2B…).
+ * History still saves each side as its own exercise on commit.
+ */
+export function createSupersetFromIndices(idxA, idxB) {
+    const items = store.activeLog.items;
+    if (!items?.[idxA] || !items?.[idxB] || idxA === idxB) return false;
+    const itemA = items[idxA];
+    const itemB = items[idxB];
+    if (!canSupersetPair(itemA, itemB)) {
+        alert('Those exercises cannot be supersetted.');
+        return false;
+    }
+
+    const merged = buildSupersetItem(itemA, itemB);
+    const hi = Math.max(idxA, idxB);
+    const lo = Math.min(idxA, idxB);
+    items.splice(hi, 1);
+    items.splice(lo, 1);
+    items.splice(lo, 0, merged);
+
+    if (window.currentModalExIdx != null) {
+        if (window.currentModalExIdx === hi || window.currentModalExIdx === lo) {
+            window.currentModalExIdx = lo;
+        } else if (window.currentModalExIdx > hi) {
+            window.currentModalExIdx -= 1;
+        }
+    }
+    if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) {
+        try { window.renderExerciseSets?.(); } catch (e) { /* ignore */ }
+    }
+    renderActiveLog();
+    return true;
+}
+
+export function canSupersetPair(a, b) {
+    if (!a || !b) return false;
+    if (a.isSuperset || b.isSuperset) return false;
+    if (a.isWarmupGroup || b.isWarmupGroup) return false;
+    if (a.isStretchGroup || b.isStretchGroup) return false;
+    if (a.isLactateHit || b.isLactateHit) return false;
+    if (a.isSportSessionBlock || b.isSportSessionBlock) return false;
+    const aDom = (a.exercise?.domain || '').toLowerCase();
+    const bDom = (b.exercise?.domain || '').toLowerCase();
+    if (aDom === 'cardio' || bDom === 'cardio') return false;
+    if (/static\s*stretch/i.test(a.exercise?.name || '') || /static\s*stretch/i.test(b.exercise?.name || '')) return false;
+    return true;
+}
+
+function cloneSets(sets, side) {
+    return (sets || []).map(s => ({
+        ...JSON.parse(JSON.stringify(s)),
+        side,
+        completed: !!s.completed
+    }));
+}
+
+export function buildSupersetItem(itemA, itemB) {
+    const id = `ss_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const nameA = itemA.exercise?.name || 'Exercise A';
+    const nameB = itemB.exercise?.name || 'Exercise B';
+
+    const aWarm = cloneSets((itemA.sets || []).filter(s => s && s.isWarmup), 'A');
+    const bWarm = cloneSets((itemB.sets || []).filter(s => s && s.isWarmup), 'B');
+    const aWorkAll = (itemA.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
+    const bWorkAll = (itemB.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
+    const aWork = aWorkAll.filter(s => !s.isDropSet);
+    const bWork = bWorkAll.filter(s => !s.isDropSet);
+    const aDrops = aWorkAll.filter(s => s.isDropSet);
+    const bDrops = bWorkAll.filter(s => s.isDropSet);
+
+    const rounds = Math.max(
+        aWork.length || (typeof itemA.plannedSets === 'number' ? itemA.plannedSets : 0) || 3,
+        bWork.length || (typeof itemB.plannedSets === 'number' ? itemB.plannedSets : 0) || 3
+    );
+
+    const templateA = aWork[0] || { weight: 0, reps: 10, rpe: 2, restTime: 0 };
+    const templateB = bWork[0] || { weight: 0, reps: 10, rpe: 2, restTime: 100 };
+
+    // Prefer fresh warmups from each side's work weight when clones are missing
+    const aWuFinal = aWarm.length
+        ? aWarm
+        : buildHypertrophyWarmupSets(nameA, Number(templateA.weight) || 0, Number(templateA.reps) || 10, !!itemA.isIsolation)
+            .map(s => ({ ...s, side: 'A', completed: false }));
+    const bWuFinal = bWarm.length
+        ? bWarm
+        : buildHypertrophyWarmupSets(nameB, Number(templateB.weight) || 0, Number(templateB.reps) || 10, !!itemB.isIsolation)
+            .map(s => ({ ...s, side: 'B', completed: false }));
+
+    const sets = [...aWuFinal, ...bWuFinal];
+    for (let i = 0; i < rounds; i++) {
+        const aw = aWork[i] || templateA;
+        const bw = bWork[i] || templateB;
+        sets.push({
+            weight: aw.weight || 0,
+            reps: aw.reps || 10,
+            rpe: aw.rpe === '' || aw.rpe == null ? 2 : aw.rpe,
+            completed: false,
+            isWarmup: false,
+            isDropSet: false,
+            side: 'A',
+            round: i + 1,
+            restTime: 0,
+            prevWeight: aw.prevWeight || 0,
+            notes: aw.notes
+        });
+        sets.push({
+            weight: bw.weight || 0,
+            reps: bw.reps || 10,
+            rpe: bw.rpe === '' || bw.rpe == null ? 2 : bw.rpe,
+            completed: false,
+            isWarmup: false,
+            isDropSet: false,
+            side: 'B',
+            round: i + 1,
+            restTime: 100,
+            prevWeight: bw.prevWeight || 0,
+            notes: bw.notes
+        });
+    }
+    aDrops.forEach(d => sets.push({
+        ...JSON.parse(JSON.stringify(d)),
+        side: 'A',
+        isDropSet: true,
+        isWarmup: false,
+        completed: false,
+        restTime: 0
+    }));
+    bDrops.forEach(d => sets.push({
+        ...JSON.parse(JSON.stringify(d)),
+        side: 'B',
+        isDropSet: true,
+        isWarmup: false,
+        completed: false,
+        restTime: 100
+    }));
+
+    return {
+        isSuperset: true,
+        supersetId: id,
+        exercise: {
+            id: `SUPERSET_${id}`,
+            name: formatSupersetTitle(nameA, nameB),
+            domain: itemA.exercise?.domain || itemB.exercise?.domain || 'strength',
+            muscle_group: itemA.exercise?.muscle_group || 'full'
+        },
+        note: [itemA.note, itemB.note].filter(Boolean).join(' · ') || 'Superset — log A then B each round',
+        sides: [
+            {
+                key: 'A',
+                exercise: JSON.parse(JSON.stringify(itemA.exercise)),
+                plannedSets: typeof itemA.plannedSets === 'number' ? itemA.plannedSets : rounds,
+                isIsolation: !!itemA.isIsolation,
+                role: itemA.role || null,
+                workWeightKg: itemA.workWeightKg,
+                needsWeightFind: !!itemA.needsWeightFind,
+                needsBwGate: !!itemA.needsBwGate,
+                weightFinderResolved: !!itemA.weightFinderResolved,
+                bwGateResolved: !!itemA.bwGateResolved
+            },
+            {
+                key: 'B',
+                exercise: JSON.parse(JSON.stringify(itemB.exercise)),
+                plannedSets: typeof itemB.plannedSets === 'number' ? itemB.plannedSets : rounds,
+                isIsolation: !!itemB.isIsolation,
+                role: itemB.role || null,
+                workWeightKg: itemB.workWeightKg,
+                needsWeightFind: !!itemB.needsWeightFind,
+                needsBwGate: !!itemB.needsBwGate,
+                weightFinderResolved: !!itemB.weightFinderResolved,
+                bwGateResolved: !!itemB.bwGateResolved
+            }
+        ],
+        sets,
+        plannedSets: rounds
+    };
+}
+
+/** Display title: "A · Bench / B · Row" */
+export function formatSupersetTitle(nameA, nameB) {
+    const a = String(nameA || 'Exercise A').trim();
+    const b = String(nameB || 'Exercise B').trim();
+    return `A · ${a} / B · ${b}`;
+}
+
+export function supersetTitleFromItem(item) {
+    if (!item?.isSuperset) return item?.exercise?.name || 'Superset';
+    return formatSupersetTitle(
+        item.sides?.[0]?.exercise?.name,
+        item.sides?.[1]?.exercise?.name
+    );
+}
+
+/**
+ * Rebuild missing/stale warmups for each side independently (does not touch completed warmups).
+ */
+export function repairSupersetWarmups(item) {
+    if (!item?.isSuperset || !Array.isArray(item.sides)) return false;
+    let changed = false;
+    const sides = ['A', 'B'];
+    const rebuiltWu = { A: null, B: null };
+
+    sides.forEach(sideKey => {
+        const meta = (item.sides || []).find(s => s.key === sideKey);
+        const sideWu = (item.sets || []).filter(s => s.side === sideKey && s.isWarmup);
+        if (sideWu.some(s => s.completed)) {
+            rebuiltWu[sideKey] = sideWu;
+            return;
+        }
+        const sideWork = (item.sets || []).filter(s =>
+            s.side === sideKey && !s.isWarmup && !s.isDropSet && !s.isText
+        );
+        const w = Number(sideWork[0]?.weight);
+        const workW = Number.isFinite(w) ? w : (Number(meta?.workWeightKg) || 0);
+        const reps = Number(sideWork[0]?.reps) || 10;
+        const exName = meta?.exercise?.name || '';
+        const isIso = !!meta?.isIsolation;
+
+        const stale = !sideWu.length
+            || (workW > 0 && sideWu.some(wu => Math.abs((Number(wu.weight) || 0) - workW) < 0.01))
+            || (sideWu.length >= 2 && (Number(sideWu[1].weight) || 0) + 0.01 < (Number(sideWu[0].weight) || 0));
+
+        if (stale) {
+            rebuiltWu[sideKey] = buildHypertrophyWarmupSets(exName, workW, reps, isIso).map(s => ({
+                ...s,
+                side: sideKey,
+                completed: false,
+                locked: false
+            }));
+            changed = true;
+        } else {
+            rebuiltWu[sideKey] = sideWu;
+        }
+    });
+
+    if (!changed) return false;
+
+    const workAndDrops = (item.sets || []).filter(s => !s.isWarmup);
+    item.sets = [...(rebuiltWu.A || []), ...(rebuiltWu.B || []), ...workAndDrops];
+    item.exercise = {
+        ...item.exercise,
+        name: supersetTitleFromItem(item)
+    };
+    return true;
+}
+
+/** Add one more A+B work round to a merged superset. */
+export function addSupersetRound(exIdx) {
+    const item = store.activeLog.items[exIdx];
+    if (!item?.isSuperset) return;
+    const aWork = (item.sets || []).filter(s => s.side === 'A' && !s.isWarmup && !s.isDropSet && !s.isText);
+    const bWork = (item.sets || []).filter(s => s.side === 'B' && !s.isWarmup && !s.isDropSet && !s.isText);
+    const ta = aWork[aWork.length - 1] || { weight: 0, reps: 10, rpe: 2 };
+    const tb = bWork[bWork.length - 1] || { weight: 0, reps: 10, rpe: 2 };
+    const round = Math.max(aWork.length, bWork.length) + 1;
+    item.sets.push({
+        weight: ta.weight || 0, reps: ta.reps || 10, rpe: 2, completed: false,
+        isWarmup: false, isDropSet: false, side: 'A', round, restTime: 0,
+        prevWeight: ta.prevWeight || ta.weight || 0
+    });
+    item.sets.push({
+        weight: tb.weight || 0, reps: tb.reps || 10, rpe: 2, completed: false,
+        isWarmup: false, isDropSet: false, side: 'B', round, restTime: 100,
+        prevWeight: tb.prevWeight || tb.weight || 0
+    });
+    item.plannedSets = round;
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
     else renderActiveLog();
+}
+
+/** Drop set on one side of a superset (80% of that side's last work weight). */
+export function addDropSetToSupersetSide(exIdx, side) {
+    const item = store.activeLog.items[exIdx];
+    if (!item?.isSuperset || (side !== 'A' && side !== 'B')) return;
+    const sideSets = (item.sets || []).filter(s => s.side === side && !s.isWarmup && !s.isText);
+    const last = sideSets[sideSets.length - 1];
+    if (!last) return;
+    const sideMeta = (item.sides || []).find(s => s.key === side);
+    const eq = equipmentForExercise(sideMeta?.exercise?.name || '');
+    const dropW = roundUpLoad((Number(last.weight) || 0) * 0.8, eq);
+    item.sets.push({
+        weight: dropW,
+        reps: last.reps || 10,
+        rpe: 1,
+        completed: false,
+        isDropSet: true,
+        isWarmup: false,
+        side,
+        restTime: side === 'B' ? 100 : 0,
+        prevWeight: last.weight || 0,
+        notes: `Drop set · 80% · ${side}`
+    });
+    if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
+    else renderActiveLog();
+}
+
+/** Rest after B of a superset round: 100s + 10s per side that hit 0 RIR. */
+export function supersetRestAfterB(setA, setB) {
+    let rest = 100;
+    const rirA = parseFloat(setA?.rpe);
+    const rirB = parseFloat(setB?.rpe);
+    if (Number.isFinite(rirA) && rirA === 0) rest += 10;
+    if (Number.isFinite(rirB) && rirB === 0) rest += 10;
+    return rest;
 }
 
 export async function generateWorkoutTemplate() {
@@ -200,30 +514,13 @@ export async function generateWorkoutTemplate() {
 
     const isSteadyFocus = isSteadyCardio(focus) || focus === 'Cardio';
     const isLactateFocus = isLactateEvent(focus);
+    const isPracticeFocus = /practice/i.test(String(focus || ''));
+    const isMatchFocus = /^(game|match)$/i.test(String(focus || ''));
+    const prepCtx = (isPracticeFocus || isMatchFocus) ? 'practice' : prepContextForFocus(focus);
+
     if (!isSteadyFocus) {
-        if (isLactateFocus) {
-            // Shorter warmup so HIT block (~20 min) + stretch ≈ 45 min total
-            mainRoutine.push({
-                name: 'Warmup',
-                isWarmupGroup: true,
-                warmupParts: getLactateWarmupParts(),
-                warmupNote: 'Pulse raising, mobilisation & dynamic stretching'
-            });
-        } else {
-            mainRoutine.push(
-                {
-                    name: "Warmup",
-                    isWarmupGroup: true,
-                    warmupParts: [
-                        { name: "Pulse Raising", reps: "3-5 Mins", notes: "Light jog, skip, or bike." },
-                        { name: "Mobilisation", reps: "10 Reps/Joint", notes: "Neck, shoulders, hips, ankles. [Video available]" },
-                        { name: "Shoulder / Dynamic Warmup", reps: "2 Rounds", notes: "Banded dislocates, arm circles, leg swings." },
-                        { name: "Dynamic Stretching", reps: "5 Mins", notes: "Walking lunges, high knees, open/close gate." }
-                    ],
-                    warmupNote: 'Pulse raising, mobilisation, shoulder warmup & dynamic stretching'
-                }
-            );
-        }
+        const wu = resolveWarmupBlock({ context: prepCtx, isLactate: isLactateFocus });
+        if (wu) mainRoutine.push(wu);
     }
 
     // If Repair Level is 1 and it's a Lower Body focus, completely abort the lower body routine.
@@ -350,9 +647,15 @@ export async function generateWorkoutTemplate() {
     else if (isSteadyCardio(focus) || focus === 'Cardio') { 
         mainRoutine.push({ name: "Steady State Cardio", notes: "Aerobic base. Zone 2. Duration tracked by the session timer." }); 
     }
+    else if (isPracticeFocus || isMatchFocus) {
+        mainRoutine.push(buildSportSessionBlock(isMatchFocus ? 'match' : 'practice'));
+    }
 
-    // 2. MANDATORY COOL-DOWN BLOCK
-    mainRoutine.push({ name: "Static Stretching", isText: true, reps: "~12 mins", notes: "Hold stretches for 30s each. [Video available]" });
+    // 2. COOL-DOWN STRETCH (honours prefs; skipped for steady)
+    if (!isSteadyFocus) {
+        const stretch = resolveStretchBlock({ context: prepCtx });
+        if (stretch) mainRoutine.push(stretch);
+    }
 
     const roundLoad = (val, type) => {
         if (type === 'dumbbell') {
@@ -374,13 +677,65 @@ export async function generateWorkoutTemplate() {
                 completed: false,
                 isText: true,
                 partName: part.name,
-                notes: part.notes
+                notes: part.notes,
+                children: Array.isArray(part.children) ? part.children : null
             }));
             store.currentGhostItems.push({
-                exercise: { id: 'WARMUP_GROUP', name: 'Warmup', domain: 'warmup', muscle_group: 'full' },
-                note: item.warmupNote || 'Pulse raising, mobilisation, shoulder warmup & dynamic stretching',
+                exercise: { id: item.isCustomWarmup ? 'CUSTOM_WARMUP' : 'WARMUP_GROUP', name: item.name || 'Warmup', domain: 'warmup', muscle_group: 'full' },
+                note: item.warmupNote || 'Includes pulse raising, mobilisation, shoulder warmup & dynamic stretching',
                 sets: setsArray,
-                isWarmupGroup: true
+                isWarmupGroup: true,
+                isCustomWarmup: !!item.isCustomWarmup,
+                prepContext: prepCtx
+            });
+            return;
+        }
+        if (item.isStretchGroup || (/static\s*stretch/i.test(item.name || '') && item.stretchParts)) {
+            const parts = item.stretchParts || [];
+            let setsArray = parts.length
+                ? parts.map(part => ({
+                    weight: 0,
+                    reps: part.reps,
+                    rpe: 0,
+                    completed: false,
+                    isText: true,
+                    partName: part.name,
+                    notes: part.notes
+                }))
+                : [{
+                    weight: 0,
+                    reps: item.reps || 'Log when done',
+                    rpe: 0,
+                    completed: false,
+                    isText: true,
+                    partName: item.name || 'Stretching',
+                    notes: item.notes
+                }];
+            store.currentGhostItems.push({
+                exercise: { id: item.isCustomStretch ? 'CUSTOM_STRETCH' : 'STRETCH_GROUP', name: item.name || 'Stretching', domain: 'mobility', muscle_group: 'full' },
+                note: item.notes || '',
+                sets: setsArray,
+                isStretchGroup: true,
+                isCustomStretch: !!item.isCustomStretch,
+                prepContext: prepCtx
+            });
+            return;
+        }
+        if (item.isSportSessionBlock) {
+            store.currentGhostItems.push({
+                exercise: { id: 'SPORT_SESSION', name: item.name, domain: 'sport', muscle_group: 'full' },
+                note: item.notes || '',
+                sets: [{
+                    weight: 0,
+                    reps: item.reps || 'Log when done',
+                    rpe: 0,
+                    completed: false,
+                    isText: true,
+                    partName: item.name,
+                    notes: item.notes
+                }],
+                isSportSessionBlock: true,
+                plannedSets: 1
             });
             return;
         }
@@ -570,7 +925,7 @@ export async function generateWorkoutTemplate() {
                 setsArray.push({
                     weight: tWeight,
                     reps: itemReps,
-                    rpe: useHypertrophy ? 4 : 2,
+                    rpe: 2,
                     completed: false,
                     restTime: itemRest,
                     prevWeight: latestLog ? latestLog.weight_kg : 0,
@@ -609,13 +964,23 @@ export async function generateWorkoutTemplate() {
             </div>`;
             return;
         }
+        if (item.isStretchGroup || /stretch/i.test(item.exercise?.name || '')) {
+            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
+                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Stretching</div>
+            </div>`;
+            return;
+        }
+        if (item.isSportSessionBlock) {
+            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
+                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">${item.exercise.name}</div>
+            </div>`;
+            return;
+        }
         html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
             <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom: 4px;">
                 <div style="font-size: 12px; color:#D4AF37; font-weight:800; text-transform:uppercase;">${item.exercise.name}</div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    ${(!item.isWarmupGroup) ? `<button type="button" onclick="openVideoModal('${String(item.exercise.name).replace(/'/g, "\\'")}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:4px 8px; border-radius:4px; color:var(--text-silver); font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">🎥 FORM</button>` : ''}
-                    ${(!item.isWarmupGroup && item.sets && item.sets.length && !item.sets[0].isText && (item.exercise.domain || '').toLowerCase() !== 'cardio') ? `<div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:700; white-space:nowrap;">${(typeof item.plannedSets === 'number' ? item.plannedSets : item.sets.filter(s => !s.isWarmup).length)} SETS</div>` : ''}
-                    ${(!item.isWarmupGroup && (item.exercise.domain || '').toLowerCase() === 'cardio' && item.sets?.[0]) ? `<div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:700; white-space:nowrap;">TIMER</div>` : ''}
+                    <button type="button" onclick="openVideoModal('${String(item.exercise.name).replace(/'/g, "\\'")}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:4px 8px; border-radius:4px; color:var(--text-silver); font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">🎥 FORM</button>
                 </div>
             </div>`;
         if (item.note) html += `<div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic; display:flex; align-items:center; gap:4px;"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg> ${item.note}</div>`;
@@ -624,21 +989,33 @@ export async function generateWorkoutTemplate() {
         if (phaseStr === 'OffSeason_Adaptation' && !item.isWarmupGroup) {
             html += `<div style="font-size:9px; color:var(--text-muted); margin-bottom:8px; font-family:'Roboto Mono'; border:1px dashed var(--border-subtle); border-radius:6px; padding:8px;">Form check space — tap FORM before loading. Keep the bar path identical for all 50 reps.</div>`;
         }
-        item.sets.forEach((set, idx) => {
-            if (set.isLactateHit && set.duration_sec) {
+
+        const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
+        const lactateSets = (item.sets || []).filter(s => s && s.isLactateHit);
+        const isCardio = (item.exercise.domain || '').toLowerCase() === 'cardio';
+
+        if (lactateSets.length) {
+            lactateSets.forEach((set, idx) => {
                 const rest = set.restTime > 0 ? ` · ${set.restTime}s rest` : '';
                 html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;"><span>Interval ${idx + 1}</span><span style="color:#D4AF37; font-weight:bold;">${set.duration_sec}s work${rest}</span></div>`;
-            } else if (set.isText) {
-                html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;"><span>Target</span><span style="color:#D4AF37; font-weight:bold;">${set.reps}</span></div>`;
-            } else if ((item.exercise.domain || '').toLowerCase() === 'cardio') {
-                const dist = set.distance_km > 0 ? `${set.distance_km} km` : 'Distance';
-                html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;"><span>Session</span><span style="color:#D4AF37; font-weight:bold;">${dist} · duration from timer</span></div>`;
-            } else {
-                let restStr = set.restTime ? `<span style="color:#7a7a7a; font-size:9px; margin-right:5px; display:inline-flex; align-items:center; gap:3px;"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ${set.restTime/60}m rest</span>` : '';
-                let repText = pData.reps === 50 ? "50 Total" : `${set.reps}`;
-                html += `<div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#ccc; margin-bottom: 4px;"><span>Set ${idx+1}</span><div style="display:flex; align-items:center;">${restStr}<span>${set.weight > 0 ? set.weight+'kg' : 'BW'} x ${repText}</span></div></div>`;
-            }
-        });
+            });
+        } else if (isCardio && item.sets?.[0]) {
+            const set = item.sets[0];
+            const dist = set.distance_km > 0 ? `${set.distance_km} km` : 'Distance';
+            html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;"><span>Session</span><span style="color:#D4AF37; font-weight:bold;">${dist} · duration from timer</span></div>`;
+        } else if (workSets.length) {
+            const sample = workSets[0];
+            const nSets = typeof item.plannedSets === 'number' ? item.plannedSets : workSets.length;
+            const reps = pData.reps === 50 ? '50' : (sample.reps || pData.reps || 10);
+            const load = Number(sample.weight) > 0 ? `${sample.weight}kg` : 'BW';
+            html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;">
+                <span>${load}</span>
+                <span style="color:#D4AF37; font-weight:bold; font-family:'Roboto Mono';">${nSets}×${reps}</span>
+            </div>`;
+        } else if ((item.sets || []).some(s => s && s.isText)) {
+            const textSet = (item.sets || []).find(s => s && s.isText);
+            html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;"><span>Target</span><span style="color:#D4AF37; font-weight:bold;">${textSet.reps || ''}</span></div>`;
+        }
         html += `</div>`;
     });
 

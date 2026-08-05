@@ -19,7 +19,7 @@ import {
     nextHypertrophyRotation,
     resolveHypertrophySessionKind
 } from './hypertrophy-engine.js';
-import { persistUserConfigToCloud } from './thermodynamics.js';
+import { calculateTDEE, computeDayNutritionTargets, persistUserConfigToCloud } from './thermodynamics.js';
 import { recordHydrationMl, specificEventName } from '../lib/food-parse.js';
 import { drawMacroChart } from '../ui/charts.js';
 import { upsertTodaySleep } from './body-metrics.js';
@@ -201,7 +201,8 @@ export function recordLoggedWorkoutSession({
 } = {}) {
     if (!dateIso || !sessionId) return null;
     const creditKind = normalizeLoggedSessionKind(kind);
-    const displayKind = creditKind || kind || 'Workout';
+    // Keep the original session label for Log/display; only credits are collapsed
+    const displayKind = kind || creditKind || 'Workout';
 
     // Week-plan credit only for Steady / Lactate / Gym
     if (creditKind) {
@@ -271,6 +272,10 @@ export function listWorkoutSessionsForDate(dateIso) {
 }
 
 export function prettyWorkoutTypeLabel(kind) {
+    // Hypertrophy / Strength A·B keep their plan labels (do not collapse to "Gym Workout")
+    if (isHypertrophyEvent(kind)) return prettyFocusName(kind) || kind;
+    if (kind === 'Full Body / Strength A' || /Strength\s*A/i.test(kind || '')) return 'Strength Session A';
+    if (kind === 'Full Body / Strength B' || /Strength\s*B/i.test(kind || '')) return 'Strength Session B';
     const normalized = normalizeLoggedSessionKind(kind) || kind;
     if (normalized === 'Cardio (Steady)') return 'Steady State';
     if (normalized === 'Lactate') return 'Lactate/HIT';
@@ -513,47 +518,63 @@ export function placeStrengthSessions(days, count) {
 /**
  * Place hypertrophy sessions (PPL / Upper-Lower / Full Body) up to 6×/week.
  * Never on Match/Game; Rest overrides win. Adjacent days allowed for PPL.
+ * Kind labels are sticky for the calendar week so hard refresh does not rotate Push/Pull/Legs.
  */
 export function placeHypertrophySessions(days, count) {
     const prefs = getHypertrophyPlanPrefs();
     const target = Math.min(6, Math.max(0, parseInt(count, 10) || prefs.sessionCount || 0));
     const split = prefs.split;
+    const weekStart = days[0]?.dateStr || '';
+    const sticky = loadHypertrophyWeekSticky(weekStart, split);
 
     let liftIdx = [];
     for (let i = 0; i < days.length; i++) {
         if (dayHasStrength(days[i].events)) liftIdx.push(i);
     }
 
+    // Re-apply sticky dates first (as long as day is still placeable)
+    const stickyDates = sticky.sessions.map(s => s.dateStr);
+    stickyDates.forEach(dateStr => {
+        const i = days.findIndex(d => d.dateStr === dateStr);
+        if (i < 0 || liftIdx.includes(i)) return;
+        if ((days[i].events || []).some(isGameEvent)) return;
+        if ((days[i].events || []).some(e => e === 'Rest' || e === 'Cannot Workout')) return;
+        const kind = sticky.sessions.find(s => s.dateStr === dateStr)?.kind
+            || (split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full');
+        if (pushGPS(days[i], hypertrophyEventForKind(kind))) {
+            liftIdx.push(i);
+        }
+    });
+    liftIdx.sort((a, b) => a - b);
+
     while (liftIdx.length > target) {
-        const i = liftIdx.pop();
+        // Prefer trimming days that were not in the sticky plan (newest extras)
+        let dropPos = -1;
+        for (let k = liftIdx.length - 1; k >= 0; k--) {
+            const ds = days[liftIdx[k]].dateStr;
+            if (!stickyDates.includes(ds)) { dropPos = k; break; }
+        }
+        if (dropPos < 0) dropPos = liftIdx.length - 1;
+        const i = liftIdx.splice(dropPos, 1)[0];
         const sIdx = days[i].events.findIndex(isStrengthEvent);
         if (sIdx >= 0) days[i].events.splice(sIdx, 1);
     }
 
-    // Prefer packing early-week for high frequency; allow adjacent for PPL / UL
     while (liftIdx.length < target) {
         let best = -1;
         let bestScore = -Infinity;
-        for (let pass = 0; pass < 2 && best < 0; pass++) {
-            const allowAdjacent = true; // hypertrophy PPL needs adjacent days
-            best = -1;
-            bestScore = -Infinity;
-            for (let i = 0; i < 7; i++) {
-                if (liftIdx.includes(i)) continue;
-                // Skip match / rest-locked days
-                if ((days[i].events || []).some(isGameEvent)) continue;
-                if ((days[i].events || []).some(e => e === 'Rest' || e === 'Cannot Workout')) continue;
-                const probe = hypertrophyEventForKind(split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full');
-                let s = scoreDayForPlacement(days, i, probe, { allowAdjacent, ignoreStrengthStreak: true });
-                if (s === -Infinity) continue;
-                // Prefer spreading a bit for 3–4 day UL; pack for 5–6 PPL
-                let minDist = 99;
-                liftIdx.forEach(idx => { minDist = Math.min(minDist, Math.abs(idx - i)); });
-                if (split === 'ppl') s += (minDist === 1 ? 12 : minDist * 4);
-                else s += (minDist < 99 ? minDist * 8 : 40);
-                if (s > bestScore) { bestScore = s; best = i; }
-            }
-            if (bestScore === -Infinity) best = -1;
+        for (let i = 0; i < 7; i++) {
+            if (liftIdx.includes(i)) continue;
+            if ((days[i].events || []).some(isGameEvent)) continue;
+            if ((days[i].events || []).some(e => e === 'Rest' || e === 'Cannot Workout')) continue;
+            const probe = hypertrophyEventForKind(split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full');
+            let s = scoreDayForPlacement(days, i, probe, { allowAdjacent: true, ignoreStrengthStreak: true });
+            if (s === -Infinity) continue;
+            let minDist = 99;
+            liftIdx.forEach(idx => { minDist = Math.min(minDist, Math.abs(idx - i)); });
+            if (split === 'ppl') s += (minDist === 1 ? 12 : minDist * 4);
+            else s += (minDist < 99 ? minDist * 8 : 40);
+            if (s > bestScore) { bestScore = s; best = i; }
         }
         if (best < 0) break;
         const probe = hypertrophyEventForKind(split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full');
@@ -562,33 +583,77 @@ export function placeHypertrophySessions(days, count) {
         liftIdx.sort((a, b) => a - b);
     }
 
-    // Rotate labels chronologically
-    let startKind = 'push';
-    try {
-        const prev = localStorage.getItem('ascensus_hypertrophy_tail');
-        if (prev) startKind = nextHypertrophyRotation([prev], split);
-        else startKind = split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full';
-    } catch (e) {
-        startKind = split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full';
-    }
+    // Assign kinds: reuse sticky by date; only mint new kinds for new dates
+    const byDate = {};
+    sticky.sessions.forEach(s => { byDate[s.dateStr] = s.kind; });
 
-    let kind = startKind;
-    let lastKind = null;
+    let kindCursor = sticky.nextStartKind
+        || (() => {
+            try {
+                const prev = localStorage.getItem('ascensus_hypertrophy_tail');
+                if (prev) return nextHypertrophyRotation([prev], split);
+            } catch (e) { /* ignore */ }
+            return split === 'ppl' ? 'push' : split === 'ul' ? 'upper' : 'full';
+        })();
+
+    const sessions = [];
     for (let i = 0; i < days.length; i++) {
         const sIdx = (days[i].events || []).findIndex(isStrengthEvent);
         if (sIdx < 0) continue;
-        // Convert legacy Strength labels on hypertrophy weeks
+        const dateStr = days[i].dateStr;
+        let kind = byDate[dateStr];
+        if (!kind || !isHypertrophyKindForSplit(kind, split)) {
+            kind = kindCursor;
+            kindCursor = nextHypertrophyRotation([kind], split);
+        }
         days[i].events[sIdx] = hypertrophyEventForKind(kind);
-        lastKind = kind;
-        kind = nextHypertrophyRotation([kind], split);
+        sessions.push({ dateStr, kind });
     }
-    if (lastKind) {
+
+    saveHypertrophyWeekSticky(weekStart, split, sessions, kindCursor);
+
+    // Tail = last kind this week (for NEXT week only). Do not advance on every rebuild.
+    if (sessions.length) {
         try {
-            localStorage.setItem('ascensus_hypertrophy_tail', lastKind);
-            localStorage.setItem('ascensus_hypertrophy_tail_week', days[0]?.dateStr || '');
+            localStorage.setItem('ascensus_hypertrophy_tail', sessions[sessions.length - 1].kind);
+            localStorage.setItem('ascensus_hypertrophy_tail_week', weekStart);
         } catch (e) { /* ignore */ }
     }
     return liftIdx.length;
+}
+
+const HYP_WEEK_STICKY_KEY = 'ascensus_hyp_week_sticky_v1';
+
+function isHypertrophyKindForSplit(kind, split) {
+    if (split === 'ppl') return kind === 'push' || kind === 'pull' || kind === 'legs';
+    if (split === 'ul') return kind === 'upper' || kind === 'lower';
+    return kind === 'full';
+}
+
+function loadHypertrophyWeekSticky(weekStart, split) {
+    try {
+        const raw = JSON.parse(localStorage.getItem(HYP_WEEK_STICKY_KEY) || 'null');
+        if (!raw || raw.weekStart !== weekStart || raw.split !== split) {
+            return { sessions: [], nextStartKind: null };
+        }
+        return {
+            sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
+            nextStartKind: raw.nextStartKind || null
+        };
+    } catch (e) {
+        return { sessions: [], nextStartKind: null };
+    }
+}
+
+function saveHypertrophyWeekSticky(weekStart, split, sessions, nextStartKind) {
+    try {
+        localStorage.setItem(HYP_WEEK_STICKY_KEY, JSON.stringify({
+            weekStart,
+            split,
+            sessions,
+            nextStartKind
+        }));
+    } catch (e) { /* ignore */ }
 }
 
 export function isQualifyingRestDay(events) {
@@ -1027,6 +1092,7 @@ export function setRouteOverride(dateStr, value) {
     if (!value) delete map[dateStr];
     else map[dateStr] = value;
     saveRouteOverrides(map);
+    try { calculateTDEE(); } catch (e) { /* ignore */ }
 }
 export function dateToISO(d) {
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -1406,21 +1472,11 @@ export function pickPrimaryFocus(events) {
     return events[0];
 }
 
-/** Macro goals for a day focus (Rest cuts carbs 20%). */
-export function getDayMacroTargets(focus) {
-    const base = store.userConfig.targets || {};
-    let cals = base.cals || 0;
-    let tPro = base.pro || 150;
-    let tCarb = base.carb || 200;
-    let tFat = base.fat || 70;
-    const f = normalizeFocusName(focus) || focus;
-    if (f === 'Rest') {
-        const reduction = Math.round(tCarb * 0.20);
-        tCarb -= reduction;
-        tFat += Math.round((reduction * 4) / 9);
-        cals = Math.round((tPro * 4) + (tCarb * 4) + (tFat * 9));
-    }
-    return { cals, tPro, tCarb, tFat };
+/** Macro goals for a calendar day (plan + prior-day load driven). */
+export function getDayMacroTargets(focus, dateObj = new Date()) {
+    const day = dateObj instanceof Date ? dateObj : new Date(dateObj);
+    const t = computeDayNutritionTargets(day);
+    return { cals: t.cals, tPro: t.pro, tCarb: t.carb, tFat: t.fat };
 }
 
 function shortDayLabel(i, futureDate) {
@@ -1444,7 +1500,7 @@ export function generateFutureTimeline() {
         const dayName = shortDayLabel(i, futureDate);
         const dayEvents = getPlannedDayEvents(futureDate);
         const primary = pickPrimaryFocus(dayEvents);
-        const macros = getDayMacroTargets(primary);
+        const macros = getDayMacroTargets(primary, futureDate);
         const slots = assignPairedSessionSlots(futureDate, dayEvents);
         const sectionLabelStyle = `font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px;`;
         const itemLineStyle = `font-size:12px; font-weight:600; color:var(--text-main); line-height:1.35;`;
@@ -1752,8 +1808,10 @@ export async function deleteSportDiaryFromLog(kind) {
 }
 
 export async function commitPracticeSession() {
-    const notes = document.getElementById('journal-notes')?.value || '';
-    const entry = buildDiaryEntryFromForm({ notes, type: 'practice' });
+    const stash = window._sportDiaryStash?.mode === 'practice' ? window._sportDiaryStash : null;
+    window._sportDiaryStash = null;
+    const notes = stash?.notes ?? (document.getElementById('journal-notes')?.value || '');
+    const entry = stash?.entry || buildDiaryEntryFromForm({ notes, type: 'practice' });
     const rpe = Number(entry.rpe) || 5;
     const ath = Number(entry.athletic) || 5;
     const ment = Number(entry.mental) || 5;
@@ -1838,8 +1896,10 @@ export async function commitPracticeSession() {
 }
 
 export async function commitMatchSession() {
-    const notes = document.getElementById('journal-notes')?.value || '';
-    const entry = buildDiaryEntryFromForm({ notes, type: 'match' });
+    const stash = window._sportDiaryStash?.mode === 'match' ? window._sportDiaryStash : null;
+    window._sportDiaryStash = null;
+    const notes = stash?.notes ?? (document.getElementById('journal-notes')?.value || '');
+    const entry = stash?.entry || buildDiaryEntryFromForm({ notes, type: 'match' });
     const rpe = Number(entry.rpe) || 5;
     const ath = Number(entry.athletic) || 5;
     const ment = Number(entry.mental) || 5;
@@ -1947,7 +2007,7 @@ export function openFuturePlan(dateStr, focus, totalCals, isoDate) {
     const planDate = isoDate ? new Date(isoDate + 'T12:00:00') : new Date();
     const dayEvents = getPlannedDayEvents(planDate);
     const primary = pickPrimaryFocus(dayEvents.length ? dayEvents : [normalizeFocusName(focus) || focus]);
-    const macros = getDayMacroTargets(primary);
+    const macros = getDayMacroTargets(primary, planDate);
     const domains = mergeDayDomainTargets(dayEvents.length ? dayEvents : [primary]);
     const slots = assignPairedSessionSlots(planDate, dayEvents.length ? dayEvents : [primary]);
 
@@ -1997,6 +2057,25 @@ export function openFuturePlan(dateStr, focus, totalCals, isoDate) {
 setTimeout(renderFixedSchedules, 1000);
 
 // --- MODAL & METRIC LOGIC ---
+export function syncSleepHoursWarning() {
+    const warn = document.getElementById('sleep-hours-warning');
+    if (!warn) return;
+    const h = parseInt(document.getElementById('sleep-input-hours')?.value, 10) || 0;
+    const m = parseInt(document.getElementById('sleep-input-mins')?.value, 10) || 0;
+    const total = h + (m / 60);
+    if (m < 0 || m > 59) {
+        warn.textContent = 'Minutes must be between 0 and 59.';
+        warn.classList.remove('hidden');
+        return;
+    }
+    if (total > 24) {
+        warn.textContent = 'Maximum sleep is 24 hours. Please enter 24 or less.';
+        warn.classList.remove('hidden');
+        return;
+    }
+    warn.classList.add('hidden');
+}
+
 export function openSleepModal() {
     const modal = document.getElementById('sleep-modal');
     const warn = document.getElementById('sleep-hours-warning');
@@ -2015,16 +2094,26 @@ export function closeSleepModal() {
 }
 
 export function submitSleepLog() {
-    const input = document.getElementById('sleep-input-hours');
+    const hoursEl = document.getElementById('sleep-input-hours');
+    const minsEl = document.getElementById('sleep-input-mins');
     const warn = document.getElementById('sleep-hours-warning');
-    const hours = parseFloat(input?.value);
-    if (!hours || hours <= 0) {
+    const h = parseInt(hoursEl?.value, 10);
+    const m = parseInt(minsEl?.value, 10) || 0;
+    if (!Number.isFinite(h) || h < 0 || (h === 0 && m <= 0)) {
         if (warn) {
             warn.textContent = 'Enter a sleep duration greater than 0.';
             warn.classList.remove('hidden');
         }
         return;
     }
+    if (m < 0 || m > 59) {
+        if (warn) {
+            warn.textContent = 'Minutes must be between 0 and 59.';
+            warn.classList.remove('hidden');
+        }
+        return;
+    }
+    const hours = h + (m / 60);
     if (hours > 24) {
         if (warn) {
             warn.textContent = 'Maximum sleep is 24 hours. Please enter 24 or less.';
@@ -2038,7 +2127,7 @@ export function submitSleepLog() {
         warn.textContent = '';
         warn.classList.add('hidden');
     }
-    upsertTodaySleep(hours);
+    upsertTodaySleep(Math.round(hours * 100) / 100);
     
     closeSleepModal();
     
@@ -2052,86 +2141,160 @@ export function submitSleepLog() {
     } catch (e) { /* ignore */ }
 }
 
+const TEACHING_POINT_PLACEHOLDER_URL = 'https://www.youtube.com/embed/placeholder';
+
+function teachingPoint(label, videoUrl = TEACHING_POINT_PLACEHOLDER_URL) {
+    return { label, videoUrl: videoUrl || TEACHING_POINT_PLACEHOLDER_URL };
+}
+
 export function openVideoModal(title, url) {
     document.getElementById('video-modal-title').innerText = title;
     const frame = document.getElementById('video-modal-frame');
-    frame.innerHTML = `TAP TO LOAD INTEL`;
-    
-    // Lazy load iframe on tap to save mobile data
+    const formUrl = url || TEACHING_POINT_PLACEHOLDER_URL;
+    window._videoModalFormUrl = formUrl;
+    window._videoModalActiveTp = null;
+    frame.innerHTML = 'TAP TO LOAD INTEL';
     frame.onclick = function() {
-        frame.innerHTML = `<iframe width="100%" height="100%" src="${url}" frameborder="0" allowfullscreen></iframe>`;
-        frame.onclick = null; 
+        frame.innerHTML = `<iframe width="100%" height="100%" src="${formUrl}" frameborder="0" allowfullscreen></iframe>`;
+        frame.onclick = null;
+        window._videoModalActiveTp = null;
+        syncTeachingPointActiveState();
     };
 
     const notesEl = document.getElementById('video-modal-notes');
+    const points = getTeachingPoints(title);
+    window._videoModalTeachingPoints = points;
     if (notesEl) {
-        notesEl.innerHTML = getVideoDirectives(title).map(d => `<li>${d}</li>`).join('');
+        notesEl.innerHTML = points.map((tp, idx) => `
+            <button type="button" class="video-tp-btn" data-tp-index="${idx}" onclick="selectTeachingPointVideo(${idx})" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:10px; padding:12px; color:inherit;">
+                <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+                    <span style="font-size:12px; color:var(--text-silver); line-height:1.45;">${escapeVideoModalText(tp.label)}</span>
+                    <span style="font-family:'Roboto Mono'; font-size:10px; color:var(--text-stealth); flex-shrink:0; text-transform:uppercase;">Video</span>
+                </div>
+            </button>
+        `).join('');
     }
-    
+
     document.getElementById('video-modal').classList.remove('hidden');
 }
 
-export function getVideoDirectives(title) {
+function escapeVideoModalText(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function syncTeachingPointActiveState() {
+    const active = window._videoModalActiveTp;
+    document.querySelectorAll('#video-modal-notes .video-tp-btn').forEach((btn) => {
+        const idx = Number(btn.getAttribute('data-tp-index'));
+        const on = active != null && idx === active;
+        btn.style.borderColor = on ? 'var(--gold-accent)' : 'var(--border-subtle)';
+        btn.style.background = on ? 'rgba(212,175,55,0.08)' : 'transparent';
+    });
+}
+
+/** Load a teaching-point clip into the form-video frame (tap again to return to form video). */
+export function selectTeachingPointVideo(index) {
+    const points = window._videoModalTeachingPoints || [];
+    const tp = points[index];
+    const frame = document.getElementById('video-modal-frame');
+    if (!tp || !frame) return;
+
+    if (window._videoModalActiveTp === index) {
+        // Toggle off — restore overall form video
+        window._videoModalActiveTp = null;
+        const formUrl = window._videoModalFormUrl || TEACHING_POINT_PLACEHOLDER_URL;
+        frame.innerHTML = 'TAP TO LOAD INTEL';
+        frame.onclick = function() {
+            frame.innerHTML = `<iframe width="100%" height="100%" src="${formUrl}" frameborder="0" allowfullscreen></iframe>`;
+            frame.onclick = null;
+        };
+        syncTeachingPointActiveState();
+        return;
+    }
+
+    window._videoModalActiveTp = index;
+    frame.onclick = null;
+    frame.innerHTML = `<iframe width="100%" height="100%" src="${tp.videoUrl}" frameborder="0" allowfullscreen title="${escapeVideoModalText(tp.label)}"></iframe>`;
+    syncTeachingPointActiveState();
+}
+
+/** Pressable teaching points for the form-video modal (label + clip URL). */
+export function getTeachingPoints(title) {
     const t = String(title || '').toLowerCase();
     if (t.includes('insulin') || t.includes('berg')) {
         return [
-            'Prioritise protein and fibre at every meal.',
-            'Cut liquid sugar and ultra-processed snacks this week.',
-            'Walk 10 minutes after your largest carbohydrate meal.'
+            teachingPoint('Prioritise protein and fibre at every meal.'),
+            teachingPoint('Cut liquid sugar and ultra-processed snacks this week.'),
+            teachingPoint('Walk 10 minutes after your largest carbohydrate meal.')
         ];
     }
     if (t.includes('squat')) {
         return [
-            'Brace before you unlock the hips — ribs down, floor through mid-foot.',
-            'Control the eccentric; depth only as far as a neutral spine allows.',
-            'Drive up without letting the knees cave or heels lift.'
+            teachingPoint('Brace before you unlock the hips — ribs down, floor through mid-foot.'),
+            teachingPoint('Control the eccentric; depth only as far as a neutral spine allows.'),
+            teachingPoint('Drive up without letting the knees cave or heels lift.')
         ];
     }
     if (t.includes('sleep')) {
         return [
-            'Fixed bedtime ±30 minutes — consistency beats one long night.',
-            'Dim screens and lights in the final 60 minutes.',
-            'Cool, dark room; leave caffeine for the morning window only.'
+            teachingPoint('Fixed bedtime ±30 minutes — consistency beats one long night.'),
+            teachingPoint('Dim screens and lights in the final 60 minutes.'),
+            teachingPoint('Cool, dark room; leave caffeine for the morning window only.')
         ];
     }
     if (t.includes('huberman') || t.includes('dopamine')) {
         return [
-            'Stack hard work before cheap dopamine (scroll / sugar).',
-            'Protect one morning block of deep focus without notifications.',
-            'Use sunlight early and finish intense training before late evening.'
+            teachingPoint('Stack hard work before cheap dopamine (scroll / sugar).'),
+            teachingPoint('Protect one morning block of deep focus without notifications.'),
+            teachingPoint('Use sunlight early and finish intense training before late evening.')
         ];
     }
     if (t.includes('bench') || t.includes('press')) {
         return [
-            'Plant feet, pinch scapulae, slight arch — bar over wrists and elbows.',
-            'Touch lightly to the chest; no bounce.',
-            'Press up and slightly back to the start position.'
+            teachingPoint('Plant feet, pinch scapulae, slight arch — bar over wrists and elbows.'),
+            teachingPoint('Touch lightly to the chest; no bounce.'),
+            teachingPoint('Press up and slightly back to the start position.')
         ];
     }
     if (t.includes('deadlift')) {
         return [
-            'Bar over mid-foot, shins vertical, lats on before you pull.',
-            'Push the floor away — hinge, don’t yank with the low back.',
-            'Lock out tall without hyperextending the lumbar spine.'
+            teachingPoint('Bar over mid-foot, shins vertical, lats on before you pull.'),
+            teachingPoint('Push the floor away — hinge, don’t yank with the low back.'),
+            teachingPoint('Lock out tall without hyperextending the lumbar spine.')
         ];
     }
     if (t.includes('band') || t.includes('pull-apart') || t.includes('face pull')) {
         return [
-            'Light tension — own the end range without shrugging.',
-            'Slow eccentric; pause where you feel the target muscle.',
-            'Breathing stays easy; this is prehab, not a max set.'
+            teachingPoint('Light tension — own the end range without shrugging.'),
+            teachingPoint('Slow eccentric; pause where you feel the target muscle.'),
+            teachingPoint('Breathing stays easy; this is prehab, not a max set.')
         ];
     }
-    // Default form cues for unnamed lifts / adaptation form space
     return [
-        'Keep the core braced and spine neutral.',
-        'Control the eccentric — no bouncing or dumping the load.',
-        'Stop the set when form breaks, even if reps remain.'
+        teachingPoint('Keep the core braced and spine neutral.'),
+        teachingPoint('Control the eccentric — no bouncing or dumping the load.'),
+        teachingPoint('Stop the set when form breaks, even if reps remain.')
     ];
 }
 
+/** @deprecated Prefer getTeachingPoints — returns label strings for older callers. */
+export function getVideoDirectives(title) {
+    return getTeachingPoints(title).map(tp => tp.label);
+}
+
 export function closeVideoModal() {
-    document.getElementById('video-modal-frame').innerHTML = 'TAP TO LOAD INTEL'; 
+    const frame = document.getElementById('video-modal-frame');
+    if (frame) {
+        frame.innerHTML = 'TAP TO LOAD INTEL';
+        frame.onclick = null;
+    }
+    window._videoModalTeachingPoints = null;
+    window._videoModalActiveTp = null;
+    window._videoModalFormUrl = null;
     document.getElementById('video-modal').classList.add('hidden');
 }
 

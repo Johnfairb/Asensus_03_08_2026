@@ -293,7 +293,7 @@
 
         <div id="fuel-panel-goals">
             <div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 12px;">
-                <p id="refund-notice" style="font-size:10px; color:var(--gold-accent); text-align:center; margin-top:-10px; margin-bottom:5px; display:none;">Extra calories from cardio added today</p>
+                <p id="refund-notice" style="font-size:10px; color:var(--gold-accent); text-align:center; margin-top:-10px; margin-bottom:5px; display:none;"></p>
                 <div id="reroute-notice" style="display:none; background: rgba(212, 175, 55, 0.05); border: 1px solid rgba(212, 175, 55, 0.3); padding: 10px; border-radius: var(--radius-sm); margin-top: -10px; margin-bottom: 10px; font-size: 11px; color: var(--gold-accent); text-align: center; font-weight: 600; letter-spacing: 0.2px; line-height: 1.4;">
                     Over target — today adjusted.
                 </div>
@@ -407,63 +407,55 @@
 
         <div id="drive-dashboard">
             <div id="drive-panel-goals">
-                <!-- 5-BAR FITNESS HUD (today only) -->
+                <!-- WEEKLY EXERCISE GOALS (Mon–Sun) -->
                 <div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 12px; margin-top: 10px;">
-                    <div onclick="showBreakdown('str')" style="cursor:pointer;">
+                    <div style="font-family:'Roboto Mono'; font-size:10px; color:var(--text-muted); letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px;">This week · Mon–Sun</div>
+                    <div>
                         <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
-                            <span class="hud-label" style="margin:0;" id="label-str">Strength</span>
-                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-str">0 / 0</span>
+                            <span class="hud-label" style="margin:0;" id="label-anaerobic">Anaerobic Cardio</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-anaerobic"></span>
                         </div>
                         <div class="progress-bar-bg macro-bar-track">
-                            <div class="macro-range-band" id="band-str"></div>
-                        <div class="macro-aim-tick is-hidden" id="tick-str"></div>
-                            <div id="bar-str" class="progress-bar-fill"></div>
+                            <div id="bar-anaerobic" class="progress-bar-fill"></div>
                         </div>
                     </div>
-                    <div onclick="showBreakdown('pow')" style="cursor:pointer;">
+                    <div>
                         <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
-                            <span class="hud-label" style="margin:0;" id="label-pow">Power</span>
-                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-pow">0 / 0</span>
+                            <span class="hud-label" style="margin:0;" id="label-aerobic">Aerobic Cardio</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-aerobic"></span>
                         </div>
                         <div class="progress-bar-bg macro-bar-track">
-                            <div class="macro-range-band" id="band-pow"></div>
-                        <div class="macro-aim-tick is-hidden" id="tick-pow"></div>
-                            <div id="bar-pow" class="progress-bar-fill"></div>
+                            <div id="bar-aerobic" class="progress-bar-fill"></div>
                         </div>
                     </div>
-                    <div onclick="showBreakdown('spd')" style="cursor:pointer;">
+                    <div>
                         <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
-                            <span class="hud-label" style="margin:0;" id="label-spd">Speed</span>
-                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-spd">0 / 0</span>
+                            <span class="hud-label" style="margin:0;" id="label-flexibility">Flexibility</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-flexibility"></span>
                         </div>
                         <div class="progress-bar-bg macro-bar-track">
-                            <div class="macro-range-band" id="band-spd"></div>
-                        <div class="macro-aim-tick is-hidden" id="tick-spd"></div>
-                            <div id="bar-spd" class="progress-bar-fill"></div>
+                            <div id="bar-flexibility" class="progress-bar-fill"></div>
                         </div>
                     </div>
-                    <div onclick="showBreakdown('crd')" style="cursor:pointer;">
+                    <div>
                         <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
-                            <span class="hud-label" style="margin:0;" id="label-crd">Cardio</span>
-                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-crd">0 / 0</span>
+                            <span class="hud-label" style="margin:0;" id="label-preparation">Preparation</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-preparation"></span>
                         </div>
                         <div class="progress-bar-bg macro-bar-track">
-                            <div class="macro-range-band" id="band-crd"></div>
-                        <div class="macro-aim-tick is-hidden" id="tick-crd"></div>
-                            <div id="bar-crd" class="progress-bar-fill"></div>
+                            <div id="bar-preparation" class="progress-bar-fill"></div>
                         </div>
                     </div>
-                    <div onclick="showBreakdown('end')" style="cursor:pointer;">
+                    <div>
                         <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
-                            <span class="hud-label" style="margin:0;" id="label-end">Endurance</span>
-                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-end">0 / 0</span>
+                            <span class="hud-label" style="margin:0;" id="label-strength">Strength</span>
+                            <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);" id="hud-txt-strength"></span>
                         </div>
                         <div class="progress-bar-bg macro-bar-track">
-                            <div class="macro-range-band" id="band-end"></div>
-                        <div class="macro-aim-tick is-hidden" id="tick-end"></div>
-                            <div id="bar-end" class="progress-bar-fill"></div>
+                            <div id="bar-strength" class="progress-bar-fill"></div>
                         </div>
                     </div>
+                    <div id="asensus-points-row" style="display:flex; align-items:center; justify-content:center; gap:10px; margin-top:6px; padding-top:12px; border-top:1px solid var(--border-subtle);"></div>
                 </div>
             </div>
 
@@ -844,6 +836,34 @@
                 <option value="4">4 kg</option>
                 <option value="5">5 kg</option>
             </select>
+
+            <div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--border-subtle);">
+                <div class="hud-label" style="margin:0 0 10px 0;">Warmup & stretching</div>
+                <label>Gym sessions — planned warmup?</label>
+                <select id="set-gym-warmup" class="input-field" onchange="saveSessionPrepSettings()">
+                    <option value="planned">Yes — planned warmup</option>
+                    <option value="custom">No — I do my own warmup</option>
+                    <option value="none">No — I don’t warmup</option>
+                </select>
+                <label>Gym sessions — planned stretching?</label>
+                <select id="set-gym-stretch" class="input-field" onchange="saveSessionPrepSettings()">
+                    <option value="planned">Yes — planned stretching</option>
+                    <option value="custom">No — I do my own stretching</option>
+                    <option value="none">No — I don’t stretch</option>
+                </select>
+                <label>Practice / match — planned warmup?</label>
+                <select id="set-practice-warmup" class="input-field" onchange="saveSessionPrepSettings()">
+                    <option value="planned">Yes — planned warmup</option>
+                    <option value="custom">No — I do my own warmup</option>
+                    <option value="none">No — I don’t warmup</option>
+                </select>
+                <label>Practice / match — planned stretching?</label>
+                <select id="set-practice-stretch" class="input-field" onchange="saveSessionPrepSettings()">
+                    <option value="planned">Yes — planned stretching</option>
+                    <option value="custom">No — I do my own stretching</option>
+                    <option value="none">No — I don’t stretch</option>
+                </select>
+            </div>
         </div>
 
         <div id="engine-panel-biometrics" class="card hidden">
@@ -885,9 +905,9 @@
             <label>Meals Per Day</label><select id="set-meals-per-day" class="input-field"><option value="2">2 Meals (IF)</option><option value="3" selected>3 Meals</option><option value="4">4 Meals</option><option value="5">5 Meals</option></select>
             <label>Daily Budget (£)</label><input type="number" step="0.01" id="set-budget" class="input-field">
             <div style="display: flex; gap: 10px; margin-top: 15px;">
-                <div style="flex: 2;"><label style="margin-top:0;">Activity Level</label><select id="set-activity" class="input-field" style="margin-bottom:0;"><option value="1.2">Sedentary</option><option value="1.375">Light</option><option value="1.55">Moderate</option><option value="1.725">Active</option></select></div>
                 <div style="flex: 1;"><label style="margin-top:0;">Days/Wk</label><input type="number" id="set-training-freq" class="input-field" value="4" style="margin-bottom:0;"></div>
             </div>
+            <p style="font-size:11px; color:var(--text-muted); margin-top:8px; line-height:1.4;">Daily calories follow your training plan and prior-day session RPE (no separate activity level).</p>
         </div>
 
         <div id="engine-panel-system" class="card hidden">
@@ -1176,11 +1196,8 @@
                 TAP TO LOAD INTEL
             </div>
             <div style="padding:16px;">
-                <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; font-weight:bold; text-transform:uppercase;">Key Directives:</div>
-                <ul id="video-modal-notes" style="font-size:12px; color:var(--text-silver); padding-left:16px; line-height:1.6;">
-                    <li>Keep core braced.</li>
-                    <li>Control the eccentric phase.</li>
-                </ul>
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; font-weight:bold; text-transform:uppercase;">Teaching points</div>
+                <div id="video-modal-notes" style="display:flex; flex-direction:column; gap:8px;"></div>
             </div>
         </div>
     </div>
@@ -1189,8 +1206,17 @@
     <div id="sleep-modal" class="bottom-sheet hidden" style="z-index: 3000; text-align:center;">
         <div class="sheet-handle" onclick="closeSleepModal()"></div>
         <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing:0.4px; margin-bottom:15px;">Log sleep</h2>
-        <input type="number" step="0.5" min="0" max="24" id="sleep-input-hours" class="input-field" style="font-size:32px; font-weight:800; text-align:center; padding:20px; border-color:var(--gold-accent);" placeholder="8.0" oninput="document.getElementById('sleep-hours-warning').classList.toggle('hidden', !(parseFloat(this.value) > 24))">
-        <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Total Hours Slept (max 24)</div>
+        <div style="display:flex; gap:10px; align-items:flex-end; justify-content:center; margin-bottom:8px;">
+            <div style="flex:1; max-width:120px;">
+                <label style="margin-top:0; font-size:10px;">Hours</label>
+                <input type="number" step="1" min="0" max="24" id="sleep-input-hours" class="input-field" style="font-size:28px; font-weight:800; text-align:center; padding:16px; border-color:var(--gold-accent); margin-bottom:0;" placeholder="7" inputmode="numeric" oninput="window.syncSleepHoursWarning && window.syncSleepHoursWarning()">
+            </div>
+            <div style="flex:1; max-width:120px;">
+                <label style="margin-top:0; font-size:10px;">Minutes</label>
+                <input type="number" step="1" min="0" max="59" id="sleep-input-mins" class="input-field" style="font-size:28px; font-weight:800; text-align:center; padding:16px; border-color:var(--gold-accent); margin-bottom:0;" placeholder="30" inputmode="numeric" oninput="window.syncSleepHoursWarning && window.syncSleepHoursWarning()">
+            </div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">e.g. 7 hours 30 mins (max 24h)</div>
         <div id="sleep-hours-warning" class="hidden" style="font-size:12px; color:#FF3B30; font-family:'Roboto Mono', monospace; margin-bottom:12px; font-weight:700;">Maximum sleep is 24 hours. Please enter 24 or less.</div>
         <button class="btn-primary is-primary" style="margin-top:0;" onclick="submitSleepLog()">Save sleep</button>
     </div>
@@ -1829,7 +1855,14 @@
                 <button onclick="window.closeExerciseSetsModal()" style="background:none; border:none; color:var(--text-stealth); font-size:28px; cursor:pointer;">&times;</button>
             </div>
             <div id="sets-modal-progress-wrap" style="margin-bottom: 16px; display: none;">
-                <div class="hud-label" style="margin-bottom: 8px;">PROGRESS HISTORY</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom: 8px;">
+                    <div class="hud-label" style="margin:0;">PROGRESS HISTORY</div>
+                    <select id="sets-modal-chart-range" class="input-field" style="width:auto; margin:0; padding:6px 10px; font-size:10px; font-family:'Roboto Mono';" onchange="window.redrawModalExerciseChart && window.redrawModalExerciseChart()">
+                        <option value="month">Month</option>
+                        <option value="year">Year</option>
+                        <option value="all" selected>All time</option>
+                    </select>
+                </div>
                 <div style="position: relative; height: 140px; width: 100%; background: var(--bg-surface-elevated); border-radius: 8px; border: 1px solid var(--border-subtle); padding: 8px;">
                     <canvas id="sets-modal-exercise-chart"></canvas>
                 </div>

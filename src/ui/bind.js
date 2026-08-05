@@ -16,6 +16,7 @@ import {
   removeJournalMedia,
   renderAdherenceCalendar,
   shiftAdherenceMonth,
+  showGymSessionDiary,
   showLactateFullWorkout,
   showLactateSessionDiary,
   toggleJournalVoiceNote,
@@ -23,15 +24,16 @@ import {
 } from './journey.js';
 import { showShopStyleInfo, toggleFoodHeading } from '../domain/food-catalog.js';
 import { cancelExEdit, cancelFoodEdit, closeLibraryDetail, deleteItem, editExercise, editFood, editFromLibraryDetail, filterBoot, loadExercises, loadInventory, openExerciseDetail, openFoodDetail, saveExerciseToCloud, saveFoodToCloud, syncPackSizeFieldMode, toggleBanFromLibraryDetail, toggleExForm, togglePantryForm } from './fuel.js';
-import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, beginExerciseLog, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, resumeInProgressWorkout, selectCardioTypeInLog, setWorkoutLogFilter, showConstraintInfo, startExecution, startManualWorkout, stopInProgressWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, toggleConstraint, toggleSetComplete, toggleToolsMenu, updateWorkoutSet } from './drive.js';
+import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, drawModalExerciseChart, redrawModalExerciseChart, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, beginExerciseLog, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, resumeInProgressWorkout, selectCardioTypeInLog, setWorkoutLogFilter, showConstraintInfo, startExecution, startManualWorkout, stopInProgressWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, toggleConstraint, togglePrepChildExpand, togglePrepPartExpand, toggleSetComplete, toggleToolsMenu, updateWorkoutSet, workoutCardDragLeave, workoutCardDragOver, workoutCardDragStart, workoutCardDrop, workoutCardTouchEnd, workoutCardTouchStart } from './drive.js';
+import { dismissPlannedWarmupFromLog, dismissPlannedStretchFromLog, saveSessionPrepSettings } from '../domain/session-prep.js';
 import { closeLactateHitPicker, confirmLactateHitPicker, filterLactateHitOptions, openLactateHitPicker, toggleLactateHitType, selectLactateDesiredRpe, confirmLactateDesiredRpe, lactateWizardBackToTypes, lactateWizardBackToRpe, openLactateBaselineRedo, toggleLactateRedoType, confirmLactateRedoSelection, submitLactateBaselineStep, adjustLactateSessionRpe, openLactateBaselineRedoFromSession, redoLactateBaselineForType } from './lactate-ui.js';
 import { exportData, injectPitchData } from './demos.js';
 import { drawExerciseChart, drawMacroChart, drawUnifiedChart, executeSundayForecast, filterExerciseChartList, onProgressRangeChange, selectExerciseForChart } from './charts.js';
 import { completeOnboarding, nextObStep, selectAuthTheme, selectObCard, triggerBootSequence } from './auth-onboarding.js';
 import { handleAuth, handleSignOut, quickLogin } from '../services/auth.js';
-import { addDropSetToExercise, addExerciseToActiveLog, addSetToExercise, addSupersetWithNext } from '../domain/workout-generator.js';
+import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext } from '../domain/workout-generator.js';
 import { calculateAchievability, handleFocusChange, handleSportChange, onGymDaysOrPhaseUiChange, onSeasonPhaseChange, roundToEquipment, saveSettings, toggleRestStop } from '../domain/thermodynamics.js';
-import { addFixedSchedule, closeFixedScheduleModal, closeSleepModal, closeVideoModal, commitMatchSession, commitPracticeSession, deleteFixedSchedule, deleteSportDiaryFromLog, editSportDiaryFromLog, generateFutureTimeline, getVideoDirectives, openFixedScheduleModal, openFuturePlan, openMatchLogModal, openPracticeLogModal, openSleepModal, openVideoModal, submitSleepLog, switchDayPlanSubTab, toggleSchedTimeVisibility } from '../domain/route-planner.js';
+import { addFixedSchedule, closeFixedScheduleModal, closeSleepModal, closeVideoModal, commitMatchSession, commitPracticeSession, deleteFixedSchedule, deleteSportDiaryFromLog, editSportDiaryFromLog, generateFutureTimeline, getTeachingPoints, getVideoDirectives, openFixedScheduleModal, openFuturePlan, openMatchLogModal, openPracticeLogModal, openSleepModal, openVideoModal, selectTeachingPointVideo, submitSleepLog, syncSleepHoursWarning, switchDayPlanSubTab, toggleSchedTimeVisibility } from '../domain/route-planner.js';
 import { openFlexibleRecipe } from '../domain/recipes.js';
 import { clearSeasonDates, saveSeasonDates, submitRepairAssessment, triggerRepairModeCheck } from '../domain/periodization.js';
 import { generateGroceryList, toggleGroceryAisle } from '../domain/grocery.js';
@@ -82,7 +84,15 @@ export function bindUi() {
   window.addFoodToActiveLog = addFoodToActiveLog;
   window.addSetToExercise = addSetToExercise;
   window.addDropSetToExercise = addDropSetToExercise;
+  window.addDropSetToSupersetSide = addDropSetToSupersetSide;
+  window.addSupersetRound = addSupersetRound;
   window.addSupersetWithNext = addSupersetWithNext;
+  window.workoutCardDragStart = workoutCardDragStart;
+  window.workoutCardDragOver = workoutCardDragOver;
+  window.workoutCardDragLeave = workoutCardDragLeave;
+  window.workoutCardDrop = workoutCardDrop;
+  window.workoutCardTouchStart = workoutCardTouchStart;
+  window.workoutCardTouchEnd = workoutCardTouchEnd;
   window.onSeasonPhaseChange = onSeasonPhaseChange;
   window.onGymDaysOrPhaseUiChange = onGymDaysOrPhaseUiChange;
   window.applyUserTemplate = applyUserTemplate;
@@ -157,6 +167,8 @@ export function bindUi() {
   window.generateGroceryList = generateGroceryList;
   window.toggleGroceryAisle = toggleGroceryAisle;
   window.getVideoDirectives = getVideoDirectives;
+  window.getTeachingPoints = getTeachingPoints;
+  window.selectTeachingPointVideo = selectTeachingPointVideo;
   window.handleAuth = handleAuth;
   window.handleFocusChange = handleFocusChange;
   window.handleSignOut = handleSignOut;
@@ -179,6 +191,7 @@ export function bindUi() {
   window.showLactateFullWorkout = showLactateFullWorkout;
   window.toggleLactateFullWorkout = toggleLactateFullWorkout;
   window.showLactateSessionDiary = showLactateSessionDiary;
+  window.showGymSessionDiary = showGymSessionDiary;
   window.editLactateSessionFromCalendar = editLactateSessionFromCalendar;
   window.openGroceryDetail = openGroceryDetail;
   window.openShoppingCostBreakdown = openShoppingCostBreakdown;
@@ -197,6 +210,7 @@ export function bindUi() {
   window.openMyFoods = openMyFoods;
   window.openPracticeLogModal = openPracticeLogModal;
   window.openSleepModal = openSleepModal;
+  window.syncSleepHoursWarning = syncSleepHoursWarning;
   window.openTrackerGuidanceModal = openTrackerGuidanceModal;
   window.openVideoModal = openVideoModal;
   window.openWorkoutDomainsDetail = openWorkoutDomainsDetail;
@@ -278,6 +292,10 @@ export function bindUi() {
   window.confirmRpeAwarenessNo = confirmRpeAwarenessNo;
   window.dismissRpeAwareness = dismissRpeAwareness;
   window.finishRpeGuideAndContinue = finishRpeGuideAndContinue;
+  window.redrawModalExerciseChart = redrawModalExerciseChart;
+  window.dismissPlannedWarmupFromLog = dismissPlannedWarmupFromLog;
+  window.dismissPlannedStretchFromLog = dismissPlannedStretchFromLog;
+  window.saveSessionPrepSettings = saveSessionPrepSettings;
   window.maybePromptWeightFinder = maybePromptWeightFinder;
   window.confirmWeightFinderKnowsYes = confirmWeightFinderKnowsYes;
   window.confirmWeightFinderKnowsNo = confirmWeightFinderKnowsNo;
@@ -309,6 +327,8 @@ export function bindUi() {
   window.togglePantryForm = togglePantryForm;
   window.toggleRestStop = toggleRestStop;
   window.toggleSchedTimeVisibility = toggleSchedTimeVisibility;
+  window.togglePrepPartExpand = togglePrepPartExpand;
+  window.togglePrepChildExpand = togglePrepChildExpand;
   window.toggleSetComplete = toggleSetComplete;
   window.toggleTheme = toggleTheme;
   window.toggleToolsMenu = toggleToolsMenu;
