@@ -6,6 +6,8 @@ import {
     deleteBodyMetricsForLocalDay,
     upsertTodayWeight
 } from '../domain/body-metrics.js';
+import { filterLogsForProgressChart } from '../domain/periodization-logs.js';
+import { needsCycleDecisions } from '../domain/workout-cycle.js';
 
 async function refreshHistoryAfterChartDelete() {
     // Dynamic import avoids charts ↔ journey ↔ route-planner cycle
@@ -356,7 +358,11 @@ export async function drawExerciseChart() {
         return d === 'lifting' || d === 'strength' || d === 'power';
     };
     const uniqueEx = workoutData
-        ? [...new Set(workoutData.map(l => l.exercise).filter(isLiftingExercise))].sort((a, b) => String(a).localeCompare(String(b)))
+        ? [...new Set(
+            filterLogsForProgressChart(workoutData)
+                .map(l => l.exercise)
+                .filter(isLiftingExercise)
+          )].sort((a, b) => String(a).localeCompare(String(b)))
         : [];
     _exerciseChartNames = uniqueEx;
 
@@ -384,7 +390,9 @@ export async function drawExerciseChart() {
 
     // Group by day — max weight (or distance) within the selected date range
     if (workoutData) {
-        let exLogs = workoutData.filter(l => l.exercise === selectedMetric && inProgressRange(new Date(l.created_at).getTime()));
+        let exLogs = filterLogsForProgressChart(
+            workoutData.filter(l => l.exercise === selectedMetric && inProgressRange(new Date(l.created_at).getTime()))
+        );
         if (exLogs.length > 0 && exLogs[0].type === 'cardio') isCardio = true;
 
         const grouped = exLogs.reduce((acc, log) => {
@@ -649,6 +657,8 @@ export function checkSundayForecast() {
         pantryContainer.innerHTML = auditHtml;
 
         document.getElementById('sunday-forecast-modal').classList.remove('hidden');
+    } else if (needsCycleDecisions()) {
+        import('./workout-cycle-ui.js').then((m) => m.maybeOpenWorkoutCycleModal()).catch(() => {});
     }
 }
 setTimeout(checkSundayForecast, 1500);
@@ -685,5 +695,13 @@ export async function executeSundayForecast() {
     
     calculateTDEE();
     document.getElementById('sunday-forecast-modal').classList.add('hidden');
-    generateGroceryList(); 
+    generateGroceryList();
+
+    // After Sunday calibration, prompt for ~4-week workout block choices when due
+    try {
+        const { maybeOpenWorkoutCycleModal } = await import('./workout-cycle-ui.js');
+        maybeOpenWorkoutCycleModal();
+    } catch (e) {
+        console.warn('workout cycle modal', e);
+    }
 }

@@ -16,9 +16,11 @@ import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog,
 import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase } from '../domain/hypertrophy-engine.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
+import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart } from '../domain/periodization-logs.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry } from './journey.js';
+import { calculateTDEE } from '../domain/thermodynamics.js';
 import { notifyRestTimerDone } from './notifications.js';
 import { addFoodToActiveLog, loadGhostTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderActiveLog, setConfirmRouteButtons, switchLogType, updateExecutionAuxBlocks, updateExerciseDropdowns, updateSaveTemplateButtonLabel } from './templates.js';
 import {
@@ -188,8 +190,10 @@ export function renderWorkoutLog() {
         if (!isLactateHitLogItem(item) && isSteadyCardioLogItem(item) && Array.isArray(item.sets) && item.sets.length > 1) {
             item.sets = [item.sets[0]];
         }
-        let domainTag = item.isWarmupGroup ? 'WARMUP' : (item.exercise.domain ? item.exercise.domain.toUpperCase() : 'CUSTOM');
-        let domainColor = item.isWarmupGroup ? 'var(--gold-accent)' : (isCardio ? 'var(--text-stealth)' : 'var(--gold-accent)');
+        let domainTag = item.isWarmupGroup ? 'WARMUP'
+            : (item.isCoreBlock ? 'CORE'
+                : (item.exercise.domain ? item.exercise.domain.toUpperCase() : 'CUSTOM'));
+        let domainColor = (item.isWarmupGroup || item.isCoreBlock) ? 'var(--gold-accent)' : (isCardio ? 'var(--text-stealth)' : 'var(--gold-accent)');
         if (item.isSuperset || item.supersetId) domainTag = 'SUPERSET';
         if (item.isStretchGroup || isStaticStretchingLogItem(item)) {
             domainTag = 'STRETCH';
@@ -210,7 +214,8 @@ export function renderWorkoutLog() {
         const isLactateHit = isLactateHitLogItem(item);
         let unitLabel = item.isWarmupGroup
             ? 'Parts'
-            : (item.isSuperset ? 'Rounds' : (isSteadyCardioLogItem(item) || isStaticStretchingLogItem(item) ? 'Session' : 'Sets'));
+            : (item.isCoreBlock ? 'Circuits'
+                : (item.isSuperset ? 'Rounds' : (isSteadyCardioLogItem(item) || isStaticStretchingLogItem(item) ? 'Session' : 'Sets')));
         if (isLactateHit) {
             domainTag = 'LACTATE/HIT';
             domainColor = 'var(--gold-accent)';
@@ -224,6 +229,8 @@ export function renderWorkoutLog() {
             subtitle = isAllCompleted ? 'Done' : 'Tap Log when finished';
         } else if (item.isWarmupGroup) {
             subtitle = `${completedSets} / ${totalSets} parts`;
+        } else if (item.isCoreBlock) {
+            subtitle = `${completedSets} / ${totalSets} circuits · 5×20`;
         } else if (item.isSuperset) {
             subtitle = `${completedSets}/${totalSets} rounds`;
         } else if (!isLactateHit && !isCardio && !item.isSportSessionBlock) {
@@ -240,7 +247,7 @@ export function renderWorkoutLog() {
             subtitle = isAllCompleted ? 'Done' : 'Tap Log when finished';
         }
         const nextItem = store.activeLog.items[exIdx + 1];
-        const canSuperset = !item.isSuperset && !isLactateHit && !item.isWarmupGroup && !isStaticStretchingLogItem(item)
+        const canSuperset = !item.isSuperset && !isLactateHit && !item.isWarmupGroup && !item.isCoreBlock && !isStaticStretchingLogItem(item)
             && nextItem && canSupersetPair(item, nextItem);
         const restSlot = isLactateHit
             ? lactateRestSlotHtml(item, exIdx)
@@ -398,6 +405,14 @@ export function togglePrepChildExpand(exIdx, setIdx, childIdx) {
     const child = set?.children?.[childIdx];
     if (!child) return;
     child._uiExpanded = !child._uiExpanded;
+    renderExerciseSets();
+}
+
+/** Show/hide the list of individual stretch parts (collapsed by default). */
+export function toggleStretchListExpand(exIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item) return;
+    item._stretchListExpanded = !item._stretchListExpanded;
     renderExerciseSets();
 }
 
@@ -630,8 +645,8 @@ function formatCardioPace(distanceKm, timeMinutes) {
     const dist = Number(distanceKm) || 0;
     const mins = Number(timeMinutes) || 0;
     if (!(dist > 0) || !(mins > 0)) return '—';
-    // distance ÷ duration (hours) → km/h
-    const kmh = dist / (mins / 60);
+    // distance (km) ÷ duration (hours) → km/h, then → m/s
+    const ms = (dist / (mins / 60)) / 3.6;
     const minPerKm = mins / dist;
     const paceClock = (() => {
         const totalSec = Math.round(minPerKm * 60);
@@ -639,7 +654,7 @@ function formatCardioPace(distanceKm, timeMinutes) {
         const s = totalSec % 60;
         return `${m}:${String(s).padStart(2, '0')}`;
     })();
-    return `${kmh.toFixed(2)} km/h · ${paceClock} /km`;
+    return `${ms.toFixed(2)} m/s · ${paceClock} /km`;
 }
 
 export function updateCardioPaceReadout(exIdx, setIdx) {
@@ -686,7 +701,7 @@ export async function drawModalExerciseChart(exerciseName, hideChart = false) {
                 : 0;
 
         if (workoutData) {
-            let exLogs = workoutData.filter(l => l.exercise === exerciseName);
+            let exLogs = filterLogsForProgressChart(workoutData.filter(l => l.exercise === exerciseName));
             if (exLogs.length > 0 && exLogs[0].type === 'cardio') isCardio = true;
 
             const grouped = exLogs.reduce((acc, log) => {
@@ -966,6 +981,55 @@ export function renderExerciseSets() {
     if (window.currentModalExIdx === null || window.currentModalExIdx === undefined) return;
     let exIdx = window.currentModalExIdx;
     let item = store.activeLog.items[exIdx];
+
+    // Strength core circuit: Set 1 / Set 2 → expand to 5 exercises with form videos
+    if (item.isCoreBlock) {
+        let html = `<div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:16px; line-height:1.45;">
+            5 exercises × 20 reps. No rest between exercises. 1 minute rest between sets.
+        </div>`;
+        item.sets.forEach((set, setIdx) => {
+            const kids = Array.isArray(set.children) ? set.children : [];
+            const expanded = !!set._uiExpanded;
+            const chevron = expanded ? '−' : '+';
+            html += `<div style="display:flex; flex-direction:column; margin-bottom:14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <button type="button" onclick="togglePrepPartExpand(${exIdx}, ${setIdx})"
+                        style="flex:1; min-width:0; text-align:left; background:none; border:none; padding:0; cursor:pointer; color:inherit;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <div style="font-size:13px; font-weight:800; color:var(--text-main);">${set.partName || ('Set ' + (setIdx + 1))}</div>
+                            <span style="font-family:'Roboto Mono'; font-size:14px; color:var(--gold-accent);">${chevron}</span>
+                        </div>
+                        <div style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:4px;">${set.reps || '5 × 20'}</div>
+                    </button>
+                    <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0;" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
+                </div>`;
+            if (expanded) {
+                html += `<div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">`;
+                kids.forEach((child, cIdx) => {
+                    const safe = String(child.name || '').replace(/</g, '&lt;').replace(/'/g, "\\'");
+                    const childOpen = !!child._uiExpanded;
+                    html += `<button type="button" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:8px; padding:10px; color:inherit;" onclick="togglePrepChildExpand(${exIdx}, ${setIdx}, ${cIdx})">
+                        <div style="display:flex; justify-content:space-between; gap:8px;">
+                            <span style="font-size:12px; font-weight:600;">${String(child.name || '').replace(/</g, '&lt;')}</span>
+                            <span style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">${child.reps || '20'} · ${childOpen ? '−' : '+'} Form</span>
+                        </div>
+                    </button>`;
+                    if (childOpen) {
+                        html += `<div style="border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.2);">
+                            <button type="button" onclick="openVideoModal('${safe}', 'https://www.youtube.com/embed/placeholder')"
+                                style="width:100%; padding:14px; background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:11px; cursor:pointer;">
+                                🎥 FORM VIDEO — ${String(child.name || '').replace(/</g, '&lt;')}
+                            </button>
+                        </div>`;
+                    }
+                });
+                html += `</div>`;
+            }
+            html += `</div>`;
+        });
+        document.getElementById('sets-modal-content').innerHTML = html;
+        return;
+    }
     
     // Warmup group: top-level parts only; children expand on part tap
     if (item.isWarmupGroup) {
@@ -1069,7 +1133,7 @@ export function renderExerciseSets() {
         return;
     }
 
-    // Stretching: list stretch names; tap a name to reveal its video/teaching point
+    // Stretching: collapsed by default; tap header to reveal individual parts
     if (isStaticStretchingLogItem(item)) {
         const parts = (item.sets || []).filter(s => s && (s.partName || s.isText));
         const useAccordion = item.isStretchGroup || parts.length > 1;
@@ -1094,29 +1158,43 @@ export function renderExerciseSets() {
             return;
         }
 
+        const listOpen = !!item._stretchListExpanded;
+        const doneCount = parts.filter(s => s.completed).length;
         let html = `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:16px;">
-            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Tap a stretch for its teaching point. Check each when done.</div>
+            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Tap Stretching to see each part. Check when done.</div>
             ${item.isCustomStretch ? '' : `<button type="button" onclick="dismissPlannedStretchFromLog(${exIdx})" style="background:none; border:none; color:var(--text-stealth); font-size:22px; cursor:pointer; line-height:1;" aria-label="Dismiss stretching">&times;</button>`}
         </div>`;
-        parts.forEach((set, setIdx) => {
-            const expanded = !!set._uiExpanded;
-            const label = set.partName || set.reps || `Stretch ${setIdx + 1}`;
-            html += `<div style="display:flex; flex-direction:column; margin-bottom:12px; border-bottom:1px solid var(--border-subtle); padding-bottom:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-                    <button type="button" onclick="togglePrepPartExpand(${exIdx}, ${setIdx})"
-                        style="flex:1; min-width:0; text-align:left; background:none; border:none; padding:0; cursor:pointer; color:inherit;">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <div style="font-size:13px; font-weight:800; color:var(--text-main);">${String(label).replace(/</g, '&lt;')}</div>
-                            <span style="font-family:'Roboto Mono'; font-size:14px; color:var(--gold-accent);">${expanded ? '−' : '+'}</span>
-                        </div>
-                    </button>
-                    <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0;" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
-                </div>`;
-            if (expanded) {
-                html += `<div style="margin-top:10px; border:1px dashed var(--border-highlight); border-radius:8px; min-height:72px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono';">Teaching point video placeholder</div>`;
-            }
-            html += `</div>`;
-        });
+        html += `<button type="button" onclick="toggleStretchListExpand(${exIdx})" style="width:100%; text-align:left; cursor:pointer; background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:12px; padding:14px 16px; color:inherit; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                <div>
+                    <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:4px;">Cool-down</div>
+                    <div style="font-size:15px; font-weight:800; color:var(--text-main);">Stretching</div>
+                    <div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-top:4px;">${doneCount}/${parts.length} done</div>
+                </div>
+                <span style="font-family:'Roboto Mono'; font-size:16px; color:var(--gold-accent);">${listOpen ? '−' : '+'}</span>
+            </div>
+        </button>`;
+        if (listOpen) {
+            parts.forEach((set, setIdx) => {
+                const expanded = !!set._uiExpanded;
+                const label = set.partName || set.reps || `Stretch ${setIdx + 1}`;
+                html += `<div style="display:flex; flex-direction:column; margin-bottom:12px; border-bottom:1px solid var(--border-subtle); padding-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                        <button type="button" onclick="togglePrepPartExpand(${exIdx}, ${setIdx})"
+                            style="flex:1; min-width:0; text-align:left; background:none; border:none; padding:0; cursor:pointer; color:inherit;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <div style="font-size:13px; font-weight:800; color:var(--text-main);">${String(label).replace(/</g, '&lt;')}</div>
+                                <span style="font-family:'Roboto Mono'; font-size:14px; color:var(--gold-accent);">${expanded ? '−' : '+'}</span>
+                            </div>
+                        </button>
+                        <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0;" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
+                    </div>`;
+                if (expanded) {
+                    html += `<div style="margin-top:10px; border:1px dashed var(--border-highlight); border-radius:8px; min-height:72px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono';">Teaching point video placeholder</div>`;
+                }
+                html += `</div>`;
+            });
+        }
         document.getElementById('sets-modal-content').innerHTML = html;
         return;
     }
@@ -1425,11 +1503,14 @@ export function toggleSetComplete(exIdx, setIdx) {
     }
     const isLactate = isLactateHitLogItem(item);
     // Skip rest timers for text/warmup blocks and steady cardio (no RIR-based rests)
+    // Core circuits: allow 60s between Set 1 / Set 2 / …
     // Lactate intervals always start their protocol rest after a logged set
-    const isWarmupOrText = item.isWarmupGroup || (setObj.isText && !isLactate);
+    const isWarmupOrText = item.isWarmupGroup || (setObj.isText && !isLactate && !item.isCoreBlock);
     const skipRest = !isLactate && (isWarmupOrText || isSteadyCardioLogItem(item));
 
-    if (setObj.completed && isLactate && setObj.restTime > 0) {
+    if (setObj.completed && item.isCoreBlock && setObj.restTime > 0 && item.sets[setIdx + 1]) {
+        startRestOnSet(exIdx, setIdx + 1, setObj.restTime);
+    } else if (setObj.completed && isLactate && setObj.restTime > 0) {
         // Prefer next set in this exercise; else first set of next lactate exercise
         if (item.sets[setIdx + 1]) {
             startRestOnSet(exIdx, setIdx + 1, setObj.restTime);
@@ -2611,6 +2692,8 @@ export async function commitWorkoutSession() {
 
     applyInjuryPainFollowUpFromJournal();
 
+    const liftPhase = periodizationBucketForSession(getSeasonPhase(), sessionKind);
+
     store.activeLog.items.forEach(item => {
         if (item.isSuperset && Array.isArray(item.sides)) {
             item.sides.forEach(sideInfo => {
@@ -2634,7 +2717,8 @@ export async function commitWorkoutSession() {
                         time_minutes: 0,
                         rpe: rpeVal,
                         type: baseDomain || 'strength',
-                        session_duration_min: timedMinutes || 0
+                        session_duration_min: timedMinutes || 0,
+                        ...(liftPhase && !isCardio ? { periodization_phase: liftPhase } : {})
                     });
                     if (!isCardio && set.rpe <= 1 && isHypertrophyPhase()) {
                         store.fatigueLockouts[sideInfo.exercise?.muscle_group] = true;
@@ -2677,7 +2761,8 @@ export async function commitWorkoutSession() {
                     time_minutes: timeMins,
                     rpe: set.isLactateHit ? 0 : rpeVal,
                     type: isCardio || set.isLactateHit ? 'cardio' : (baseDomain || 'strength'),
-                    session_duration_min: timedMinutes || 0
+                    session_duration_min: timedMinutes || 0,
+                    ...(liftPhase && !isCardio && !set.isLactateHit ? { periodization_phase: liftPhase } : {})
                 });
 
                 if (!isCardio && set.rpe <= 1 && isHypertrophyPhase()) {
@@ -2745,11 +2830,26 @@ export async function commitWorkoutSession() {
     if (logsToSave.length > 0) {
         try {
             if (!navigator.onLine) throw new Error("Offline");
-            const { data, error } = await store.supabaseClient.from('workout_logs').insert(logsToSave).select();
+            let { data, error } = await store.supabaseClient.from('workout_logs').insert(logsToSave).select();
+            // Column may not exist yet — retry without periodization_phase
+            if (error && /periodization_phase/i.test(String(error.message || error.details || ''))) {
+                const stripped = logsToSave.map(({ periodization_phase, ...rest }) => rest);
+                const retry = await store.supabaseClient.from('workout_logs').insert(stripped).select();
+                data = retry.data;
+                error = retry.error;
+                if (!error && liftPhase) rememberLogPhasesByFingerprint(logsToSave, liftPhase);
+            }
             if (error) throw error;
             insertedRows = Array.isArray(data) ? data : [];
+            if (liftPhase) {
+                rememberLogPhases(insertedRows.map((r) => ({ ...r, periodization_phase: r.periodization_phase || liftPhase })));
+                if (!insertedRows.some((r) => r.periodization_phase)) {
+                    rememberLogPhasesByFingerprint(insertedRows.map((r) => ({ ...r, periodization_phase: liftPhase })), liftPhase);
+                }
+            }
         } catch (e) {
             console.error("Workout save error:", e);
+            if (liftPhase) rememberLogPhasesByFingerprint(logsToSave, liftPhase);
             store.offlineQueue.push({ table: 'workout_logs', payload: logsToSave });
             localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
             saveError = "offline";
@@ -2849,6 +2949,7 @@ export async function commitWorkoutSession() {
             }
             saveGymJournalEntry(dateIso, entry);
             try { renderAdherenceCalendar(); } catch (e) { /* ignore */ }
+            try { calculateTDEE(); } catch (e) { /* ignore */ }
         } catch (e) {
             console.warn('Gym journal save failed', e);
             if (jNotes) localStorage.setItem('ascensus_journal_' + new Date().toLocaleDateString(), jNotes);

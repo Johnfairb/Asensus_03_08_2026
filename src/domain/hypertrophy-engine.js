@@ -20,7 +20,7 @@ export const BODYWEIGHT_COMPOUNDS = bodyweightCompoundSet();
 export const HYPERTROPHY_EXERCISE_META = buildHypertrophyMetaMap();
 
 export const HYPERTROPHY_POOLS = {
-    anterior_bilateral: ['Squat', 'Front Squat', 'Sumo Squat', 'Goblet Squat', 'Leg Press', 'Wide Leg Press'],
+    anterior_bilateral: ['Squat', 'Front Squat', 'Sumo Squat', 'Goblet Squat'],
     anterior_unilateral: ['Bulgarian Squat', 'Split Squat', 'Lunge', 'Walk Lunge', 'Pistol Squat'],
     posterior_bilateral: ['Deadlift', 'Sumo Deadlift', 'Rack Deadlift', 'Romanian Deadlift'],
     posterior_unilateral: ['Single Leg Deadlift'],
@@ -48,7 +48,7 @@ export const HYPERTROPHY_POOLS = {
     calf_isolation: ['Calf Raise Machine', 'Calf Raise Barbell', 'Single Calf Raise'],
     groin_isolation: ['Adductor Machine'],
     abductor_isolation: ['Abductor Machine'],
-    quad_isolation: ['Leg Extension', 'Hack Squat'],
+    quad_isolation: ['Leg Extension'],
     hamstring_isolation: ['Seated Hamstring Curl', 'Lying Hamstring Curl'],
     rear_delt_isolation: ['Bent Over Rear Flye', 'Machine Reverse Rear Flye'],
     front_delt_isolation: ['Standing Dumbbell Front Raise', 'Incline Dumbbell Front Raise'],
@@ -567,10 +567,54 @@ export function clearHypertrophyDayPlanCache() {
 }
 
 /**
- * Stable hypertrophy routine for the day — same picks until date/prefs/kind change.
+ * Stable hypertrophy routine for the ~4-week cycle — same picks until cycle decision.
  */
 export function getHypertrophySessionRoutine(focus, date = new Date()) {
-    const key = hypertrophyPlanCacheKey(focus, date);
+    const kind = resolveHypertrophySessionKind(focus) || 'full';
+    const sessionTypeId = `hyp_${kind}`;
+
+    // Prefer locked cycle plan (keep / custom / generated for this block)
+    try {
+        const plans = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}');
+        const locked = plans && plans[sessionTypeId];
+        if (locked?.source === 'custom' && Array.isArray(locked.items) && locked.items.length) {
+            const prefs = getHypertrophyPlanPrefs();
+            const plan = {
+                kind,
+                label: HYPERTROPHY_DISPLAY_LABELS[HYPERTROPHY_EVENT_TYPES[kind]] || kind,
+                tier: prefs.maxTime,
+                maxTime: prefs.maxTime,
+                split: prefs.split,
+                items: locked.items.map((it) => ({
+                    name: it.exercise?.name || it.name,
+                    notes: it.notes || 'Custom cycle workout',
+                    sets: (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText).length || it.plannedSets || 3,
+                    isIsolation: !!(it.isIsolation),
+                    isSuperset: !!it.isSuperset,
+                    sides: it.sides
+                })).filter((it) => it.name),
+                note: 'Hypertrophy · custom workout for this cycle',
+                source: 'custom'
+            };
+            window.currentHypertrophySession = plan;
+            return plan;
+        }
+        if (locked?.plan && Array.isArray(locked.plan.items)) {
+            window.currentHypertrophySession = locked.plan;
+            return locked.plan;
+        }
+    } catch (e) { /* fall through */ }
+
+    // Cycle-stable cache key (not calendar day)
+    let cycleStart = '';
+    try {
+        const cycle = JSON.parse(localStorage.getItem('ascensus_workout_cycle_v1') || 'null');
+        cycleStart = cycle?.startDate || '';
+    } catch (e) { /* ignore */ }
+    const prefs = getHypertrophyPlanPrefs();
+    const tier = timeTier(prefs.maxTime, prefs.split);
+    const key = `${cycleStart || hypertrophyCacheDateKey(date)}|${kind}|${prefs.split}|${tier}|${prefs.maxTime}`;
+
     try {
         const raw = localStorage.getItem(HYPERTROPHY_DAY_CACHE_KEY);
         if (raw) {
@@ -585,6 +629,9 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
     const plan = buildHypertrophySessionRoutine(focus);
     try {
         localStorage.setItem(HYPERTROPHY_DAY_CACHE_KEY, JSON.stringify({ key, plan }));
+        const plans = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}');
+        plans[sessionTypeId] = { source: 'generated', family: 'hypertrophy', hypKind: kind, plan };
+        localStorage.setItem('ascensus_cycle_session_plans_v1', JSON.stringify(plans));
     } catch (e) { /* ignore */ }
     window.currentHypertrophySession = plan;
     return plan;
@@ -869,13 +916,24 @@ export function hypertrophyRestSeconds(rir) {
 
 /**
  * First-session finder: weight for ~10 reps @ 5 RIR → work weight ≈ +10%.
+ * In strength phase, that hypertrophy-equivalent load is then raised +15% (BW included in total).
  * Rounds up to the exercise equipment step.
  */
-export function workWeightFromFinder(finderKg, exName) {
+export function workWeightFromFinder(finderKg, exName, opts = {}) {
     const raw = Number(finderKg) || 0;
     if (raw <= 0) return 0;
     const eq = equipmentForExercise(exName);
-    return roundUpLoad(raw * 1.10, eq);
+    let work = roundUpLoad(raw * 1.10, eq);
+    if (opts.forStrength) {
+        try {
+            // Inline +15% with BW so we don't circular-import periodization-logs here
+            const meta = HYPERTROPHY_EXERCISE_META[exName];
+            const isBw = BODYWEIGHT_COMPOUNDS.has(exName) || !!(meta && meta.bodyweight);
+            const bw = isBw ? (Number(store.userConfig?.weight) || 0) : 0;
+            work = roundUpLoad(Math.max(0, (work + bw) * 1.15 - bw), eq);
+        } catch (e) { /* keep hyp work */ }
+    }
+    return work;
 }
 
 /** Round a known work weight to equipment increments. */

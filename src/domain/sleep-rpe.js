@@ -35,19 +35,20 @@ export function gymRpeFromMinutes(minutes) {
   return 5 + Math.floor((m - 45) / 15);
 }
 
-/** Session RPE used for sleep load (steady fixed, gym from duration, lactate/user as given). */
+/** Session RPE used for sleep load (steady fixed, gym from duration or diary RPE, lactate/user as given). */
 export function resolveSessionRpe({ kind, durationMinutes, userRpe }) {
   const k = normalizeKind(kind) || kind || '';
+  const u = Number(userRpe);
+  const hasUserRpe = Number.isFinite(u) && u > 0;
   if (kindLooksSteady(k)) return 2;
   if (kindLooksLactate(k)) {
-    const u = Number(userRpe);
-    return Number.isFinite(u) && u > 0 ? u : 6;
+    return hasUserRpe ? u : 6;
   }
   if (kindLooksStrength(k) || !k) {
-    return gymRpeFromMinutes(durationMinutes);
+    // Prefer diary / session RPE when the user logged one; else duration rule
+    return hasUserRpe ? u : gymRpeFromMinutes(durationMinutes);
   }
-  const u = Number(userRpe);
-  return Number.isFinite(u) && u > 0 ? u : gymRpeFromMinutes(durationMinutes);
+  return hasUserRpe ? u : gymRpeFromMinutes(durationMinutes);
 }
 
 export function sleepHoursFromTotalRpe(totalRpe) {
@@ -119,13 +120,16 @@ export function getDailyWorkoutRpeLoad(dateKey = new Date().toLocaleDateString()
   if (!day) return Math.round(total * 10) / 10;
 
   const sessions = day.items.filter(i => i.type === 'workout');
-  // Always include practice/match diary RPE
-  sessions.forEach(log => {
-    const name = log.exercise || '';
-    if (name === 'Practice' || name === 'Match' || /^Spontaneous:/i.test(name)) {
-      total += Number(log.rpe) || 0;
-    }
-  });
+  // Practice/Match/Spontaneous from history only when no session snapshots cover the day
+  // (timed sport sessions already recorded a snapshot — double-counting kept sleep at baseline 8.5h)
+  if (!usedSnapshots) {
+    sessions.forEach(log => {
+      const name = log.exercise || '';
+      if (name === 'Practice' || name === 'Match' || /^Spontaneous:/i.test(name)) {
+        total += Number(log.rpe) || 0;
+      }
+    });
+  }
 
   // Fallback: reconstruct gym/cardio load from raw logs when no snapshots
   if (!usedSnapshots) {

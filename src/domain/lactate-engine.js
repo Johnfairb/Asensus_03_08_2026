@@ -43,7 +43,7 @@ export const HIT_MODALITY_META = {
     treadmill_sprints: {
         label: 'Treadmill sprints',
         intensityKind: 'speed',
-        unitLabel: 'km/h',
+        unitLabel: 'm/s',
         machineResistance: null,
         tests: [
             { id: 'm400', label: '400 m time (track preferred)', unit: 'sec', distanceM: 400, hint: 'Advise a track for the 400 m to reduce injury risk.' },
@@ -54,7 +54,7 @@ export const HIT_MODALITY_META = {
     incline_treadmill: {
         label: 'Incline treadmill sprints',
         intensityKind: 'speed',
-        unitLabel: 'km/h',
+        unitLabel: 'm/s',
         machineResistance: null,
         tests: [
             { id: 'm400', label: '400 m time (track preferred)', unit: 'sec', distanceM: 400 },
@@ -115,7 +115,7 @@ export const HIT_MODALITY_META = {
     cycling: {
         label: 'Cycling',
         intensityKind: 'speed',
-        unitLabel: 'km/h',
+        unitLabel: 'm/s',
         machineResistance: 7,
         tests: [
             { id: 'd20', label: 'Max distance in 20 s', unit: 'm', durationSec: 20 },
@@ -125,7 +125,7 @@ export const HIT_MODALITY_META = {
     elliptical: {
         label: 'Elliptical',
         intensityKind: 'speed',
-        unitLabel: 'km/h',
+        unitLabel: 'm/s',
         machineResistance: 7,
         tests: [
             { id: 'd20', label: 'Max distance in 20 s', unit: 'm', durationSec: 20 },
@@ -384,8 +384,8 @@ export function formatIntensityDisplay(typeId, rate, workSec = 20) {
     }
     const kind = meta.intensityKind;
     if (kind === 'speed') {
-        const kmh = rate * 3.6;
-        return { display: `${kmh.toFixed(1)} km/h`, displayUnit: 'km/h', targetValue: Math.round(kmh * 10) / 10 };
+        const ms = Math.round(rate * 100) / 100;
+        return { display: `${ms.toFixed(2)} m/s`, displayUnit: 'm/s', targetValue: ms };
     }
     if (kind === 'time') {
         const dist = rate * Math.max(5, Number(workSec) || 20);
@@ -697,10 +697,31 @@ export function recalculateLactatePlanIntensities(selection, newSessionRpe) {
 }
 
 export function getLactateWarmupParts() {
+    // Nested children so lactate warmup parts expand like hypertrophy (press for teaching points)
+    const joints = ['Neck', 'Shoulders', 'Hips', 'Ankles'];
+    const dynamic = ['Leg swings', 'Open/close gate', 'Walking lunges'];
     return [
-        { name: 'Pulse Raising', reps: '3–5 Mins', notes: 'Light jog, skip, bike, or skip rope.' },
-        { name: 'Mobilisation', reps: '10 Reps/Joint', notes: 'Neck, shoulders, hips, ankles.' },
-        { name: 'Dynamic Stretching', reps: '5 Mins', notes: 'Leg swings, open/close gate, walking lunges.' }
+        {
+            name: 'Pulse Raising',
+            reps: '3–5 Mins',
+            notes: 'Light jog, skip, bike, or skip rope.',
+            children: [
+                { name: 'Light jog / skip / bike', reps: 'Video', notes: 'Teaching point video placeholder' },
+                { name: 'Skip rope', reps: 'Video', notes: 'Teaching point video placeholder' }
+            ]
+        },
+        {
+            name: 'Mobilisation',
+            reps: '10 Reps/Joint',
+            notes: 'Tap a joint for its teaching-point video.',
+            children: joints.map(j => ({ name: j, reps: 'Video', notes: 'Teaching point video placeholder' }))
+        },
+        {
+            name: 'Dynamic Stretching',
+            reps: '5 Mins',
+            notes: 'Tap a stretch for its teaching-point video.',
+            children: dynamic.map(s => ({ name: s, reps: 'Video', notes: 'Teaching point video placeholder' }))
+        }
     ];
 }
 

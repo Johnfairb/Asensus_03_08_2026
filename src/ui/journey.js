@@ -474,7 +474,7 @@ export async function openDayDetail(dateStr, isoHint) {
 
         const mediaJournal = matchJournal?.media?.length ? matchJournal
             : (practiceJournal?.media?.length ? practiceJournal
-                : (gymJournal?.media?.length && gymJournal.type !== 'lactate' && !(gymJournal.hitTypes?.length) ? gymJournal : null));
+                : (gymJournal?.media?.length ? gymJournal : null));
         if (mediaJournal?.media?.length) {
             const slot = document.getElementById('day-journal-media-slot');
             if (slot) slot.innerHTML = await buildJournalMediaGalleryHtml(mediaJournal.media);
@@ -617,11 +617,11 @@ function renderSportDiaryBlockHtml(kind, journal, workoutLogs = []) {
     </div>`;
 }
 
-/** Gym / strength diary on adherence day detail (lactate uses session sheet View diary). */
+/** Gym / lactate diary on adherence day detail (same pattern as practice/match). */
 function renderGymDiaryBlockHtml(journal) {
     if (!journal) return '';
-    if (journal.type === 'lactate' || (Array.isArray(journal.hitTypes) && journal.hitTypes.length)) return '';
 
+    const isLactate = journal.type === 'lactate' || (Array.isArray(journal.hitTypes) && journal.hitTypes.length);
     const fields = journal.fields || {};
     const fieldLines = Object.keys(fields)
         .filter(k => fields[k] != null && fields[k] !== '' && !['rpe', 'mental', 'athletic', 'matchPerformance'].includes(k))
@@ -634,18 +634,24 @@ function renderGymDiaryBlockHtml(journal) {
         || journal.rpe != null
         || journal.mental != null
         || fieldLines
-        || (journal.media && journal.media.length);
+        || (journal.media && journal.media.length)
+        || (isLactate && (journal.lactateSummary || journal.hitTypes?.length));
     if (!hasContent) return '';
 
     const metaBits = [];
     if (journal.mental != null) metaBits.push(`Mental ${journal.mental}`);
+    if (isLactate && journal.hitTypes?.length) {
+        metaBits.push(journal.hitTypes.map(String).join(' · '));
+    }
 
+    const title = isLactate ? 'LACTATE DIARY' : 'WORKOUT DIARY';
     return `<div style="margin-bottom:16px; padding:14px; border:1px solid rgba(212,175,55,0.35); border-radius:10px; background:rgba(212,175,55,0.06);">
-        <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">[ WORKOUT DIARY ]</div>
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:${journal.notes || fieldLines ? '10px' : '0'}; font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);">
+        <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">[ ${title} ]</div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:${journal.notes || fieldLines || journal.lactateSummary ? '10px' : '0'}; font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);">
             ${journal.rpe != null ? `<span>RPE <strong style="color:var(--text-main);">${journal.rpe}</strong></span>` : ''}
             ${metaBits.map(b => `<span>${escapeHtml(b)}</span>`).join('')}
         </div>
+        ${journal.lactateSummary ? `<div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">${escapeHtml(journal.lactateSummary)}</div>` : ''}
         ${journal.notes ? `<div style="font-size:13px; color:var(--text-main); line-height:1.5; white-space:pre-wrap;">${escapeHtml(journal.notes)}</div>` : ''}
         ${fieldLines}
         ${journal.media?.length ? `<div id="day-journal-media-slot"></div>` : ''}

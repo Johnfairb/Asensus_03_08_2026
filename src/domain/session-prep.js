@@ -232,31 +232,100 @@ export function saveSessionPrepSettings() {
     });
 }
 
+function refreshPrepLogUi(exIdx, { closeModal = false, reRenderSets = false } = {}) {
+    try {
+        if (closeModal && typeof window.closeExerciseSetsModal === 'function') window.closeExerciseSetsModal();
+        if (typeof window.renderActiveLog === 'function') window.renderActiveLog();
+        if (typeof window.renderWorkoutLog === 'function') window.renderWorkoutLog();
+        if (reRenderSets && window.currentModalExIdx === exIdx && typeof window.renderExerciseSets === 'function') {
+            window.renderExerciseSets();
+        }
+    } catch (e) { /* ignore */ }
+}
+
+function applyWarmupToCustom(item) {
+    item.exercise = { id: 'CUSTOM_WARMUP', name: 'Custom Warmup', domain: 'warmup', muscle_group: 'full' };
+    item.isCustomWarmup = true;
+    item.note = 'Custom warmup (no prescribed parts)';
+    item.sets = [{
+        weight: 0, reps: 'Log when done', rpe: 0, completed: false, isText: true,
+        partName: 'Custom Warmup', notes: 'Your own warmup — mark complete when finished.'
+    }];
+}
+
+function applyStretchToCustom(item) {
+    item.exercise = { id: 'CUSTOM_STRETCH', name: 'Custom Stretching', domain: 'mobility', muscle_group: 'full' };
+    item.isCustomStretch = true;
+    item.isStretchGroup = true;
+    item.note = 'Your own stretching routine';
+    item.sets = [{
+        weight: 0, reps: 'Log when done', rpe: 0, completed: false, isText: true,
+        partName: 'Custom Stretching', notes: 'Mark complete when finished.'
+    }];
+}
+
+/** Three-way chooser for dismissing planned warmup / stretching. */
+function showPrepDismissChooser({ kind, onChoice }) {
+    const existing = document.getElementById('prep-dismiss-chooser');
+    if (existing) existing.remove();
+
+    const label = kind === 'warmup' ? 'warmup' : 'stretching';
+    const overlay = document.createElement('div');
+    overlay.id = 'prep-dismiss-chooser';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:100050;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+    overlay.innerHTML = `
+        <div class="stealth-panel" style="width:100%;max-width:390px;background:var(--bg-surface);padding:20px 16px 16px;border-radius:14px 14px 0 0;">
+            <div style="font-size:13px;font-weight:800;color:var(--text-main);margin-bottom:6px;">Remove ${label}?</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;line-height:1.4;">Choose how you want to change this session.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <button type="button" data-prep-choice="session" class="btn-primary is-secondary" style="margin:0;">Remove for this workout only</button>
+                <button type="button" data-prep-choice="custom" class="btn-primary is-secondary" style="margin:0;">Exchange permanently for custom ${label}</button>
+                <button type="button" data-prep-choice="none" class="btn-primary is-secondary" style="margin:0;">Remove ${label} permanently</button>
+                <button type="button" data-prep-choice="cancel" style="margin:8px 0 0;background:none;border:none;color:var(--text-stealth);font-size:12px;cursor:pointer;font-family:'Roboto Mono';">Cancel</button>
+            </div>
+        </div>`;
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) close();
+    });
+    overlay.querySelectorAll('[data-prep-choice]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const choice = btn.getAttribute('data-prep-choice');
+            close();
+            if (choice && choice !== 'cancel' && typeof onChoice === 'function') onChoice(choice);
+        });
+    });
+    document.body.appendChild(overlay);
+}
+
 export function dismissPlannedWarmupFromLog(exIdx) {
     const item = store.activeLog?.items?.[exIdx];
     if (!item || !item.isWarmupGroup) return;
     const ctx = item.prepContext || 'gym';
-    const own = confirm('Do you want to do your own warmup?\n\nYes = replace with Custom Warmup for this session type.\nNo = remove warmup for this session type.\n\nYou can restore planned warmups in Settings → Algorithms.');
-    if (own) {
-        dismissWarmupToCustom(ctx);
-        item.exercise = { id: 'CUSTOM_WARMUP', name: 'Custom Warmup', domain: 'warmup', muscle_group: 'full' };
-        item.isCustomWarmup = true;
-        item.note = 'Custom warmup (no prescribed parts)';
-        item.sets = [{
-            weight: 0, reps: 'Log when done', rpe: 0, completed: false, isText: true,
-            partName: 'Custom Warmup', notes: 'Your own warmup — mark complete when finished.'
-        }];
-    } else {
-        dismissWarmupToNone(ctx);
-        store.activeLog.items.splice(exIdx, 1);
-    }
-    try {
-        if (typeof window.renderActiveLog === 'function') window.renderActiveLog();
-        if (typeof window.renderWorkoutLog === 'function') window.renderWorkoutLog();
-    } catch (e) { /* ignore */ }
-    alert(own
-        ? 'Custom warmup saved for this session type. Re-enable planned warmup in Settings → Algorithms.'
-        : 'Warmup removed for this session type. Re-enable planned warmup in Settings → Algorithms.');
+
+    showPrepDismissChooser({
+        kind: 'warmup',
+        onChoice: (choice) => {
+            if (choice === 'session') {
+                store.activeLog.items.splice(exIdx, 1);
+                refreshPrepLogUi(exIdx, { closeModal: true });
+                return;
+            }
+            if (choice === 'custom') {
+                dismissWarmupToCustom(ctx);
+                applyWarmupToCustom(item);
+                refreshPrepLogUi(exIdx, { reRenderSets: true });
+                alert('Custom warmup saved for this session type. Re-enable planned warmup in Settings → Algorithms.');
+                return;
+            }
+            if (choice === 'none') {
+                dismissWarmupToNone(ctx);
+                store.activeLog.items.splice(exIdx, 1);
+                refreshPrepLogUi(exIdx, { closeModal: true });
+                alert('Warmup removed for this session type. Re-enable planned warmup in Settings → Algorithms.');
+            }
+        }
+    });
 }
 
 export function dismissPlannedStretchFromLog(exIdx) {
@@ -268,32 +337,28 @@ export function dismissPlannedStretchFromLog(exIdx) {
     if (!isStretch) return;
 
     const ctx = item.prepContext || 'gym';
-    const own = confirm('Do you want to do your own stretching?\n\nOK = Custom Stretching for this session type.\nCancel = remove stretching for this session type.');
-    if (own) {
-        dismissStretchToCustom(ctx);
-        item.exercise = { id: 'CUSTOM_STRETCH', name: 'Custom Stretching', domain: 'mobility', muscle_group: 'full' };
-        item.isCustomStretch = true;
-        item.isStretchGroup = true;
-        item.note = 'Your own stretching routine';
-        item.sets = [{
-            weight: 0, reps: 'Log when done', rpe: 0, completed: false, isText: true,
-            partName: 'Custom Stretching', notes: 'Mark complete when finished.'
-        }];
-    } else {
-        dismissStretchToNone(ctx);
-        store.activeLog.items.splice(exIdx, 1);
-        try {
-            if (typeof window.closeExerciseSetsModal === 'function') window.closeExerciseSetsModal();
-        } catch (e) { /* ignore */ }
-    }
-    try {
-        if (typeof window.renderActiveLog === 'function') window.renderActiveLog();
-        if (typeof window.renderWorkoutLog === 'function') window.renderWorkoutLog();
-        if (own && window.currentModalExIdx === exIdx && typeof window.renderExerciseSets === 'function') {
-            window.renderExerciseSets();
+
+    showPrepDismissChooser({
+        kind: 'stretch',
+        onChoice: (choice) => {
+            if (choice === 'session') {
+                store.activeLog.items.splice(exIdx, 1);
+                refreshPrepLogUi(exIdx, { closeModal: true });
+                return;
+            }
+            if (choice === 'custom') {
+                dismissStretchToCustom(ctx);
+                applyStretchToCustom(item);
+                refreshPrepLogUi(exIdx, { reRenderSets: true });
+                alert('Custom stretching saved for this session type. Re-enable planned stretching in Settings → Algorithms.');
+                return;
+            }
+            if (choice === 'none') {
+                dismissStretchToNone(ctx);
+                store.activeLog.items.splice(exIdx, 1);
+                refreshPrepLogUi(exIdx, { closeModal: true });
+                alert('Stretching removed for this session type. Re-enable planned stretching in Settings → Algorithms.');
+            }
         }
-    } catch (e) { /* ignore */ }
-    alert(own
-        ? 'Custom stretching saved for this session type. Re-enable planned stretching in Settings → Algorithms.'
-        : 'Stretching removed for this session type. Re-enable planned stretching in Settings → Algorithms.');
+    });
 }

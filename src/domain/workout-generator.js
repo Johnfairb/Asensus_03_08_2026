@@ -4,7 +4,7 @@ import { PERIODIZATION, getPhaseLoadMultiplier, getSeasonPhase, isGuidanceOff } 
 import { buildLactateIntervalPlan } from './lactate-engine.js';
 import { dateToISO, getLactateSlotForDate, isLactateEvent, isLiftingEvent, isSteadyCardio, openVideoModal } from './route-planner.js';
 import { SPORT_MATRIX } from './sports-matrix.js';
-import { buildAuxiliaryExerciseList, buildStrengthSessionRoutine, getAttachedAuxForStrengthDay, getGymPlanPrefs, isStrengthFocus } from './strength-engine.js';
+import { buildAuxiliaryExerciseList, buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, isStrengthPhase, progressStrengthIsolationWeight } from './strength-engine.js';
 import {
     buildHypertrophyWarmupSets,
     equipmentForExercise,
@@ -29,6 +29,8 @@ import {
 } from './session-prep.js';
 import { roundToEquipment } from './thermodynamics.js';
 import { renderActiveLog } from '../ui/templates.js';
+import { ensureCycleStarted, ensureCyclePlansForProgramme } from './workout-cycle.js';
+import { latestPhaseWeight, strengthLoadFromHypertrophy, resolveLogPeriodization } from './periodization-logs.js';
 
 // ==========================================
 // 8. ELITE WORKOUT ENGINE (DRIVE TAB)
@@ -543,31 +545,27 @@ export async function generateWorkoutTemplate() {
 
     const useHypertrophy = isHypertrophyFocus(focus)
         || (isHypertrophyPhase(phaseStr) && (isStrengthFocus(focus) || focus === 'Full Body / Strength'));
+    if (useHypertrophy || (isStrengthFocus(focus) && !isHypertrophyFocus(focus))) {
+        try {
+            ensureCycleStarted(new Date());
+            ensureCyclePlansForProgramme();
+        } catch (e) { /* ignore */ }
+    }
     if (useHypertrophy) {
         // Stable day plan — same exercises until date / prefs / session kind change
         const built = getHypertrophySessionRoutine(focus);
         window.currentHypertrophySession = built;
         window.currentStrengthSession = null;
         built.items.forEach(item => mainRoutine.push(item));
-    } else if (focus === 'Full Body / Strength' || isStrengthFocus(focus)) {
+    } else if (focus === 'Full Body / Strength' || (isStrengthFocus(focus) && !isHypertrophyFocus(focus))) {
         const prefs = getGymPlanPrefs();
         const built = buildStrengthSessionRoutine(focus, sportData, prefs.setBudget);
         built.items.forEach(item => mainRoutine.push(item));
         // Persist which session ran for legacy Strength labels
         localStorage.setItem('ascensus_strength_ab', built.session);
         window.currentStrengthSession = built.session;
-
-        // Attach auxiliary work to strength when prefs say so (time / gym-day convenience)
-        const todayISO = dateToISO(new Date());
-        getAttachedAuxForStrengthDay(todayISO, sportData).forEach(item => {
-            const auxSets = item.setsOverride != null ? item.setsOverride : (item.sets != null ? item.sets : 2);
-            mainRoutine.push({
-                ...item,
-                sets: auxSets,
-                setsOverride: auxSets,
-                notes: item.notes || 'Auxiliary finisher'
-            });
-        });
+        window.currentStrengthTimeTier = built.timeTier;
+        // No auxiliary attachment in strength / hybrid
     } 
     else if (focus === 'Full Body / Power') { 
         pData = PERIODIZATION['PreSeason_Power']; 
@@ -578,12 +576,12 @@ export async function generateWorkoutTemplate() {
             { name: sportData.cardio === 'anaerobic' ? "Side-to-Side Shuffle" : "Clap Pushups" }
         ]; 
     } 
-    else if (focus === 'Auxiliary' && !isHypertrophyPhase(phaseStr)) { 
+    else if (focus === 'Auxiliary' && !isHypertrophyPhase(phaseStr) && !isStrengthPhase(phaseStr)) { 
         pData = { reps: 12, sets: 3, rest_sec: 60, notes: "Prehab & Weaknesses. Short rests. Target vulnerable areas." }; 
         buildAuxiliaryExerciseList(sportData).forEach(item => mainRoutine.push(item));
-    } else if (focus === 'Auxiliary' && isHypertrophyPhase(phaseStr)) {
-        // Hypertrophy has no auxiliary track — treat leftover Aux days as rest guidance
-        content.innerHTML = "<div style='text-align:center;'><p style='font-size:13px; color:var(--gold-accent); font-weight:bold;'>No auxiliary in hypertrophy</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Switch periodization to Strength if you want auxiliary / band sessions, or start a hypertrophy gym day from Plan.</p></div>";
+    } else if (focus === 'Auxiliary' && (isHypertrophyPhase(phaseStr) || isStrengthPhase(phaseStr))) {
+        // No auxiliary track in hypertrophy / strength / hybrid
+        content.innerHTML = "<div style='text-align:center;'><p style='font-size:13px; color:var(--gold-accent); font-weight:bold;'>No auxiliary in this phase</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Strength and hypertrophy do not schedule separate auxiliary sessions.</p></div>";
         container.classList.remove('hidden');
         return;
     } 
@@ -740,6 +738,40 @@ export async function generateWorkoutTemplate() {
             return;
         }
 
+        // Strength core circuit — Set 1 / Set 2 expand to 5×20 exercises
+        if (item.isCoreBlock) {
+            const coreEx = Array.isArray(item.coreExercises) ? item.coreExercises : [];
+            const circuitCount = typeof item.sets === 'number' ? item.sets
+                : (typeof item.setsOverride === 'number' ? item.setsOverride : 2);
+            const setsArray = [];
+            for (let i = 0; i < circuitCount; i++) {
+                setsArray.push({
+                    partName: `Set ${i + 1}`,
+                    reps: '5 exercises × 20 reps',
+                    weight: 0,
+                    rpe: 0,
+                    completed: false,
+                    isText: true,
+                    isCoreCircuit: true,
+                    restTime: i < circuitCount - 1 ? 60 : 0,
+                    children: coreEx.map(n => ({
+                        name: n,
+                        reps: '20 reps',
+                        _uiExpanded: false
+                    }))
+                });
+            }
+            store.currentGhostItems.push({
+                exercise: { id: 'CORE_CIRCUIT', name: 'Core Circuit', domain: 'strength', muscle_group: 'core' },
+                note: item.notes || 'No rest between exercises · 1 min between sets',
+                sets: setsArray,
+                isCoreBlock: true,
+                plannedSets: circuitCount,
+                coreExercises: coreEx
+            });
+            return;
+        }
+
         // Bodyweight competency: monthly / permanent swaps before catalogue lookup
         const programmedName = item.isText ? item.name : resolveProgrammedBwName(item.name);
         if (!item.isText && programmedName !== item.name) {
@@ -747,24 +779,29 @@ export async function generateWorkoutTemplate() {
         }
         let exObj = getEx(item.name);
         let latestLog = hist.find(l => l.exercise === exObj.name) || null;
-        
-        // 1RM Calculation Logic — Adaptation uses ~25% so loads stay in true 50-rep territory
+        const isCardioEx = ((exObj.domain || '').toLowerCase() === 'cardio');
+        const eqType = equipmentForExercise(exObj.name);
+        const inStrengthPhase = !useHypertrophy && (phaseStr === 'OffSeason_Strength' || phaseStr === 'OffSeason_Hybrid' || isStrengthPhase(phaseStr));
+
+        // Seed weight — never use 1RM for strength (strength = hypertrophy work +15%, then normal progression).
+        // Adaptation may still use phase multipliers for light loads.
         let calcWeight = 20;
-        if (store.userConfig.oneRepMax) {
+        if (!inStrengthPhase && store.userConfig.oneRepMax) {
             let mult = getPhaseLoadMultiplier(phaseStr);
             if (exObj.name.includes("Squat") && store.userConfig.oneRepMax.squat > 0) calcWeight = store.userConfig.oneRepMax.squat * mult;
             else if (exObj.name.includes("Bench") && store.userConfig.oneRepMax.bench > 0) calcWeight = store.userConfig.oneRepMax.bench * mult;
             else if (exObj.name.includes("Deadlift") && store.userConfig.oneRepMax.deadlift > 0) calcWeight = store.userConfig.oneRepMax.deadlift * mult;
-            else if (!item.isText) calcWeight = Math.max(10, 20 * mult / 0.65); // light default accessories
+            else if (!item.isText) calcWeight = Math.max(10, 20 * mult / 0.65);
             const eq0 = equipmentForExercise(exObj.name);
             calcWeight = roundLoad(calcWeight, eq0);
             if (phaseStr === 'OffSeason_Adaptation' && calcWeight < 10) calcWeight = 10;
         }
 
-        // Prefer calculated light loads in Adaptation — never inherit heavy strength-phase logs
         let tWeight;
         if (item.isText) {
             tWeight = 0;
+        } else if (inStrengthPhase) {
+            tWeight = 0; // filled below from strength log, hypertrophy+15%, or finder
         } else if (phaseStr === 'OffSeason_Adaptation') {
             if (latestLog && Number(latestLog.weight_kg) > 0 && Number(latestLog.weight_kg) <= calcWeight * 1.15) {
                 tWeight = Number(latestLog.weight_kg);
@@ -777,21 +814,34 @@ export async function generateWorkoutTemplate() {
         let tDist = latestLog ? latestLog.distance_km : 0;
         // Steady duration comes from the session timer at log time — don't prefill a fake target
         let tMins = 0;
-        const isCardioEx = ((exObj.domain || '').toLowerCase() === 'cardio');
-        const eqType = equipmentForExercise(exObj.name);
         let itemNoteExtra = '';
 
-        // Bodyweight competency ask (hypertrophy 8 / strength 4) — unless already answered this month
+        // Bodyweight competency ask (hypertrophy 8 / strength 5) — unless already answered this month
         let needsBwGate = false;
         if (!item.isText && !isCardioEx && isBwGateExercise(exObj.name) && needsBwCompetencyAsk(exObj.name)) {
             needsBwGate = true;
             itemNoteExtra = ` Bodyweight check: can you do the required reps? If not, we swap for this month.`;
         }
 
+        // Strength: last strength log (+ same progression below); else hypertrophy work +15% (BW in total); else 10@5 RIR finder → +15%
+        if (!item.isText && !isCardioEx && inStrengthPhase) {
+            const strengthW = latestPhaseWeight(hist, exObj.name, 'strength');
+            const hypW = latestPhaseWeight(hist, exObj.name, 'hypertrophy');
+            if (strengthW != null) {
+                tWeight = strengthW;
+                latestLog = hist.find(l => l.exercise === exObj.name && resolveLogPeriodization(l) === 'strength') || null;
+            } else if (hypW != null) {
+                tWeight = strengthLoadFromHypertrophy(hypW, exObj.name);
+                itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + 'Strength load = hypertrophy +15% (bodyweight included for BW lifts).';
+                latestLog = null; // first strength prescription from hyp — progression starts next session
+            }
+        }
+
         // First time THIS exact exercise name is logged — ask for work weight / 10@5 RIR finder
         // History at 0 kg (pure BW) still counts so we don't re-ask every session.
+        // Strength with no hyp history also uses the hypertrophy finder, then +15%.
         let needsWeightFind = false;
-        if (!item.isText && !isCardioEx && (useHypertrophy || isBwGateExercise(exObj.name))) {
+        if (!item.isText && !isCardioEx && (useHypertrophy || isBwGateExercise(exObj.name) || inStrengthPhase)) {
             const exName = String(exObj.name || '').toLowerCase();
             const nameMatch = (n) => String(n || '').toLowerCase() === exName;
             const hasHist = (hist || []).some(l => nameMatch(l.exercise) && (l.weight_kg != null && Number(l.weight_kg) >= 0) && (Number(l.reps) > 0 || Number(l.weight_kg) > 0));
@@ -806,11 +856,23 @@ export async function generateWorkoutTemplate() {
                     }
                 }
             } catch (e) { /* ignore */ }
+            const hasStrengthOrHyp = inStrengthPhase && (
+                latestPhaseWeight(hist, exObj.name, 'strength') != null
+                || latestPhaseWeight(hist, exObj.name, 'hypertrophy') != null
+            );
             if (isPressUpVariant(exObj.name) && !needsBwGate) {
                 tWeight = 0;
-            } else if (!needsBwGate && !hasHist && !hasLocal && !latestLog) {
+            } else if (!needsBwGate && !hasStrengthOrHyp && !hasHist && !hasLocal && !latestLog) {
                 needsWeightFind = true;
-                itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + 'First time on this exercise: we will ask for your work weight (or help you find 10 reps @ 5 RIR).';
+                itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '')
+                    + (inStrengthPhase
+                        ? 'First time on this exercise in strength: find 10 reps @ 5 RIR (hypertrophy protocol), then we set strength at +15%.'
+                        : 'First time on this exercise: we will ask for your work weight (or help you find 10 reps @ 5 RIR).');
+            } else if (inStrengthPhase && !hasStrengthOrHyp && tWeight <= 0 && !needsBwGate) {
+                // No 1RM fallback — must find via hypertrophy protocol
+                needsWeightFind = true;
+                itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '')
+                    + 'Find 10 reps @ 5 RIR (hypertrophy protocol), then strength is set at +15%.';
             }
         }
 
@@ -823,8 +885,11 @@ export async function generateWorkoutTemplate() {
             pData.notes = `REPAIR MODE: Weight restricted to ${throttle*100}% to protect ${store.userConfig.injury}.`;
         }
         
-        if (latestLog && !item.isText && phaseStr === 'OffSeason_Strength') {
+        if (latestLog && !item.isText && !item.isStrengthIsolation && !item.isCoreBlock
+            && (phaseStr === 'OffSeason_Strength' || phaseStr === 'OffSeason_Hybrid')) {
             let allExLogs = hist.filter(l => l.exercise === exObj.name);
+            const strengthOnly = allExLogs.filter(l => resolveLogPeriodization(l) === 'strength');
+            if (strengthOnly.length) allExLogs = strengthOnly;
             // Group by day to check last 2 sessions
             let uniqueDays = [...new Set(allExLogs.map(logDayKey).filter(Boolean))].slice(0, 2);
             let missedConsecutive = 0;
@@ -854,7 +919,13 @@ export async function generateWorkoutTemplate() {
             }
         }
 
-        if (latestLog && !item.isText && (useHypertrophy || phaseStr === 'OffSeason_Hypertrophy')) {
+        if (latestLog && !item.isText && item.isStrengthIsolation) {
+            const prog = progressStrengthIsolationWeight(exObj.name, hist, tWeight, (w) => roundLoad(w, eqType));
+            tWeight = prog.weight;
+            if (prog.note) itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + prog.note;
+        }
+
+        if (latestLog && !item.isText && (useHypertrophy || phaseStr === 'OffSeason_Hypertrophy') && !item.isStrengthIsolation) {
             const prog = progressHypertrophyWeight(exObj.name, hist, tWeight, 10);
             tWeight = prog.weight;
             if (prog.note) itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + prog.note;
@@ -873,12 +944,16 @@ export async function generateWorkoutTemplate() {
         }
         // Steady-state cardio is one continuous session (distance + duration), not multiple sets
         if (!item.isLactateHit && (isCardioEx || /steady\s*state\s*cardio/i.test(item.name || exObj.name || ''))) activeSets = 1;
-        const itemReps = item.isAux ? 12 : (useHypertrophy ? 10 : pData.reps);
-        const itemRest = item.isAux ? 60 : (useHypertrophy ? 90 : pData.rest_sec);
+        const itemReps = item.isAux ? 12
+            : (item.isStrengthIsolation ? (item.targetReps || 8)
+                : (useHypertrophy ? 10 : pData.reps));
+        const itemRest = item.isAux ? 60
+            : (item.isStrengthIsolation ? (item.restSec || 120)
+                : (useHypertrophy ? 90 : pData.rest_sec));
 
-        // Per-exercise warmups (strength + hypertrophy)
+        // Per-exercise warmups (strength + hypertrophy) — same warmup weight logic
         if (!item.isText && !isCardioEx && !item.isLactateHit) {
-            const wu = buildHypertrophyWarmupSets(exObj.name, tWeight, itemReps, !!item.isIsolation);
+            const wu = buildHypertrophyWarmupSets(exObj.name, tWeight, itemReps, !!item.isIsolation || !!item.isStrengthIsolation);
             setsArray.push(...wu);
         }
 
@@ -944,7 +1019,9 @@ export async function generateWorkoutTemplate() {
             sets: setsArray,
             plannedSets: activeSets,
             slotLabel: item.slotLabel || null,
-            isIsolation: !!item.isIsolation,
+            isIsolation: !!item.isIsolation || !!item.isStrengthIsolation,
+            isStrengthIsolation: !!item.isStrengthIsolation,
+            isStrengthCompound: !!item.isStrengthCompound,
             role: item.role || null,
             isLactateHit: !!item.isLactateHit,
             lactateRows: item.lactateRows || null,
@@ -961,6 +1038,15 @@ export async function generateWorkoutTemplate() {
                 <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Warmup</div>
                 <div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note || 'Includes pulse raising, mobilisation, shoulder warmup & dynamic stretching'}</div>
                 <div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc;"><span>Blocks</span><span style="color:#D4AF37; font-weight:bold;">${item.sets.length} parts</span></div>
+            </div>`;
+            return;
+        }
+        if (item.isCoreBlock) {
+            const n = item.plannedSets || (item.sets || []).length;
+            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
+                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Core Circuit</div>
+                <div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note || '5 exercises × 20 · no rest between · 1 min between sets'}</div>
+                <div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc;"><span>Circuits</span><span style="color:#D4AF37; font-weight:bold;">${n} set${n === 1 ? '' : 's'}</span></div>
             </div>`;
             return;
         }

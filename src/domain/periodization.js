@@ -33,10 +33,15 @@ export function checkAutoSeason() {
     const inSeason = new Date(store.userConfig.seasonDates.in);
     
     let newPhase = 'OffSeason_Hypertrophy';
-    if (today >= inSeason) newPhase = 'InSeason_Maintenance';
+    if (today >= inSeason) newPhase = 'OffSeason_Hypertrophy';
     else if (today >= pre) newPhase = 'PreSeason_Power';
     else if (today >= off) newPhase = 'OffSeason_Strength';
     
+    // Migrate removed In-Season Maintenance phase
+    if (store.userConfig.seasonPhase === 'InSeason_Maintenance') {
+        store.userConfig.seasonPhase = 'OffSeason_Hypertrophy';
+    }
+
     if (store.userConfig.seasonPhase !== newPhase) {
         store.userConfig.seasonPhase = newPhase;
         const select = document.getElementById('set-season-phase');

@@ -7,6 +7,7 @@ import { store } from '../state/store.js';
 import {
     applyHypertrophyWorkWeight,
     applyWorkWeightToSupersetSide,
+    isHypertrophyPhase,
     workWeightFromFinder
 } from '../domain/hypertrophy-engine.js';
 import {
@@ -18,12 +19,17 @@ import {
     swapTargetFor
 } from '../domain/bodyweight-lifts.js';
 import { excludeBannedExercises } from '../domain/bans.js';
+import { isStrengthPhase } from '../domain/strength-engine.js';
 
 let _finderOpen = false;
 let _finderExIdx = null;
 /** @type {null|'A'|'B'} */
 let _finderSide = null;
 let _openLogAfterFinder = false;
+
+function finderForStrength() {
+    return isStrengthPhase() && !isHypertrophyPhase();
+}
 
 function ensureWeightFinderSheet() {
     let sheet = document.getElementById('weight-finder-sheet');
@@ -207,7 +213,7 @@ function renderFinderEntry(exIdx) {
             <button type="button" onclick="dismissWeightFinder()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
         <p style="font-size:13px; color:var(--text-silver); line-height:1.5; margin:0 0 14px;">
-            Warm up, then find a weight you can do for <strong style="color:var(--text-main);">10 reps with 5 reps in reserve</strong> (RIR 5). Enter that finder weight below. Work weight will be set <strong style="color:var(--text-main);">10% higher</strong>.
+            Warm up, then find a weight you can do for <strong style="color:var(--text-main);">10 reps with 5 reps in reserve</strong> (RIR 5). Enter that finder weight below. Work weight will be set <strong style="color:var(--text-main);">${finderForStrength() ? '10% higher, then +15% for strength' : '10% higher'}</strong>.
         </p>
         <label style="display:block; font-size:11px; color:var(--text-muted); font-family:'Roboto Mono',monospace; margin-bottom:6px;">FINDER WEIGHT — 10 REPS @ 5 RIR (KG)</label>
         <input id="weight-finder-input" type="number" inputmode="decimal" min="0" step="0.5" placeholder="e.g. 50"
@@ -240,8 +246,10 @@ function updateFinderPreview() {
         preview.textContent = 'Work weight → 0 kg (bodyweight)';
         return;
     }
-    const work = workWeightFromFinder(finder, name);
-    preview.textContent = `Work weight → ${work} kg`;
+    const work = workWeightFromFinder(finder, name, { forStrength: finderForStrength() });
+    preview.textContent = finderForStrength()
+        ? `Strength work weight → ${work} kg (+10% finder, then +15%)`
+        : `Work weight → ${work} kg`;
 }
 
 function openSheet(exIdx, renderFn) {
@@ -467,7 +475,7 @@ export function submitFinderWorkWeight() {
     const exName = item.isSuperset
         ? (activeSideMeta(item)?.exercise?.name || '')
         : (item.exercise?.name || '');
-    const work = finder === 0 ? 0 : workWeightFromFinder(finder, exName);
+    const work = finder === 0 ? 0 : workWeightFromFinder(finder, exName, { forStrength: finderForStrength() });
     const applied = applyWorkWeight(item, work);
     if (applied < 0) {
         showError('Could not apply that weight.');

@@ -116,6 +116,9 @@ export function applyUserConfigToDom() {
     setVal('set-bf', store.userConfig.bodyFat);
     setVal('set-injury', store.userConfig.injury || 'None');
     setVal('set-bw-test', store.userConfig.canDoPullups);
+    if (store.userConfig.seasonPhase === 'InSeason_Maintenance') {
+        store.userConfig.seasonPhase = 'OffSeason_Hypertrophy';
+    }
     setVal('set-season-phase', store.userConfig.seasonPhase || 'OffSeason_Hypertrophy');
     setVal('set-training-window', store.userConfig.trainingWindow);
     setVal('set-meals-per-day', store.userConfig.mealsPerDay);
@@ -131,6 +134,8 @@ export function applyUserConfigToDom() {
     } catch (e) { /* ignore */ }
     const disc = document.getElementById('strength-phase-disclaimer');
     if (disc) disc.classList.toggle('hidden', (store.userConfig.seasonPhase || '') !== 'OffSeason_Strength');
+    const hybridDisc = document.getElementById('hybrid-phase-disclaimer');
+    if (hybridDisc) hybridDisc.classList.toggle('hidden', (store.userConfig.seasonPhase || '') !== 'OffSeason_Hybrid');
     // Day/time menus depend on phase — rebuild, preserving saved willingness/time when valid
     const daysEl = document.getElementById('set-gym-willingness');
     if (daysEl) daysEl.value = String(store.userConfig.gymWillingness != null ? store.userConfig.gymWillingness : (store.userConfig.trainingFreq || 4));
@@ -228,6 +233,9 @@ export function saveSettings() {
     if (bandEl) store.userConfig.bandAuxiliary = !!bandEl.checked;
     const disc = document.getElementById('strength-phase-disclaimer');
     if (disc) disc.classList.toggle('hidden', store.userConfig.seasonPhase !== 'OffSeason_Strength');
+    const hybridDisc = document.getElementById('hybrid-phase-disclaimer');
+    if (hybridDisc) hybridDisc.classList.toggle('hidden', store.userConfig.seasonPhase !== 'OffSeason_Hybrid');
+    syncHybridSplitFromDom();
     syncAuxiliaryUiVisibility();
 
     const networkEl = document.getElementById('toggle-network');
@@ -250,9 +258,15 @@ export function saveSettings() {
     const bandHint = document.getElementById('band-aux-hint');
     if (bandHint) {
         const prefs = getGymPlanPrefs();
-        bandHint.innerHTML = prefs.band
-            ? `On: <span style="color:var(--gold-accent);">${prefs.strengthCount} Strength</span> + <span style="color:var(--gold-accent);">2 Band Aux</span>${prefs.attachMode === 'none' ? ' (separate days)' : ' (attached to strength)'}.`
-            : `Off: <span style="color:var(--gold-accent);">${prefs.strengthCount} Strength</span> + <span style="color:var(--gold-accent);">${prefs.auxCount} Aux</span> from gym-day budget.`;
+        if (prefs.strengthPhase) {
+            bandHint.innerHTML = prefs.hybrid
+                ? `<span style="color:var(--gold-accent);">${prefs.strengthCount} Strength</span> + <span style="color:var(--gold-accent);">${prefs.hypertrophyCount} Hypertrophy</span> · no auxiliary.`
+                : `<span style="color:var(--gold-accent);">${prefs.strengthCount} Strength</span> · no auxiliary.`;
+        } else {
+            bandHint.innerHTML = prefs.band
+                ? `On: <span style="color:var(--gold-accent);">${prefs.strengthCount} Strength</span> + <span style="color:var(--gold-accent);">2 Band Aux</span>${prefs.attachMode === 'none' ? ' (separate days)' : ' (attached to strength)'}.`
+                : `Off: <span style="color:var(--gold-accent);">${prefs.strengthCount} Strength</span> + <span style="color:var(--gold-accent);">${prefs.auxCount} Aux</span> from gym-day budget.`;
+        }
     }
 
     document.getElementById('ghost-template-container').classList.add('hidden'); 
@@ -382,6 +396,11 @@ function macrosFromCalories(targetCals) {
  * Same-day logs do not affect that day's target — only the week plan does for "today".
  */
 export function computeDayNutritionTargets(dateObj = new Date(), config = store.userConfig) {
+    return explainDayNutritionTargets(dateObj, config).macros;
+}
+
+/** Breakdown of what set today's calorie aim (for Goals → Calories sheet). */
+export function explainDayNutritionTargets(dateObj = new Date(), config = store.userConfig) {
     const day = dateObj instanceof Date ? new Date(dateObj) : new Date(dateObj);
     day.setHours(12, 0, 0, 0);
     const dayIso = dateToISO(day);
@@ -391,33 +410,69 @@ export function computeDayNutritionTargets(dateObj = new Date(), config = store.
     twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
 
     const BMR = computeBmr(config);
+    const factors = [];
     let mult = 1.3; // baseline (no prior activity)
+    factors.push({ label: 'Baseline activity', detail: '×1.3 on BMR', mult: 1.3 });
 
     const yesterdayEvents = getPlannedDayEvents(yesterday) || [];
-    if (yesterdayEvents.some(isStrengthEvent)) mult *= 1.3;
-
-    for (const rpe of collectPlannedEventRpes(yesterday)) {
-        mult *= eventRpeMultiplier(rpe);
+    if (yesterdayEvents.some(isStrengthEvent)) {
+        mult *= 1.3;
+        factors.push({ label: 'Yesterday strength (planned)', detail: '×1.3', mult: 1.3 });
     }
 
-    // Day after an RPE 8+ event (event was two days ago → today gets ×1.2 each)
+    for (const rpe of collectPlannedEventRpes(yesterday)) {
+        const m = eventRpeMultiplier(rpe);
+        mult *= m;
+        factors.push({
+            label: `Yesterday sport / HIT · RPE ${rpe == null ? DEFAULT_EVENT_RPE : rpe}`,
+            detail: `×${m}`,
+            mult: m
+        });
+    }
+
     for (const rpe of collectPlannedEventRpes(twoDaysAgo)) {
-        if (rpe >= 8) mult *= 1.2;
+        if (rpe >= 8) {
+            mult *= 1.2;
+            factors.push({ label: `RPE ${rpe} two days ago`, detail: '×1.2 recovery bump', mult: 1.2 });
+        }
     }
 
     const todayEvents = getPlannedDayEvents(day) || [];
-    if (todayEvents.some(isStrengthEvent)) mult *= 1.1;
-    if (todayEvents.some(isPracticeEvent)) mult *= 1.1;
-
-    let maintenanceCals = BMR * mult;
-
-    let targetCals = maintenanceCals;
-    if (!config.restStop) {
-        if (config.goal === 'Fat_Loss') targetCals = maintenanceCals * 0.9;
-        else if (config.goal === 'Muscle_Gain') targetCals = maintenanceCals * 1.1;
+    if (todayEvents.some(isStrengthEvent)) {
+        mult *= 1.1;
+        factors.push({ label: 'Today strength (planned)', detail: '×1.1', mult: 1.1 });
+    }
+    if (todayEvents.some(isPracticeEvent)) {
+        mult *= 1.1;
+        factors.push({ label: 'Today practice (planned)', detail: '×1.1', mult: 1.1 });
     }
 
-    return macrosFromCalories(targetCals);
+    let maintenanceCals = BMR * mult;
+    let goalMult = 1;
+    let targetCals = maintenanceCals;
+    if (!config.restStop) {
+        if (config.goal === 'Fat_Loss') {
+            goalMult = 0.9;
+            targetCals = maintenanceCals * 0.9;
+            factors.push({ label: 'Goal · Fat loss', detail: '×0.9', mult: 0.9 });
+        } else if (config.goal === 'Muscle_Gain') {
+            goalMult = 1.1;
+            targetCals = maintenanceCals * 1.1;
+            factors.push({ label: 'Goal · Muscle gain', detail: '×1.1', mult: 1.1 });
+        }
+    }
+
+    const macros = macrosFromCalories(targetCals);
+    return {
+        bmr: Math.round(BMR),
+        activityMult: mult,
+        goalMult,
+        maintenanceCals: Math.round(maintenanceCals),
+        targetCals: macros.cals,
+        factors,
+        macros,
+        note: 'Same-day sessions update tomorrow’s calorie aim, not today’s.'
+    };
 }
 
 export function calculateTDEE() {
@@ -519,21 +574,22 @@ export function getGymTimeOptionsForContext(phase, gymDays) {
         };
     }
 
-    // Strength (and other phases)
-    if (p === 'OffSeason_Strength') {
+    // Strength + hybrid — document timing ladder (45 / 60 / 75 / 90)
+    if (p === 'OffSeason_Strength' || p === 'OffSeason_Hybrid') {
         return {
-            hint: 'Longer slots can attach auxiliary after strength.',
+            hint: p === 'OffSeason_Hybrid'
+                ? 'Applies to strength days. Hypertrophy days use the same clock for their own templates.'
+                : '45 min drops unilateral + core. Stick to rest times so the clock matches.',
             options: [
+                { value: 45, label: '45 min' },
                 { value: 60, label: '1 hour' },
                 { value: 75, label: '1 hour 15' },
-                { value: 90, label: '1 hour 30' },
-                { value: 105, label: '1 hour 45' },
-                { value: 120, label: '2 hours+' }
+                { value: 90, label: '1 hour 30' }
             ]
         };
     }
 
-    // Adaptation / Power / Maintenance
+    // Adaptation / Power (and any other non-hypertrophy / non-strength phase)
     return {
         hint: 'Session length for this phase.',
         options: [
@@ -562,13 +618,24 @@ export function getGymDaysOptionsForPhase(phase) {
     }
     if (phase === 'OffSeason_Strength') {
         return {
-            hint: 'Strength days (max 4 hard lifts). Aux is separate when band mode is on.',
+            hint: 'All gym days are strength (max 4). No auxiliary sessions.',
             options: [
-                { value: 2, label: '2 — 2 Strength' },
-                { value: 3, label: '3 — 2 Strength + 1 Auxiliary' },
-                { value: 4, label: '4 — 3 Strength + 1 Auxiliary' },
-                { value: 5, label: '5 — 3 Strength + 2 Auxiliary' },
-                { value: 6, label: '6+ — 4 Strength + 2 Auxiliary' }
+                { value: 1, label: '1 — Strength ×1' },
+                { value: 2, label: '2 — Strength ×2' },
+                { value: 3, label: '3 — Strength ×3' },
+                { value: 4, label: '4 — Strength ×4' }
+            ]
+        };
+    }
+    if (phase === 'OffSeason_Hybrid') {
+        return {
+            hint: 'Total gym days / week. Set the strength : hypertrophy split below.',
+            options: [
+                { value: 2, label: '2 days / week' },
+                { value: 3, label: '3 days / week' },
+                { value: 4, label: '4 days / week' },
+                { value: 5, label: '5 days / week' },
+                { value: 6, label: '6 days / week' }
             ]
         };
     }
@@ -602,16 +669,100 @@ function rebuildSelectOptions(selectEl, options, preferredValue) {
     return Number(next);
 }
 
-/** Hide auxiliary settings when hypertrophy; rebuild day/time menus for phase + days. */
+/** Hide auxiliary settings when hypertrophy/strength/hybrid; rebuild day/time menus for phase + days. */
 export function syncAuxiliaryUiVisibility() {
     syncGymPlanOptionMenus();
 }
 
+function syncHybridSplitMenus(totalDays) {
+    const block = document.getElementById('hybrid-split-block');
+    const phase = readLivePhase();
+    const isHybrid = phase === 'OffSeason_Hybrid';
+    if (block) block.classList.toggle('hidden', !isHybrid);
+    if (!isHybrid) return;
+
+    const total = Math.min(6, Math.max(2, parseInt(totalDays, 10) || 4));
+    const maxS = Math.min(4, total);
+    let s = store.userConfig.hybridStrengthDays != null
+        ? parseInt(store.userConfig.hybridStrengthDays, 10)
+        : Math.min(maxS, Math.max(1, total - 1));
+    if (!Number.isFinite(s)) s = Math.min(maxS, 3);
+    s = Math.min(maxS, Math.max(0, s));
+    let h = total - s;
+    if (h < 0) { s = total; h = 0; }
+
+    const sEl = document.getElementById('set-hybrid-strength-days');
+    const hEl = document.getElementById('set-hybrid-hypertrophy-days');
+    if (sEl) {
+        sEl.innerHTML = Array.from({ length: maxS + 1 }, (_, i) =>
+            `<option value="${i}">${i}</option>`
+        ).join('');
+        sEl.value = String(s);
+    }
+    if (hEl) {
+        hEl.innerHTML = Array.from({ length: total + 1 }, (_, i) =>
+            `<option value="${i}">${i}</option>`
+        ).join('');
+        hEl.value = String(h);
+    }
+    store.userConfig.hybridStrengthDays = s;
+    store.userConfig.hybridHypertrophyDays = h;
+    const hint = document.getElementById('hybrid-split-hint');
+    if (hint) hint.textContent = `${s} strength : ${h} hypertrophy (of ${total} gym days)`;
+}
+
+export function syncHybridSplitFromDom() {
+    if (readLivePhase() !== 'OffSeason_Hybrid') return;
+    const total = readLiveGymDays();
+    const sEl = document.getElementById('set-hybrid-strength-days');
+    const hEl = document.getElementById('set-hybrid-hypertrophy-days');
+    let s = sEl ? parseInt(sEl.value, 10) : store.userConfig.hybridStrengthDays;
+    let h = hEl ? parseInt(hEl.value, 10) : store.userConfig.hybridHypertrophyDays;
+    s = Math.min(4, Math.max(0, parseInt(s, 10) || 0));
+    h = Math.max(0, parseInt(h, 10) || 0);
+    if (s + h !== total) {
+        // Adjust the field that was not just edited — prefer keeping strength, clamp hypertrophy
+        if (s > total) s = Math.min(4, total);
+        h = Math.max(0, total - s);
+    }
+    store.userConfig.hybridStrengthDays = s;
+    store.userConfig.hybridHypertrophyDays = h;
+    if (sEl) sEl.value = String(s);
+    if (hEl) hEl.value = String(h);
+    const hint = document.getElementById('hybrid-split-hint');
+    if (hint) hint.textContent = `${s} strength : ${h} hypertrophy (of ${total} gym days)`;
+}
+
+export function onHybridSplitChange() {
+    const total = readLiveGymDays();
+    const sEl = document.getElementById('set-hybrid-strength-days');
+    const hEl = document.getElementById('set-hybrid-hypertrophy-days');
+    const active = document.activeElement;
+    let s = sEl ? parseInt(sEl.value, 10) : 0;
+    let h = hEl ? parseInt(hEl.value, 10) : 0;
+    s = Math.min(4, Math.max(0, s || 0));
+    h = Math.max(0, h || 0);
+    if (active === hEl) {
+        if (h > total) h = total;
+        s = Math.min(4, Math.max(0, total - h));
+    } else {
+        if (s > total) s = Math.min(4, total);
+        h = Math.max(0, total - s);
+    }
+    if (sEl) sEl.value = String(s);
+    if (hEl) hEl.value = String(h);
+    store.userConfig.hybridStrengthDays = s;
+    store.userConfig.hybridHypertrophyDays = h;
+    saveSettings();
+}
+
 export function syncGymPlanOptionMenus() {
     const phase = readLivePhase();
-    const hypertrophy = phase === 'OffSeason_Hypertrophy';
+    const hideAux = phase === 'OffSeason_Hypertrophy'
+        || phase === 'OffSeason_Strength'
+        || phase === 'OffSeason_Hybrid';
     const auxBlock = document.getElementById('aux-settings-block');
-    if (auxBlock) auxBlock.classList.toggle('hidden', hypertrophy);
+    if (auxBlock) auxBlock.classList.toggle('hidden', hideAux);
 
     const daysPack = getGymDaysOptionsForPhase(phase);
     const daysHint = document.getElementById('gym-days-hint');
@@ -635,6 +786,8 @@ export function syncGymPlanOptionMenus() {
     if (timeEl) timeEl.removeAttribute('data-preferred');
     const timeVal = rebuildSelectOptions(timeEl, timePack.options, preferredTime);
     if (timeVal != null) store.userConfig.maxGymTime = timeVal;
+
+    syncHybridSplitMenus(daysVal || readLiveGymDays());
 }
 
 export function onGymDaysOrPhaseUiChange() {
@@ -647,6 +800,8 @@ export function onSeasonPhaseChange() {
     const sel = document.getElementById('set-season-phase');
     const disc = document.getElementById('strength-phase-disclaimer');
     if (disc) disc.classList.toggle('hidden', !sel || sel.value !== 'OffSeason_Strength');
+    const hybridDisc = document.getElementById('hybrid-phase-disclaimer');
+    if (hybridDisc) hybridDisc.classList.toggle('hidden', !sel || sel.value !== 'OffSeason_Hybrid');
     syncGymPlanOptionMenus();
     clearHypertrophyDayPlanCache();
     saveSettings();

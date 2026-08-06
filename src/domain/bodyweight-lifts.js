@@ -97,7 +97,8 @@ export function bwRepThreshold() {
     const p = store.userConfig?.seasonPhase || '';
     const sel = typeof document !== 'undefined' ? document.getElementById('set-season-phase') : null;
     const live = sel?.value || p;
-    return live === 'OffSeason_Hypertrophy' ? 8 : 4;
+    // Hypertrophy competency: 8 reps. Strength / other phases: 5 reps.
+    return live === 'OffSeason_Hypertrophy' ? 8 : 5;
 }
 
 function pickTricepIsolation() {

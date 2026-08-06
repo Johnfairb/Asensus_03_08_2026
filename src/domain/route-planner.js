@@ -766,7 +766,7 @@ export function stripAllAuxiliary(days) {
  * Non-band: attach to strength when attachMode says so, else standalone.
  */
 export function placeAuxiliarySessions(days, prefs) {
-    if (isHypertrophyPhase()) {
+    if (isHypertrophyPhase() || (prefs && prefs.strengthPhase)) {
         stripAllAuxiliary(days);
         return 0;
     }
@@ -950,28 +950,36 @@ export function buildWeeklyTrainingPlan(weekStartISO) {
     const prefs = getGymPlanPrefs();
     const hypPrefs = getHypertrophyPlanPrefs();
     const hypertrophyMode = isHypertrophyPhase();
+    const hybridMode = !!(prefs.hybrid);
     const loggedCredits = countLoggedWorkoutCredits(weekStartISO);
     const lactateQuota = Math.max(0, 2 - countPracticeLactateCredits(weekStartISO) - (loggedCredits.lactate || 0));
     const steadyQuota = Math.max(0, 2 - (loggedCredits.steady || 0));
-    const gymTarget = hypertrophyMode
+    const strengthTarget = hybridMode
+        ? Math.max(0, (prefs.strengthCount || 0) - Math.min(loggedCredits.strength || 0, prefs.strengthCount || 0))
+        : hypertrophyMode
+            ? 0
+            : Math.max(0, (prefs.strengthCount || 0) - (loggedCredits.strength || 0));
+    const gymTargetPureHyp = hypertrophyMode
         ? Math.max(0, (hypPrefs.sessionCount || 0) - (loggedCredits.strength || 0))
-        : Math.max(0, (prefs.strengthCount || 0) - (loggedCredits.strength || 0));
-    const strengthTarget = gymTarget;
+        : 0;
     const cacheKey = [
-        'v6-hypertrophy',
+        'v7-strength-hybrid',
         weekStartISO,
         hypertrophyMode ? 1 : 0,
+        hybridMode ? 1 : 0,
         hypPrefs.split,
         prefs.willingness,
         prefs.band ? 1 : 0,
         prefs.maxTime,
-        hypertrophyMode ? hypPrefs.sessionCount : prefs.strengthCount,
+        prefs.strengthCount,
+        prefs.hypertrophyCount || 0,
         prefs.auxCount,
         prefs.attachMode,
         prefs.separateAuxDays,
         lactateQuota,
         steadyQuota,
         strengthTarget,
+        gymTargetPureHyp,
         loggedCredits.steady || 0,
         loggedCredits.lactate || 0,
         loggedCredits.strength || 0,
@@ -1015,15 +1023,19 @@ export function buildWeeklyTrainingPlan(weekStartISO) {
     const timetablingOff = isGuidanceOff('timetabling');
 
     if (!timetablingOff) {
-        // 1) Gym sessions — hypertrophy (default) or strength A/B
+        // 1) Gym sessions — hypertrophy, strength A/B, or hybrid mix
         if (hypertrophyMode) {
-            placeHypertrophySessions(days, strengthTarget);
+            placeHypertrophySessions(days, gymTargetPureHyp);
+        } else if (hybridMode) {
+            placeStrengthSessions(days, strengthTarget);
+            placeHybridHypertrophySessions(days, prefs.hypertrophyCount || 0);
+            trimHybridGymDays(days, prefs.strengthCount || 0, prefs.hypertrophyCount || 0);
         } else {
             placeStrengthSessions(days, strengthTarget);
         }
 
-        // 2) Auxiliary — strength / band only (never in hypertrophy)
-        if (!hypertrophyMode) {
+        // 2) Auxiliary — never for hypertrophy / strength / hybrid
+        if (!hypertrophyMode && !prefs.strengthPhase && auxCap > 0) {
             placeAuxiliarySessions(days, prefs);
         } else {
             stripAllAuxiliary(days);
@@ -1045,11 +1057,10 @@ export function buildWeeklyTrainingPlan(weekStartISO) {
 
     // Final hard caps — Aux ≤ 2 always (strip+verify); re-assert steady + lactate
     if (!timetablingOff) {
-        if (hypertrophyMode) {
+        if (hypertrophyMode || prefs.strengthPhase) {
             stripAllAuxiliary(days);
         } else {
             enforceAuxiliaryCap(days, 2);
-            // If soft-rest surgery wiped Aux below quota for band/gym separate mode, refill once
             if (countEventType(days, isAuxEvent) < auxCap && (prefs.band || prefs.attachMode === 'none')) {
                 placeAuxiliarySessions(days, prefs);
             }
@@ -1057,18 +1068,130 @@ export function buildWeeklyTrainingPlan(weekStartISO) {
         }
         ensureSteadySessions(days, steadyQuota);
         ensureLactateSessions(days, lactateQuota);
-        if (hypertrophyMode) stripAllAuxiliary(days);
+        if (hypertrophyMode || prefs.strengthPhase) stripAllAuxiliary(days);
         else enforceAuxiliaryCap(days, 2);
     }
     days.forEach(day => {
         if (day.events.length === 0) day.events = ['Rest'];
     });
 
+    // Prefer remaining steady slots onto pure rest days (never above weekly quota)
+    ensureSteadyOnRestDays(days, steadyQuota);
+
     // Sanity: never ship a plan with >2 Aux
     if (countEventType(days, isAuxEvent) > 2) enforceAuxiliaryCap(days, 2);
+    if (hypertrophyMode || prefs.strengthPhase) stripAllAuxiliary(days);
 
+    persistWeekStrengthTail(days);
     store._weekPlanCache = { key: cacheKey, plan: days };
     return days;
+}
+
+/** Keep hybrid weeks at strengthCount Strength + hypertrophyCount Hypertrophy events. */
+function trimHybridGymDays(days, strengthCount, hypertrophyCount) {
+    const sTarget = Math.min(4, Math.max(0, parseInt(strengthCount, 10) || 0));
+    const hTarget = Math.max(0, parseInt(hypertrophyCount, 10) || 0);
+
+    const strengthIdx = [];
+    const hypIdx = [];
+    for (let i = 0; i < days.length; i++) {
+        const ev = days[i].events || [];
+        const sPos = ev.findIndex(e => typeof e === 'string' && e.includes('Strength'));
+        const hPos = ev.findIndex(e => typeof e === 'string' && e.includes('Hypertrophy'));
+        if (sPos >= 0) strengthIdx.push(i);
+        else if (hPos >= 0) hypIdx.push(i);
+    }
+
+    while (strengthIdx.length > sTarget) {
+        const i = strengthIdx.pop();
+        const sPos = days[i].events.findIndex(e => typeof e === 'string' && e.includes('Strength'));
+        if (sPos >= 0) days[i].events.splice(sPos, 1);
+    }
+    while (hypIdx.length > hTarget) {
+        const i = hypIdx.pop();
+        const hPos = days[i].events.findIndex(e => typeof e === 'string' && e.includes('Hypertrophy'));
+        if (hPos >= 0) days[i].events.splice(hPos, 1);
+    }
+}
+
+/**
+ * Place hypertrophy sessions for hybrid weeks without overwriting Strength A/B days.
+ * Uses full-body hypertrophy templates when session count is low.
+ */
+function placeHybridHypertrophySessions(days, count) {
+    const target = Math.max(0, parseInt(count, 10) || 0);
+    if (target <= 0) return 0;
+
+    const hypPrefs = getHypertrophyPlanPrefs();
+    // Temporarily bias split by hypertrophy day count alone
+    const split = target <= 2 ? 'fb' : target <= 4 ? 'ul' : 'ppl';
+    void hypPrefs;
+
+    let hypIdx = [];
+    for (let i = 0; i < days.length; i++) {
+        const ev = days[i].events || [];
+        if (ev.some(e => typeof e === 'string' && e.includes('Hypertrophy'))) hypIdx.push(i);
+    }
+
+    while (hypIdx.length > target) {
+        const i = hypIdx.pop();
+        const hPos = days[i].events.findIndex(e => typeof e === 'string' && e.includes('Hypertrophy'));
+        if (hPos >= 0) days[i].events.splice(hPos, 1);
+    }
+
+    const rotation = split === 'ppl'
+        ? ['push', 'pull', 'legs']
+        : split === 'ul'
+            ? ['upper', 'lower']
+            : ['full'];
+    let rot = 0;
+
+    while (hypIdx.length < target) {
+        let best = -1;
+        let bestScore = -Infinity;
+        for (let i = 0; i < days.length; i++) {
+            if (hypIdx.includes(i)) continue;
+            const ev = days[i].events || [];
+            // Never place on Strength / Match / hard rest
+            if (ev.some(e => typeof e === 'string' && e.includes('Strength'))) continue;
+            if (ev.some(isGameEvent)) continue;
+            if (ev.some(e => e === 'Rest' || e === 'Cannot Workout')) continue;
+            const probe = hypertrophyEventForKind(rotation[rot % rotation.length]);
+            let s = scoreDayForPlacement(days, i, probe, { allowAdjacent: true, ignoreStrengthStreak: true });
+            if (s === -Infinity) continue;
+            let minDist = 99;
+            hypIdx.forEach(idx => { minDist = Math.min(minDist, Math.abs(idx - i)); });
+            // Also distance from strength days
+            for (let j = 0; j < days.length; j++) {
+                if ((days[j].events || []).some(e => typeof e === 'string' && e.includes('Strength'))) {
+                    minDist = Math.min(minDist, Math.abs(j - i));
+                }
+            }
+            s += (minDist < 99 ? minDist * 6 : 30);
+            if (s > bestScore) { bestScore = s; best = i; }
+        }
+        if (best < 0) break;
+        const kind = rotation[rot % rotation.length];
+        rot++;
+        if (!pushGPS(days[best], hypertrophyEventForKind(kind))) break;
+        hypIdx.push(best);
+        hypIdx.sort((a, b) => a - b);
+    }
+    return hypIdx.length;
+}
+
+/** Fill leftover steady quota on pure rest days only — never exceeds `quota` (default 2). */
+export function ensureSteadyOnRestDays(days, quota = 2) {
+    const target = Math.max(0, Number(quota) || 0);
+    let left = Math.max(0, target - countEventType(days, isSteadyCardio));
+    for (let i = 0; i < (days || []).length && left > 0; i++) {
+        const ev = days[i].events || [];
+        if (!ev.length) continue;
+        if (ev.some(isSteadyCardio)) continue;
+        if (!ev.every(isRestEvent)) continue;
+        days[i].events = ['Cardio (Steady)'];
+        left--;
+    }
 }
 
 export function getPlannedDayEvents(dateObj) {
@@ -1825,6 +1948,7 @@ export async function commitPracticeSession() {
         if (Array.isArray(added) && added.length) media = media.concat(added);
     } catch (e) { console.warn(e); }
     savePracticeJournalEntry(dateStr, { ...entry, notes, rpe, athletic: ath, mental: ment, hydration_ml: hydrationMl, type: 'practice', media });
+    try { calculateTDEE(); } catch (e) { /* ignore */ }
     if (hydrationMl > 0) recordHydrationMl(hydrationMl, 'practice', dateStr);
     resetJournalMedia();
     window._editingJournalExistingMedia = [];
@@ -1914,6 +2038,7 @@ export async function commitMatchSession() {
         if (Array.isArray(added) && added.length) media = media.concat(added);
     } catch (e) { console.warn(e); }
     saveMatchJournalEntry(dateStr, { ...entry, notes, rpe, athletic: ath, mental: ment, matchPerformance: matchPerf, hydration_ml: hydrationMl, media });
+    try { calculateTDEE(); } catch (e) { /* ignore */ }
     if (hydrationMl > 0) recordHydrationMl(hydrationMl, 'match', dateStr);
     resetJournalMedia();
     window._editingJournalExistingMedia = [];
@@ -2017,7 +2142,8 @@ export function openFuturePlan(dateStr, focus, totalCals, isoDate) {
     const exPanel = document.getElementById('day-plan-panel-exercise');
 
     if (foodPanel) {
-        foodPanel.innerHTML = buildMacroGoalBarsHtml(macros, planDate)
+        foodPanel.innerHTML = buildPlanSleepTargetHtml(planDate)
+            + buildMacroGoalBarsHtml(macros, planDate)
             + buildMealPlanCardsHtml({
                 tPro: macros.tPro,
                 tCarb: macros.tCarb,
@@ -2028,8 +2154,7 @@ export function openFuturePlan(dateStr, focus, totalCals, isoDate) {
     }
 
     if (exPanel) {
-        let sessionHtml = buildPlanSleepTargetHtml(planDate);
-        sessionHtml += buildDomainGoalBarsHtml(domains);
+        let sessionHtml = buildDomainGoalBarsHtml(domains);
         if (!slots.length || slots.every(s => isRestEvent(s.event))) {
             const restFocus = dayEvents.includes('Rest (Cardio Only)') ? 'Rest (Cardio Only)' : 'Rest';
             sessionHtml += buildPlainSessionCardHtml(restFocus, '');

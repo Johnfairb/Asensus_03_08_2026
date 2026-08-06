@@ -6,25 +6,33 @@ const SCHEMA_KEY = 'ascensus_diary_schema_v1';
 
 const DEFAULTS = {
   practice: [
-    { id: 'rpe', label: 'Session RPE (1-10)', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 triggers Lactate/HIT tracking)', min: 1, max: 10 },
-    { id: 'athletic', label: 'Athletic Performance', type: 'scale10', hint: '(1-10)', min: 1, max: 10 },
-    { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '(1-10)', min: 1, max: 10 },
+    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 triggers Lactate/HIT tracking)', min: 1, max: 10 },
+    { id: 'athletic', label: 'Athletic Performance', type: 'scale10', hint: '', min: 1, max: 10 },
+    { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '', min: 1, max: 10 },
     { id: 'hydration_ml', label: 'Hydration (ml)', type: 'quantitative', hint: 'Counts toward your daily hydration goal', min: 0, step: 50 }
   ],
   match: [
-    { id: 'rpe', label: 'Session RPE (1-10)', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 replaces a Lactate/HIT this week)', min: 1, max: 10 },
-    { id: 'athletic', label: 'Athletic Performance', type: 'scale10', hint: '(1-10)', min: 1, max: 10 },
-    { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '(1-10)', min: 1, max: 10 },
-    { id: 'matchPerformance', label: 'Match Performance', type: 'scale10', hint: 'How did you play overall? (1-10)', min: 1, max: 10 },
+    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 replaces a Lactate/HIT this week)', min: 1, max: 10 },
+    { id: 'athletic', label: 'Athletic Performance', type: 'scale10', hint: '', min: 1, max: 10 },
+    { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '', min: 1, max: 10 },
+    { id: 'matchPerformance', label: 'Match Performance', type: 'scale10', hint: 'How did you play overall?', min: 1, max: 10 },
     { id: 'hydration_ml', label: 'Hydration (ml)', type: 'quantitative', hint: 'Counts toward your daily hydration goal', min: 0, step: 50 }
   ],
   gym: [
-    { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '(1-10)', min: 1, max: 10 }
+    { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '', min: 1, max: 10 }
   ],
   lactate: [
-    { id: 'rpe', label: 'Session RPE (1-10)', type: 'scale10', hint: 'Rate the Lactate/HIT work. HIT class recovery uses this score.', min: 1, max: 10 }
+    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: 'Rate the Lactate/HIT work. HIT class recovery uses this score.', min: 1, max: 10 }
   ]
 };
+
+/** Strip "(1-10)" / "(1–10)" from titles — scale stays in the input placeholder. */
+function stripScaleFromLabel(label) {
+  return String(label || '')
+    .replace(/\s*[\(\[]\s*1\s*[-–]\s*10\s*[\)\]]\s*/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 
 function uid() {
   return `f_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -63,11 +71,14 @@ function normalizeField(f) {
     : (f.type === 'scale10' ? 'scale10' : 'quantitative');
   // Legacy: quantitative with max 10 / score labels → scale10
   if (type === 'quantitative' && (f.scale === '10' || f.scale10 === true)) type = 'scale10';
+  let hint = String(f.hint || '');
+  if (/^\s*[\(\[]?\s*1\s*[-–]\s*10\s*[\)\]]?\s*$/i.test(hint)) hint = '';
+  else hint = hint.replace(/\s*[\(\[]\s*1\s*[-–]\s*10\s*[\)\]]/gi, '').trim();
   const base = {
     id: String(f.id || uid()),
-    label: String(f.label || 'Field').trim() || 'Field',
+    label: stripScaleFromLabel(f.label || 'Field') || 'Field',
     type,
-    hint: String(f.hint || ''),
+    hint,
     min: f.min != null ? Number(f.min) : undefined,
     max: f.max != null ? Number(f.max) : undefined,
     step: f.step != null ? Number(f.step) : undefined
@@ -214,12 +225,12 @@ export function addDiaryField(mode, field = {}) {
   const type = field.type || 'quantitative';
   const labels = {
     qualitative: 'Notes field',
-    scale10: 'Score (1-10)',
+    scale10: 'Score',
     quantitative: 'Number'
   };
   const hints = {
     qualitative: '',
-    scale10: '(1-10)',
+    scale10: '',
     quantitative: 'Any number'
   };
   list.push(normalizeField({

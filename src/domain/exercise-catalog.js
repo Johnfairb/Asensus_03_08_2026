@@ -2,7 +2,8 @@
  * Canonical lifting + core exercise catalog (filming template 25/07/2026).
  * Region headings (PECS/LATS/…) are PDF-only and never used for logic or labels.
  * Movement-specific fields (laterality, dumbbell, grip) drive programming only.
- * Core entries are listed for the library but excluded from session programming.
+ * Core entries and machine leg presses/hack squat are listed for the library
+ * but excluded from session programming (hypertrophy + strength).
  */
 
 function ex(partial) {
@@ -113,15 +114,16 @@ export const EXERCISE_CATALOG = {
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Glute medius'],
         secondary: ['Calves', 'Adductors']
     }),
+    // Library only — not programmed for hypertrophy or strength
     'Leg Press': ex({
         domain: 'strength', movement: 'flexion', laterality: 'Bilateral', lateralityEither: true, role: 'compound',
-        muscle_group: 'quad', ppl: 'Legs',
+        muscle_group: 'quad', ppl: 'Legs', inProgramming: false,
         primary: ['Glute max', 'Quads', 'Hamstrings'],
         secondary: ['Calves', 'Adductors']
     }),
     'Wide Leg Press': ex({
         domain: 'strength', movement: 'flexion', laterality: 'Bilateral', lateralityEither: true, role: 'compound',
-        muscle_group: 'quad', ppl: 'Legs',
+        muscle_group: 'quad', ppl: 'Legs', inProgramming: false,
         primary: ['Glute max', 'Quads', 'Hamstrings', 'Adductors'],
         secondary: ['Calves']
     }),
@@ -132,9 +134,10 @@ export const EXERCISE_CATALOG = {
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Quads'], secondary: []
     }),
+    // Library only — not programmed for hypertrophy or strength
     'Hack Squat': ex({
         domain: 'lifting', movement: 'quad isolation', role: 'isolation',
-        muscle_group: 'quad', ppl: 'Legs',
+        muscle_group: 'quad', ppl: 'Legs', inProgramming: false,
         primary: ['Quads'], secondary: ['Calves', 'Hamstrings']
     }),
     'Calf Raise Machine': ex({

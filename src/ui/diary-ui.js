@@ -35,7 +35,8 @@ function hideLegacyBlocks() {
 
 function fieldTypeLabel(f) {
   if (f.type === 'qualitative') return 'Text';
-  if (f.type === 'scale10' || isTenPointScaleField(f)) return '1–10';
+  // Scale range lives in the input placeholder only — not in the title/badge
+  if (f.type === 'scale10' || isTenPointScaleField(f)) return '';
   return 'Number';
 }
 
@@ -56,8 +57,9 @@ export function renderDiaryFields(mode, prefillEntry = null) {
       ? `type="number" inputmode="decimal" ${min != null ? `min="${min}"` : ''} ${max != null ? `max="${max}"` : ''} ${f.step != null ? `step="${f.step}"` : 'step="any"'} ${tenScale ? 'data-diary-scale="10"' : ''}`
       : `type="text"`;
     const storeType = isText ? 'qualitative' : (tenScale ? 'scale10' : 'quantitative');
+    const typeBadge = fieldTypeLabel(f);
     html += `<div class="diary-field-block" style="margin-bottom:15px;">
-      <label style="margin-top:0;">${escapeHtml(f.label)} <span style="color:var(--text-stealth); font-weight:600; font-size:9px; text-transform:uppercase;">${fieldTypeLabel(f)}</span></label>
+      <label style="margin-top:0;">${escapeHtml(f.label)}${typeBadge ? ` <span style="color:var(--text-stealth); font-weight:600; font-size:9px; text-transform:uppercase;">${typeBadge}</span>` : ''}</label>
       ${f.hint ? `<div style="font-size:9px; color:var(--text-muted); margin-bottom:8px;">${escapeHtml(f.hint)}</div>` : ''}
       <input class="input-field" style="margin-bottom:0;" data-diary-field-id="${escapeHtml(f.id)}" data-diary-field-type="${storeType}" ${inputAttrs} placeholder="${isQuant ? (tenScale ? '1–10' : '0') : 'Type here…'}">
     </div>`;

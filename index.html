@@ -794,13 +794,16 @@
             </div>
             <select id="set-season-phase" class="input-field" onchange="onSeasonPhaseChange()">
                 <option value="OffSeason_Hypertrophy" selected>Standard: Hypertrophy (default)</option>
-                <option value="OffSeason_Strength">Off-Season: Strength (5x5)</option>
+                <option value="OffSeason_Strength">Standard: Strength</option>
+                <option value="OffSeason_Hybrid">Hybrid: Strength + Hypertrophy</option>
                 <option value="OffSeason_Adaptation">Off-Season: Adaptation</option>
                 <option value="PreSeason_Power">Pre-Season: Power & Plyo</option>
-                <option value="InSeason_Maintenance">In-Season: Maintenance</option>
             </select>
             <p id="strength-phase-disclaimer" class="hidden" style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin:-4px 0 12px 0; line-height:1.45;">
                 Strength phase should only be used after ~8 months of consistent training. Hypertrophy is recommended until then.
+            </p>
+            <p id="hybrid-phase-disclaimer" class="hidden" style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin:-4px 0 12px 0; line-height:1.45;">
+                Hybrid mixes strength and hypertrophy in one week. Focusing on one, then the other, is usually better than hybrid.
             </p>
 
             <label style="margin-top:14px;">Gym days willing / week</label>
@@ -813,6 +816,24 @@
                 <option value="5">5 — Push / Pull / Legs</option>
                 <option value="6">6 — Push / Pull / Legs</option>
             </select>
+
+            <div id="hybrid-split-block" class="hidden" style="margin: 10px 0 14px 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px;">
+                <div class="hud-label" style="margin:0 0 8px 0;">Hybrid split (strength : hypertrophy)</div>
+                <p style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; margin:0 0 10px 0; line-height:1.4;">
+                    Days must add up to your gym days willing. Strength days max 4.
+                </p>
+                <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:120px;">
+                        <label style="margin:0;">Strength days</label>
+                        <select id="set-hybrid-strength-days" class="input-field" onchange="onHybridSplitChange()"></select>
+                    </div>
+                    <div style="flex:1; min-width:120px;">
+                        <label style="margin:0;">Hypertrophy days</label>
+                        <select id="set-hybrid-hypertrophy-days" class="input-field" onchange="onHybridSplitChange()"></select>
+                    </div>
+                </div>
+                <p id="hybrid-split-hint" style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin:8px 0 0 0; line-height:1.4;"></p>
+            </div>
 
             <div id="aux-settings-block">
                 <label class="pill-toggle" style="margin: 8px 0 12px 0;">
@@ -1438,7 +1459,7 @@
                 <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform: uppercase; letter-spacing: 2px; margin:0;">Macro-Periodization</h2>
                 <button onclick="document.getElementById('periodization-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
             </div>
-            <p style="font-size: 10px; color:var(--text-muted); margin-bottom:15px; font-family:'Roboto Mono', monospace;">Set your calendar. The GPS will automatically shift you through Adaptation, Strength, Power, and Maintenance phases.</p>
+            <p style="font-size: 10px; color:var(--text-muted); margin-bottom:15px; font-family:'Roboto Mono', monospace;">Set your calendar. The GPS will automatically shift you through Adaptation, Strength, Power, then Hypertrophy in-season.</p>
             
             <label style="margin-top:0;">Off-Season Start (Adaptation & Strength)</label>
             <input type="date" id="date-offseason" class="input-field" style="color-scheme: dark;">
@@ -1446,7 +1467,7 @@
             <label style="margin-top:0;">Pre-Season Start (Power & Plyo)</label>
             <input type="date" id="date-preseason" class="input-field" style="color-scheme: dark;">
             
-            <label style="margin-top:0;">In-Season / Trials (Maintenance)</label>
+            <label style="margin-top:0;">In-Season / Trials (Hypertrophy)</label>
             <input type="date" id="date-inseason" class="input-field" style="color-scheme: dark;">
             
             <button class="btn-primary" style="margin-top:10px; border-color: var(--gold-accent); color: var(--gold-accent);" onclick="saveSeasonDates()">Lock In Calendar</button>

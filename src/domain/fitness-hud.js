@@ -10,7 +10,7 @@ import {
     isHypertrophyFocus,
     isHypertrophyPhase
 } from './hypertrophy-engine.js';
-import { persistUserConfigToCloud } from './thermodynamics.js';
+import { explainDayNutritionTargets, persistUserConfigToCloud } from './thermodynamics.js';
 import { DAILY_HYDRATION_TARGET_L } from '../config/constants.js';
 import { estimateFoodWaterMl, getHydrationLitersForDate, parseFoodLogDetails } from '../lib/food-parse.js';
 import { computeDomainBarLayout, formatDomainAimLabel, getMacroRange } from '../lib/macro-range.js';
@@ -79,23 +79,27 @@ export function getTodayFocus() {
                 descEl.innerText = "Lactate/HIT session (~45 min). 10 min HIT — search type(s) when you start.";
             }
         }
-        else if (focus === 'Auxiliary' && !isHypertrophyPhase()) {
+        else if (focus === 'Auxiliary' && !isHypertrophyPhase() && !getGymPlanPrefs().strengthPhase) {
             const bandOn = !!(typeof getGymPlanPrefs === 'function' ? getGymPlanPrefs().band : store.userConfig.bandAuxiliary);
             descEl.innerText = bandOn
                 ? "Band auxiliary — resistance-band prehab & weak-point work (no machines required)."
                 : "Prehab, weak points, and joint integrity.";
         }
+        else if (focus === 'Auxiliary') {
+            descEl.innerText = "No auxiliary in this phase — use Strength or Hypertrophy gym days instead.";
+        }
         else if (isHypertrophyFocus(focus) || (isHypertrophyPhase() && isStrengthFocus(focus))) {
             const built = getHypertrophySessionRoutine(focus);
             descEl.innerText = `Hypertrophy — ${built.label || 'session'}. Stick to rest times so the session finishes on schedule.`;
         }
-        else if (isStrengthFocus(focus)) {
+        else if (isStrengthFocus(focus) && !isHypertrophyFocus(focus)) {
             const sess = resolveStrengthSession(focus) || 'A';
-            const withAux = !isHypertrophyPhase() && (window.todayRouteEvents || []).some(isAuxEvent);
-            descEl.innerText = (sess === 'A'
-                ? "Strength Session A — Hinge, Upper Push, Lower Pull, Unilateral Flexion."
-                : "Strength Session B — Bilateral Flexion, Upper Pull, Lower Push, Core.")
-                + (withAux ? " Auxiliary finisher attached." : "");
+            const built = buildStrengthSessionRoutine(focus, SPORT_MATRIX[store.userConfig.sport] || SPORT_MATRIX.None);
+            const compounds = (built.items || []).filter(i => i.isStrengthCompound).length;
+            const hasCore = (built.items || []).some(i => i.isCoreBlock);
+            descEl.innerText = `Strength Session ${sess} — ${compounds} compounds, 2 isolations`
+                + (hasCore ? ', core circuit' : '')
+                + `. Monthly picks locked · ~${built.timeTier || 90} min.`;
         }
         else descEl.innerText = "Mechanical Load Protocol.";
     }
@@ -1019,19 +1023,21 @@ export function getWorkoutExerciseRows(focus) {
             })))
         };
     }
-    if (focus === 'Full Body / Strength' || isStrengthFocus(focus)) {
+    if ((focus === 'Full Body / Strength' || (isStrengthFocus(focus) && !isHypertrophyFocus(focus)))) {
         const prefs = getGymPlanPrefs();
         const built = buildStrengthSessionRoutine(focus, sportData, prefs.setBudget);
-        let exercises = built.items.map(i => ({
-            name: i.name,
-            sets: i.setsOverride || i.sets
-        }));
-        if (!isHypertrophyPhase() && prefs.attachMode !== 'none' && prefs.auxCount > 0) {
-            exercises.push({
-                name: prefs.attachMode === 'half' ? 'Half Auxiliary finisher' : 'Auxiliary finisher',
-                sets: 2
-            });
-        }
+        let exercises = built.items.map(i => {
+            if (i.isCoreBlock) {
+                return {
+                    name: `Core Circuit (${(i.coreExercises || []).length}×20)`,
+                    sets: i.setsOverride || i.sets
+                };
+            }
+            return {
+                name: i.name,
+                sets: i.setsOverride || i.sets
+            };
+        });
         return {
             sessionType: 'Workout',
             sessionName: `Strength Session ${built.session}`,
@@ -1049,7 +1055,7 @@ export function getWorkoutExerciseRows(focus) {
             ].map(n => ({ name: n, sets: PERIODIZATION[getSeasonPhase()]?.sets || 3 })))
         };
     }
-    if ((focus === 'Auxiliary' || isAuxEvent(focus)) && !isHypertrophyPhase()) {
+    if ((focus === 'Auxiliary' || isAuxEvent(focus)) && !isHypertrophyPhase() && !getGymPlanPrefs().strengthPhase) {
         const bandOn = !!(typeof getGymPlanPrefs === 'function' ? getGymPlanPrefs().band : store.userConfig.bandAuxiliary);
         return {
             sessionType: 'Auxiliary',
@@ -1057,6 +1063,13 @@ export function getWorkoutExerciseRows(focus) {
             exercises: withPhaseReps(bandOn
                 ? ['Band Pull-Aparts', 'Band Monster Walks', 'Band Pallof Press'].map(n => ({ name: n, sets: 3 }))
                 : ['Prehab & Joint Integrity', 'Core Stability', 'Rotator Cuff Work'].map(n => ({ name: n })))
+        };
+    }
+    if ((focus === 'Auxiliary' || isAuxEvent(focus))) {
+        return {
+            sessionType: 'Rest',
+            sessionName: 'No auxiliary',
+            exercises: [{ name: 'This phase has no auxiliary sessions' }]
         };
     }
     return {
@@ -1263,8 +1276,48 @@ export function showBreakdown(type) {
         return;
     }
 
+    const listEl = document.getElementById('macro-breakdown-list');
+    const titleEl = document.getElementById('macro-breakdown-title');
+    const subEl = document.getElementById('macro-breakdown-subtitle');
+    const sheet = document.getElementById('macro-breakdown-sheet');
+    if (!listEl || !sheet) return;
+
+    // Calories: only what sets the aim (not food eaten)
+    if (type === 'cals') {
+        if (titleEl) titleEl.textContent = 'Calories';
+        try {
+            const explained = explainDayNutritionTargets(new Date());
+            const range = getMacroRange('cals', explained.targetCals || store.userConfig.targets?.cals || 0);
+            if (subEl) {
+                subEl.textContent = `Aim ${Math.round(range.min)}–${Math.round(range.max)} kcal`;
+            }
+            let html = `<div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:10px;">What sets today’s calorie aim</div>
+                <div class="macro-breakdown-row">
+                    <span class="macro-breakdown-name">BMR</span>
+                    <span class="macro-breakdown-val">${explained.bmr} kcal</span>
+                </div>`;
+            (explained.factors || []).forEach(f => {
+                html += `<div class="macro-breakdown-row">
+                    <span class="macro-breakdown-name">${f.label}</span>
+                    <span class="macro-breakdown-val">${f.detail}</span>
+                </div>`;
+            });
+            html += `<div class="macro-breakdown-row" style="margin-top:6px;">
+                    <span class="macro-breakdown-name" style="font-weight:700; color:var(--text-main);">Today’s aim</span>
+                    <span class="macro-breakdown-val" style="font-weight:700; color:var(--gold-accent);">${explained.targetCals} kcal</span>
+                </div>
+                <p style="font-size:11px; color:var(--text-muted); margin:10px 0 0; line-height:1.4;">${explained.note}</p>`;
+            listEl.innerHTML = html;
+        } catch (e) {
+            listEl.innerHTML = `<p style="font-size:13px; color:var(--text-silver); margin:12px 0 0;">Could not load calorie aim factors.</p>`;
+            if (subEl) subEl.textContent = '';
+        }
+        sheet.classList.remove('hidden');
+        return;
+    }
+
     // Nutrition: bottom sheet with per-food contributions
-    const titles = { cals: 'Calories', pro: 'Protein', carb: 'Carbs', fat: 'Fat', cost: 'Cost', water: 'Hydration' };
+    const titles = { pro: 'Protein', carb: 'Carbs', fat: 'Fat', cost: 'Cost', water: 'Hydration' };
     const title = titles[type] || type.toUpperCase();
     const todayFoods = (store.globalGroupedHistory[todayStr] && store.globalGroupedHistory[todayStr].items)
         ? store.globalGroupedHistory[todayStr].items.filter(i => i.type === 'food')
@@ -1273,21 +1326,37 @@ export function showBreakdown(type) {
     const contribMap = {};
     todayFoods.forEach(log => {
         let items = [];
-        try { items = parseFoodLogDetails(log.food_details).items; } catch (e) { return; }
+        let parsedOk = false;
+        try {
+            items = parseFoodLogDetails(log.food_details).items || [];
+            parsedOk = true;
+        } catch (e) { items = []; }
+        let detailSum = 0;
         items.forEach(item => {
             if (!item.food) return;
             const m = item.mass / 100;
             let val = 0;
-            if (type === 'cals') val = (item.food.protein_per_100g * 4 * m) + (item.food.carbs_per_100g * 4 * m) + (item.food.fat_per_100g * 9 * m);
             if (type === 'pro') val = item.food.protein_per_100g * m;
             if (type === 'carb') val = item.food.carbs_per_100g * m;
             if (type === 'fat') val = item.food.fat_per_100g * m;
             if (type === 'cost') val = (item.food.price_per_100g || 0) * m;
             if (type === 'water') val = estimateFoodWaterMl(item.food, item.mass) / 1000;
             if (val <= 0) return;
+            detailSum += val;
             const name = item.food._cleanName || item.food.name || 'Food';
             contribMap[name] = (contribMap[name] || 0) + val;
         });
+        // Fallback so sheet totals match the Goals bar (stored log columns)
+        if (type === 'pro' || type === 'carb' || type === 'fat' || type === 'cost') {
+            const stored = type === 'pro' ? Number(log.protein)
+                : type === 'carb' ? Number(log.carbs)
+                : type === 'fat' ? Number(log.fat)
+                : Number(log.cost);
+            if ((!parsedOk || detailSum <= 0) && Number.isFinite(stored) && stored > 0) {
+                const mealName = log.meal_name || 'Logged meal';
+                contribMap[mealName] = (contribMap[mealName] || 0) + stored;
+            }
+        }
     });
 
     const rows = Object.entries(contribMap)
@@ -1298,7 +1367,12 @@ export function showBreakdown(type) {
         if (manualL > 0) rows.push({ name: 'Manual drinks', val: manualL });
         rows.sort((a, b) => b.val - a.val);
     }
-    const total = rows.reduce((s, r) => s + r.val, 0);
+    // Prefer live dashboard totals so the sheet matches the bar above
+    let total = rows.reduce((s, r) => s + r.val, 0);
+    if (type === 'pro' && store.consumedToday?.pro != null) total = Number(store.consumedToday.pro) || total;
+    else if (type === 'carb' && store.consumedToday?.carb != null) total = Number(store.consumedToday.carb) || total;
+    else if (type === 'fat' && store.consumedToday?.fat != null) total = Number(store.consumedToday.fat) || total;
+    else if (type === 'cost' && store.consumedToday?.cost != null) total = Number(store.consumedToday.cost) || total;
 
     let subtitle = '';
     if (type === 'cost') {
@@ -1321,37 +1395,30 @@ export function showBreakdown(type) {
         const left = Math.max(0, range.min - waterTotal);
         subtitle = `${waterTotal.toFixed(1)} L · aim ${range.min.toFixed(1)}–${range.max.toFixed(1)}`;
         if (waterTotal < range.min && left > 0) subtitle += ` · ${left.toFixed(1)} left`;
-    } else if (type !== 'cals' && type !== 'pro' && type !== 'carb' && type !== 'fat') {
+    } else if (type !== 'pro' && type !== 'carb' && type !== 'fat') {
         subtitle = '';
     } else {
         const target = store.userConfig.targets?.[type] || 0;
         const range = getMacroRange(type, target);
-        const unit = type === 'cals' ? 'kcal' : 'g';
         const left = Math.max(0, Math.round(range.min - total));
-        subtitle = `${Math.round(total)} ${unit} · aim ${Math.round(range.min)}–${Math.round(range.max)}`;
+        subtitle = `${Math.round(total)} g · aim ${Math.round(range.min)}–${Math.round(range.max)}`;
         if (total < range.min && left > 0) subtitle += ` · ${left} left`;
     }
-
-    const listEl = document.getElementById('macro-breakdown-list');
-    const titleEl = document.getElementById('macro-breakdown-title');
-    const subEl = document.getElementById('macro-breakdown-subtitle');
-    const sheet = document.getElementById('macro-breakdown-sheet');
-    if (!listEl || !sheet) return;
 
     if (titleEl) titleEl.textContent = title;
     if (subEl) subEl.textContent = subtitle;
 
+    let html = '';
     if (rows.length === 0) {
         const emptyMsg = type === 'water'
             ? 'No food moisture or drinks logged today.'
             : 'No foods logged today.';
-        listEl.innerHTML = `<p style="font-size:13px; color:var(--text-silver); margin:12px 0 0;">${emptyMsg}</p>`;
+        html = `<p style="font-size:13px; color:var(--text-silver); margin:12px 0 0;">${emptyMsg}</p>`;
     } else {
-        listEl.innerHTML = rows.map(r => {
+        html = rows.map(r => {
             const pct = total > 0 ? Math.round((r.val / total) * 100) : 0;
             let amount;
             if (type === 'cost') amount = `£${r.val.toFixed(2)}`;
-            else if (type === 'cals') amount = `${Math.round(r.val)} kcal`;
             else if (type === 'water') amount = `${r.val.toFixed(2)} L`;
             else amount = `${Math.round(r.val)} g`;
             return `<div class="macro-breakdown-row">
@@ -1361,6 +1428,7 @@ export function showBreakdown(type) {
         }).join('');
     }
 
+    listEl.innerHTML = html;
     sheet.classList.remove('hidden');
 }
 
@@ -1368,8 +1436,8 @@ export const PERIODIZATION = {
     OffSeason_Adaptation: { reps: 50, sets: 1, rest_sec: 60, notes: "ADAPTATION: Target 50 total reps (Min 35 per set). Very light weight — a load you could grind for 50 clean reps. Strengthen tendons." },
     OffSeason_Hypertrophy: { reps: 10, sets: 3, rest_sec: 90, notes: "HYPERTROPHY: 8-12 reps · ~90s rest (stick to the timer so session length stays accurate). Stop ~1–2 RIR on work sets." },
     OffSeason_Strength: { reps: 5, sets: 4, rest_sec: 240, notes: "STRENGTH: Stop 2 reps before failure. Heavy, slow eccentric and concentric. NO STRAPS." },
-    PreSeason_Power: { reps: 3, sets: 3, rest_sec: 240, notes: "POWER: Maximum intent. Explosive concentric. Must be completely fresh." },
-    InSeason_Maintenance: { reps: 5, sets: 3, rest_sec: 120, notes: "MAINTENANCE: Maintain mechanics. Perfect form. Avoid failure entirely." }
+    OffSeason_Hybrid: { reps: 5, sets: 4, rest_sec: 240, notes: "HYBRID: Strength days use strength loading; hypertrophy days use hypertrophy templates." },
+    PreSeason_Power: { reps: 3, sets: 3, rest_sec: 240, notes: "POWER: Maximum intent. Explosive concentric. Must be completely fresh." }
 };
 
 /** Visible periodization select is source of truth so UI and workouts stay aligned. */
@@ -1379,8 +1447,12 @@ export function getSeasonPhase() {
         if (store.userConfig.seasonPhase !== sel.value) store.userConfig.seasonPhase = sel.value;
         return sel.value;
     }
-    const phase = store.userConfig.seasonPhase || 'OffSeason_Hypertrophy';
-    return PERIODIZATION[phase] ? phase : 'OffSeason_Hypertrophy';
+    let phase = store.userConfig.seasonPhase || 'OffSeason_Hypertrophy';
+    if (phase === 'InSeason_Maintenance' || !PERIODIZATION[phase]) {
+        phase = 'OffSeason_Hypertrophy';
+        store.userConfig.seasonPhase = phase;
+    }
+    return phase;
 }
 
 export function isGuidanceOff(kind) {
@@ -1483,9 +1555,8 @@ export function openCoachesNotesModal() {
 /** 1RM → working load by phase. Adaptation ≈ weight you can do for ~50 reps. */
 export function getPhaseLoadMultiplier(phaseStr) {
     if (phaseStr === 'OffSeason_Adaptation') return 0.25;
-    if (phaseStr === 'OffSeason_Strength') return 0.80;
+    if (phaseStr === 'OffSeason_Strength' || phaseStr === 'OffSeason_Hybrid') return 0.80;
     if (phaseStr === 'OffSeason_Hypertrophy') return 0.65;
     if (phaseStr === 'PreSeason_Power') return 0.55;
-    if (phaseStr === 'InSeason_Maintenance') return 0.70;
     return 0.65;
 }
