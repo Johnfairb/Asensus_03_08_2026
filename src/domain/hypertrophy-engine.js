@@ -567,13 +567,13 @@ export function clearHypertrophyDayPlanCache() {
 }
 
 /**
- * Stable hypertrophy routine for the ~4-week cycle — same picks until cycle decision.
+ * Stable hypertrophy routine for the monthly cycle — same picks until cycle decision.
  */
 export function getHypertrophySessionRoutine(focus, date = new Date()) {
     const kind = resolveHypertrophySessionKind(focus) || 'full';
     const sessionTypeId = `hyp_${kind}`;
 
-    // Prefer locked cycle plan (keep / custom / generated for this block)
+    // Prefer locked cycle plan (keep / custom / confirmed / generated for this month)
     try {
         const plans = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}');
         const locked = plans && plans[sessionTypeId];
@@ -587,14 +587,42 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
                 split: prefs.split,
                 items: locked.items.map((it) => ({
                     name: it.exercise?.name || it.name,
+                    slotLabel: it.slotLabel || null,
                     notes: it.notes || 'Custom cycle workout',
                     sets: (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText).length || it.plannedSets || 3,
                     isIsolation: !!(it.isIsolation),
+                    isExtra: !!it.isExtra,
                     isSuperset: !!it.isSuperset,
                     sides: it.sides
                 })).filter((it) => it.name),
-                note: 'Hypertrophy · custom workout for this cycle',
+                note: 'Hypertrophy · custom workout for this month',
                 source: 'custom'
+            };
+            window.currentHypertrophySession = plan;
+            return plan;
+        }
+        if (locked?.exercisesConfirmed && Array.isArray(locked.lockedItems) && locked.lockedItems.length) {
+            const prefs = getHypertrophyPlanPrefs();
+            const plan = {
+                kind,
+                label: HYPERTROPHY_DISPLAY_LABELS[HYPERTROPHY_EVENT_TYPES[kind]] || kind,
+                tier: prefs.maxTime,
+                maxTime: prefs.maxTime,
+                split: prefs.split,
+                items: locked.lockedItems
+                    .filter((it) => it && (it.exercise?.name || it.name) && !it.isWarmupGroup && !it.isStretchGroup)
+                    .map((it) => ({
+                        name: it.exercise?.name || it.name,
+                        slotLabel: it.slotLabel || null,
+                        notes: it.note || it.notes || '',
+                        sets: (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText).length || it.plannedSets || 3,
+                        isIsolation: !!it.isIsolation,
+                        isExtra: !!it.isExtra,
+                        isSuperset: !!it.isSuperset,
+                        sides: it.sides
+                    })),
+                note: 'Hypertrophy · confirmed for this month',
+                source: 'confirmed'
             };
             window.currentHypertrophySession = plan;
             return plan;

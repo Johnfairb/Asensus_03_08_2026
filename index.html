@@ -1155,6 +1155,7 @@
         </div>
         <div id="tools-menu" class="card hidden" style="margin-top: 16px; padding: 16px; border-style: dashed;">
             <select id="select-food" class="input-field" style="font-size: 13px; padding: 12px; margin-bottom: 12px; display:none;"><option value="">+ Manual Food...</option></select>
+            <button type="button" id="btn-open-add-exercises" class="btn-primary is-secondary" style="margin:0 0 12px 0; width:100%; font-size:12px; display:none;" onclick="openAddExercisesModal()">+ Add exercises</button>
             <select id="select-exercise" class="input-field" style="font-size: 13px; padding: 12px; margin-bottom: 12px; display:none;"><option value="">+ Manual Exercise...</option></select>
             <div style="display: flex; gap: 10px;"><button class="btn-primary" style="margin:0; padding: 12px; font-size: 11px; flex: 1;" onclick="manualAdd()">Add Item</button><button class="btn-primary" style="margin:0; padding: 12px; font-size: 11px; flex: 1; border-color: #555; color: #aaa;" onclick="applyUserTemplate()">Load Saved</button><button class="btn-primary" style="margin:0; padding: 12px; font-size: 11px; flex: 1; border-color: var(--gold-accent); color: var(--gold-accent);" onclick="saveCurrentAsTemplate()">Save Named</button>
 <button class="btn-icon" style="margin:0; padding: 0 12px; font-size: 14px; flex: 0.5; border-color: var(--gold-accent); color: var(--gold-accent);" onclick="shareActiveRoute()" title="Share Route">
@@ -1889,7 +1890,7 @@
                 </div>
             </div>
             <div id="sets-modal-swap-wrap" style="margin-bottom: 16px; display: none;">
-                <label id="sets-modal-swap-label" style="margin-top:0;">Swap for equivalent (same muscle group)</label>
+                <label id="sets-modal-swap-label" style="margin-top:0;">Swap for equivalent (same slot)</label>
                 <select id="sets-modal-swap-select" class="input-field" style="margin-bottom:8px;" onchange="swapExerciseInLog(this.value)"></select>
             </div>
             <div id="sets-modal-cardio-type-wrap" style="margin-bottom: 16px; display: none;">
@@ -1906,6 +1907,23 @@
         </div>
     </div>
 
+
+    <div id="add-exercises-modal" class="hidden" style="position:fixed;inset:0;z-index:2200;background:rgba(0,0,0,0.55);display:flex;justify-content:center;align-items:flex-end;padding:0;" onclick="if(event.target===this)closeAddExercisesModal()">
+        <div class="modal-content stealth-panel" style="width:100%;max-width:430px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;border-radius:16px 16px 0 0;margin:0;" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 8px;">
+                <div>
+                    <div style="font-family:'Roboto Mono';font-size:10px;color:var(--gold-accent);font-weight:800;letter-spacing:1px;text-transform:uppercase;">My Exercises</div>
+                    <h2 style="color:var(--text-main);margin:4px 0 0;font-family:'Roboto Mono';font-size:16px;text-transform:uppercase;letter-spacing:1px;">Add exercises</h2>
+                </div>
+                <button type="button" onclick="closeAddExercisesModal()" style="background:none;border:none;color:var(--text-stealth);font-size:28px;cursor:pointer;line-height:1;">&times;</button>
+            </div>
+            <p style="font-size:11px;color:var(--text-muted);padding:0 16px 10px;margin:0;line-height:1.45;">Select one or more exercises under each muscle group heading.</p>
+            <div id="add-exercises-list" style="flex:1;overflow-y:auto;padding:0 16px 16px;"></div>
+            <div style="padding:12px 16px 20px;border-top:1px solid var(--border-subtle);">
+                <button type="button" class="btn-primary is-primary" style="margin:0;width:100%;" onclick="confirmAddExercisesModal()">Add selected</button>
+            </div>
+        </div>
+    </div>
 
     <div class="iphone-home-indicator" aria-hidden="true"></div>
   </div>

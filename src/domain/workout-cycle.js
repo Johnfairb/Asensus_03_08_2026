@@ -1,8 +1,16 @@
 /**
- * Fixed ~4-week workout cycle for strength + hypertrophy session types.
- * Starts on first gym session; ends on the Sunday on/after day 28.
- * On that Sunday the user chooses change / keep / custom per session type.
+ * Monthly workout cycle for strength + hypertrophy session types.
+ * Anchor = onboarding / payment day; rolls on the same calendar day each month.
+ * On/after anniversary the user chooses change / keep / custom per session type.
  */
+import {
+    getBillingPeriodForDate,
+    ensureMonthAnchor,
+    dateToISO,
+    anniversaryAfter,
+    getAnchorDayOfMonth,
+    parseISODate
+} from './billing-month.js';
 import { getGymPlanPrefs, isHybridPhase, isStrengthPhase, loadStrengthMonthPlan, saveStrengthMonthPlan, rebuildStrengthSessionInPlan } from './strength-engine.js';
 import {
     buildHypertrophySessionRoutine,
@@ -12,23 +20,11 @@ import {
     HYPERTROPHY_DISPLAY_LABELS
 } from './hypertrophy-engine.js';
 
+// Re-export date helpers used by other modules
+export { dateToISO, parseISODate } from './billing-month.js';
+
 const CYCLE_KEY = 'ascensus_workout_cycle_v1';
 const PLANS_KEY = 'ascensus_cycle_session_plans_v1';
-
-export function dateToISO(d = new Date()) {
-    const x = d instanceof Date ? d : new Date(d);
-    const y = x.getFullYear();
-    const m = String(x.getMonth() + 1).padStart(2, '0');
-    const day = String(x.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-}
-
-export function parseISODate(iso) {
-    if (!iso || typeof iso !== 'string') return null;
-    const [y, m, d] = iso.split('-').map(Number);
-    if (!y || !m || !d) return null;
-    return new Date(y, m - 1, d);
-}
 
 export function addDaysISO(iso, days) {
     const d = parseISODate(iso);
@@ -37,28 +33,27 @@ export function addDaysISO(iso, days) {
     return dateToISO(d);
 }
 
-/** Next Sunday on or after the given date (inclusive). */
-export function sundayOnOrAfterISO(iso) {
-    const d = parseISODate(iso);
-    if (!d) return null;
-    const day = d.getDay();
-    if (day !== 0) d.setDate(d.getDate() + (7 - day));
-    return dateToISO(d);
+/** @deprecated Sunday snap removed — kept as alias of period endDate for callers. */
+export function computeCycleEndSunday(startISO) {
+    return computeCycleEndDate(startISO);
 }
 
-/** End Sunday = Sunday on/after (start + 28 days). */
-export function computeCycleEndSunday(startISO) {
-    const day28 = addDaysISO(startISO, 28);
-    return sundayOnOrAfterISO(day28);
+/** Next monthly anniversary after start (billing period end / decision day). */
+export function computeCycleEndDate(startISO) {
+    const anchor = ensureMonthAnchor(parseISODate(startISO) || new Date());
+    const day = getAnchorDayOfMonth(anchor);
+    return anniversaryAfter(startISO, day);
 }
 
 export function loadCycleState() {
     try {
         const raw = JSON.parse(localStorage.getItem(CYCLE_KEY) || 'null');
         if (!raw || typeof raw !== 'object') return null;
+        const endDate = raw.endDate || raw.endSunday || null;
         return {
             startDate: raw.startDate || null,
-            endSunday: raw.endSunday || null,
+            endDate,
+            endSunday: endDate, // back-compat alias
             decisionsResolved: !!raw.decisionsResolved,
             pendingDecisions: raw.pendingDecisions && typeof raw.pendingDecisions === 'object' ? raw.pendingDecisions : {}
         };
@@ -69,7 +64,13 @@ export function loadCycleState() {
 
 export function saveCycleState(state) {
     try {
-        localStorage.setItem(CYCLE_KEY, JSON.stringify(state));
+        const toSave = {
+            startDate: state.startDate || null,
+            endDate: state.endDate || state.endSunday || null,
+            decisionsResolved: !!state.decisionsResolved,
+            pendingDecisions: state.pendingDecisions && typeof state.pendingDecisions === 'object' ? state.pendingDecisions : {}
+        };
+        localStorage.setItem(CYCLE_KEY, JSON.stringify(toSave));
     } catch (e) { /* ignore */ }
 }
 
@@ -99,28 +100,33 @@ export function setCyclePlan(sessionTypeId, plan) {
     saveCyclePlans(plans);
 }
 
-/** Start a cycle on first gym session if none is active. */
+/**
+ * Start / resume the monthly cycle from the onboarding (billing) anchor.
+ */
 export function ensureCycleStarted(date = new Date()) {
+    ensureMonthAnchor(date);
     let state = loadCycleState();
-    const today = dateToISO(date);
-    if (state?.startDate && state?.endSunday && !state.decisionsResolved) {
+    const period = getBillingPeriodForDate(date);
+
+    if (state?.startDate && state?.endDate && !state.decisionsResolved) {
+        // Migrate period bounds if we're still in an active block but endDate drifted
         return state;
     }
-    if (state?.startDate && state?.endSunday && state.decisionsResolved) {
-        // Waiting for next cycle start after decisions — begin new block
-        const start = today;
+
+    if (state?.startDate && state?.endDate && state.decisionsResolved) {
         state = {
-            startDate: start,
-            endSunday: computeCycleEndSunday(start),
+            startDate: period.startDate,
+            endDate: period.endDate,
             decisionsResolved: false,
             pendingDecisions: {}
         };
         saveCycleState(state);
         return state;
     }
+
     state = {
-        startDate: today,
-        endSunday: computeCycleEndSunday(today),
+        startDate: period.startDate,
+        endDate: period.endDate,
         decisionsResolved: false,
         pendingDecisions: {}
     };
@@ -128,17 +134,18 @@ export function ensureCycleStarted(date = new Date()) {
     return state;
 }
 
-/** True when the cycle has ended and Sunday choices are still outstanding. */
+/** True when the monthly anniversary has arrived and choices are still outstanding. */
 export function needsCycleDecisions(date = new Date()) {
     const state = loadCycleState();
-    if (!state?.startDate || !state?.endSunday) return false;
+    if (!state?.startDate || !state?.endDate) return false;
     if (state.decisionsResolved) return false;
     const today = dateToISO(date);
-    return today >= state.endSunday;
+    return today >= state.endDate;
 }
 
+/** @deprecated Sunday no longer special — alias of needsCycleDecisions. */
 export function isCycleDecisionSunday(date = new Date()) {
-    return date.getDay() === 0 && needsCycleDecisions(date);
+    return needsCycleDecisions(date);
 }
 
 /**
@@ -226,7 +233,8 @@ function snapshotStrengthSession(session) {
         isolations,
         coreSession: plan.coreSession,
         coreExercises: plan.coreExercises || [],
-        strengthPlan: plan
+        strengthPlan: plan,
+        exercisesConfirmed: false
     };
 }
 
@@ -237,8 +245,167 @@ function snapshotHypertrophyKind(hypKind) {
         source: 'generated',
         family: 'hypertrophy',
         hypKind,
-        plan: built
+        plan: built,
+        exercisesConfirmed: false
     };
+}
+
+/** True when this session type still needs the swap-and-confirm flow. */
+export function sessionNeedsExerciseConfirm(sessionTypeId) {
+    if (!sessionTypeId) return false;
+    const plan = getCyclePlan(sessionTypeId);
+    if (!plan) return true;
+    if (plan.source === 'kept' || plan.source === 'custom') return false;
+    if (plan.exercisesConfirmed) return false;
+    return true;
+}
+
+/**
+ * Lock ghost items (programmed + pre-confirm extras) for the rest of the month.
+ */
+export function confirmSessionExercises(sessionTypeId, ghostItems) {
+    if (!sessionTypeId) return null;
+    const plans = loadCyclePlans();
+    const prev = plans[sessionTypeId] || { source: 'generated', family: sessionTypeId.startsWith('strength') ? 'strength' : 'hypertrophy' };
+    const items = Array.isArray(ghostItems) ? JSON.parse(JSON.stringify(ghostItems)) : [];
+
+    const next = {
+        ...prev,
+        exercisesConfirmed: true,
+        confirmedAt: dateToISO(new Date()),
+        lockedItems: items,
+        source: prev.source === 'custom' ? 'custom' : (prev.source === 'kept' ? 'kept' : 'confirmed')
+    };
+
+    // Keep hypertrophy `.plan.items` in sync for generators that read plan
+    if (next.family === 'hypertrophy' || sessionTypeId.startsWith('hyp_')) {
+        const mapped = items
+            .filter((it) => it && it.exercise?.name && !it.isWarmupGroup && !it.isStretchGroup && !it.isSportSessionBlock)
+            .map((it) => ({
+                name: it.exercise.name,
+                slotLabel: it.slotLabel || null,
+                notes: it.note || it.notes || '',
+                sets: (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText).length || it.plannedSets || 3,
+                isIsolation: !!it.isIsolation,
+                isExtra: !!it.isExtra,
+                isSuperset: !!it.isSuperset,
+                sides: it.sides
+            }));
+        next.plan = {
+            ...(next.plan || {}),
+            items: mapped,
+            source: 'confirmed'
+        };
+        next.family = 'hypertrophy';
+    }
+
+    if (next.family === 'strength' || sessionTypeId.startsWith('strength_')) {
+        next.family = 'strength';
+        // Update shared strength month compound picks from locked compounds
+        try {
+            const strengthPlan = loadStrengthMonthPlan();
+            if (strengthPlan) {
+                const STRENGTH_LABEL_TO_ID = {
+                    'Bilateral Posterior': 'bilateral_posterior',
+                    'Bilateral Anterior': 'bilateral_anterior',
+                    'Unilateral Legs': 'unilateral_legs',
+                    'Horizontal Pull': 'horizontal_pull',
+                    'Horizontal Push': 'horizontal_push',
+                    'Vertical Pull': 'vertical_pull',
+                    'Vertical Push': 'vertical_push'
+                };
+                items.forEach((it) => {
+                    if (!it?.slotLabel || !it.exercise?.name || it.isExtra) return;
+                    const label = it.slotLabel;
+                    const slotId = STRENGTH_LABEL_TO_ID[label];
+                    if (slotId && strengthPlan.compoundPicks) {
+                        strengthPlan.compoundPicks[slotId] = it.exercise.name;
+                    }
+                    if (label && label.startsWith('Isolation ·') && Array.isArray(strengthPlan.isolations)) {
+                        const muscleKey = label.replace(/^Isolation\s*·\s*/i, '').trim();
+                        const session = next.session || (sessionTypeId === 'strength_B' ? 'B' : 'A');
+                        const iso = strengthPlan.isolations.find(
+                            (row) => row.session === session && String(row.muscleKey).toLowerCase() === muscleKey.toLowerCase()
+                        );
+                        if (iso) iso.name = it.exercise.name;
+                    }
+                });
+                saveStrengthMonthPlan(strengthPlan);
+                next.strengthPlan = strengthPlan;
+                next.compounds = snapshotStrengthSession(next.session || (sessionTypeId === 'strength_B' ? 'B' : 'A'))?.compounds;
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    plans[sessionTypeId] = next;
+    saveCyclePlans(plans);
+    return next;
+}
+
+/**
+ * After mid-month swap/ban: update locked plan exercise for a slot (or by index).
+ */
+export function updateLockedExerciseInPlan(sessionTypeId, { slotLabel, oldName, newName, itemIndex }) {
+    if (!sessionTypeId || !newName) return null;
+    const plans = loadCyclePlans();
+    const plan = plans[sessionTypeId];
+    if (!plan) return null;
+
+    const renameInList = (list) => {
+        if (!Array.isArray(list)) return false;
+        let changed = false;
+        list.forEach((it, idx) => {
+            const name = it.exercise?.name || it.name;
+            const matchIdx = itemIndex != null && idx === itemIndex;
+            const matchSlot = slotLabel && (it.slotLabel === slotLabel) && (!oldName || name === oldName);
+            const matchName = oldName && name === oldName && (!slotLabel || it.slotLabel === slotLabel);
+            if (matchIdx || matchSlot || matchName) {
+                if (it.exercise) it.exercise = { ...it.exercise, name: newName };
+                if (it.name != null) it.name = newName;
+                changed = true;
+            }
+        });
+        return changed;
+    };
+
+    renameInList(plan.lockedItems);
+    if (plan.plan?.items) renameInList(plan.plan.items);
+    if (Array.isArray(plan.items)) renameInList(plan.items);
+
+    // Strength shared picks
+    if (plan.family === 'strength' || sessionTypeId.startsWith('strength_')) {
+        try {
+            const STRENGTH_LABEL_TO_ID = {
+                'Bilateral Posterior': 'bilateral_posterior',
+                'Bilateral Anterior': 'bilateral_anterior',
+                'Unilateral Legs': 'unilateral_legs',
+                'Horizontal Pull': 'horizontal_pull',
+                'Horizontal Push': 'horizontal_push',
+                'Vertical Pull': 'vertical_pull',
+                'Vertical Push': 'vertical_push'
+            };
+            const strengthPlan = loadStrengthMonthPlan();
+            const slotId = STRENGTH_LABEL_TO_ID[slotLabel];
+            if (strengthPlan?.compoundPicks && slotId) {
+                strengthPlan.compoundPicks[slotId] = newName;
+                saveStrengthMonthPlan(strengthPlan);
+            }
+            if (slotLabel && String(slotLabel).startsWith('Isolation ·') && strengthPlan?.isolations) {
+                const muscleKey = String(slotLabel).replace(/^Isolation\s*·\s*/i, '').trim();
+                const session = plan.session || (sessionTypeId === 'strength_B' ? 'B' : 'A');
+                strengthPlan.isolations.forEach((row) => {
+                    if (row.session === session && String(row.muscleKey).toLowerCase() === muscleKey.toLowerCase()) {
+                        row.name = newName;
+                    }
+                });
+                saveStrengthMonthPlan(strengthPlan);
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    plans[sessionTypeId] = plan;
+    saveCyclePlans(plans);
+    return plan;
 }
 
 /** Ensure each programme session type has a locked plan for this cycle. */
@@ -248,7 +415,6 @@ export function ensureCyclePlansForProgramme() {
     const plans = loadCyclePlans();
     let changed = false;
 
-    // Keep a shared strength month plan keyed by cycle
     if (types.some((t) => t.family === 'strength')) {
         loadStrengthMonthPlan();
     }
@@ -280,25 +446,41 @@ export function applyCycleDecision(sessionTypeId, decision, opts = {}) {
 
     if (decision === 'keep') {
         if (prev) {
-            plans[sessionTypeId] = { ...prev, source: 'kept' };
+            plans[sessionTypeId] = {
+                ...prev,
+                source: 'kept',
+                exercisesConfirmed: true
+            };
         } else if (meta?.family === 'strength') {
-            plans[sessionTypeId] = { ...snapshotStrengthSession(meta.session), source: 'kept' };
+            plans[sessionTypeId] = { ...snapshotStrengthSession(meta.session), source: 'kept', exercisesConfirmed: true };
         } else if (meta?.family === 'hypertrophy') {
-            plans[sessionTypeId] = { ...snapshotHypertrophyKind(meta.hypKind), source: 'kept' };
+            plans[sessionTypeId] = { ...snapshotHypertrophyKind(meta.hypKind), source: 'kept', exercisesConfirmed: true };
         }
     } else if (decision === 'change') {
         if (meta?.family === 'strength') {
             const plan = loadStrengthMonthPlan();
             const rebuilt = rebuildStrengthSessionInPlan(plan, meta.session);
             saveStrengthMonthPlan(rebuilt);
-            // Refresh both A/B snapshots from shared plan so slots stay consistent
-            plans.strength_A = { ...snapshotStrengthSession('A'), source: sessionTypeId === 'strength_A' ? 'generated' : (plans.strength_A?.source || 'generated') };
+            plans.strength_A = {
+                ...snapshotStrengthSession('A'),
+                source: sessionTypeId === 'strength_A' ? 'generated' : (plans.strength_A?.source || 'generated'),
+                exercisesConfirmed: sessionTypeId === 'strength_A' ? false : !!plans.strength_A?.exercisesConfirmed
+            };
             if (types.some((t) => t.id === 'strength_B')) {
-                plans.strength_B = { ...snapshotStrengthSession('B'), source: sessionTypeId === 'strength_B' ? 'generated' : (plans.strength_B?.source || 'generated') };
+                plans.strength_B = {
+                    ...snapshotStrengthSession('B'),
+                    source: sessionTypeId === 'strength_B' ? 'generated' : (plans.strength_B?.source || 'generated'),
+                    exercisesConfirmed: sessionTypeId === 'strength_B' ? false : !!plans.strength_B?.exercisesConfirmed
+                };
             }
-            plans[sessionTypeId] = { ...snapshotStrengthSession(meta.session), source: 'generated' };
+            plans[sessionTypeId] = { ...snapshotStrengthSession(meta.session), source: 'generated', exercisesConfirmed: false };
         } else if (meta?.family === 'hypertrophy') {
-            plans[sessionTypeId] = { ...snapshotHypertrophyKind(meta.hypKind), source: 'generated' };
+            plans[sessionTypeId] = { ...snapshotHypertrophyKind(meta.hypKind), source: 'generated', exercisesConfirmed: false };
+        }
+        // Clear previous lockedItems so confirm flow runs again
+        if (plans[sessionTypeId]) {
+            delete plans[sessionTypeId].lockedItems;
+            plans[sessionTypeId].exercisesConfirmed = false;
         }
     } else if (decision === 'custom') {
         const items = Array.isArray(opts.items) ? opts.items : null;
@@ -311,7 +493,8 @@ export function applyCycleDecision(sessionTypeId, decision, opts = {}) {
             templateId: opts.templateId || null,
             templateName: opts.templateName || null,
             sessionKind: opts.sessionKind || null,
-            items
+            items,
+            exercisesConfirmed: true
         };
     }
 
@@ -325,7 +508,7 @@ export function applyCycleDecision(sessionTypeId, decision, opts = {}) {
     return plans[sessionTypeId];
 }
 
-/** After all session types have a decision, roll into the next cycle starting tomorrow (or Monday). */
+/** After all session types have a decision, roll into the next monthly cycle. */
 export function finalizeCycleDecisions(date = new Date()) {
     const types = getSessionTypesForCurrentProgramme();
     const state = loadCycleState() || {};
@@ -333,24 +516,48 @@ export function finalizeCycleDecisions(date = new Date()) {
     const missing = types.filter((t) => !pending[t.id]);
     if (missing.length) return { ok: false, missing };
 
-    // Next cycle starts the day after decision Sunday (usually Monday)
-    const start = addDaysISO(dateToISO(date), 1) || dateToISO(date);
+    // New month starts on the anniversary that triggered decisions (state.endDate)
+    const start = state.endDate || dateToISO(date);
     const next = {
         startDate: start,
-        endSunday: computeCycleEndSunday(start),
+        endDate: computeCycleEndDate(start),
         decisionsResolved: false,
         pendingDecisions: {}
     };
     saveCycleState(next);
 
-    // Kept/custom plans already in PLANS_KEY; regenerated ones already updated.
-    // Stamp strength month plan to cycle key for compatibility.
+    // Drop plans that were "change" so they regenerate; keep kept/custom/confirmed
+    try {
+        const plans = loadCyclePlans();
+        const cleaned = {};
+        Object.keys(plans).forEach((id) => {
+            const p = plans[id];
+            if (!p) return;
+            if (pending[id] === 'change' && !p.exercisesConfirmed) {
+                // leave generated plan for confirm flow
+                cleaned[id] = p;
+            } else if (pending[id] === 'keep' || pending[id] === 'custom') {
+                cleaned[id] = p;
+            } else if (pending[id] === 'change') {
+                cleaned[id] = p;
+            }
+        });
+        // For change decisions, ensure exercisesConfirmed false
+        types.forEach((t) => {
+            if (pending[t.id] === 'change' && cleaned[t.id]) {
+                cleaned[t.id].exercisesConfirmed = false;
+                delete cleaned[t.id].lockedItems;
+            }
+        });
+        saveCyclePlans(cleaned);
+    } catch (e) { /* ignore */ }
+
     try {
         const plan = loadStrengthMonthPlan();
         if (plan) {
             plan.month = next.startDate;
             plan.cycleStart = next.startDate;
-            plan.cycleEnd = next.endSunday;
+            plan.cycleEnd = next.endDate;
             saveStrengthMonthPlan(plan);
         }
     } catch (e) { /* ignore */ }

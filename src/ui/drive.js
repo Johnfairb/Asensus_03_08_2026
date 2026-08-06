@@ -1,5 +1,6 @@
 import { store } from '../state/store.js';
-import { isExerciseBanned } from '../domain/bans.js';
+import { getEquivalentExercises, resolveItemSlotLabel } from '../domain/exercise-slots.js';
+import { sessionTypeIdFromFocus, updateLockedExerciseInPlan } from '../domain/workout-cycle.js';
 import { resolveSessionRpe } from '../domain/sleep-rpe.js';
 import { calculateLiveFitnessScores, generateDailyExerciseLog, getSeasonPhase, getTodayFocus, getWeeklyCoachTip, getWorkoutSessionAdvice, isGuidanceOff } from '../domain/fitness-hud.js';
 import { applyInjuryPainFollowUpFromJournal, injuryAreaLabel, needsInjuryPainFollowUp } from '../domain/periodization.js';
@@ -23,6 +24,7 @@ import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, rende
 import { calculateTDEE } from '../domain/thermodynamics.js';
 import { notifyRestTimerDone } from './notifications.js';
 import { addFoodToActiveLog, loadGhostTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderActiveLog, setConfirmRouteButtons, switchLogType, updateExecutionAuxBlocks, updateExerciseDropdowns, updateSaveTemplateButtonLabel } from './templates.js';
+import { openAddExercisesModal } from './add-exercises-modal.js';
 import {
     clearWorkoutDraft,
     draftMatchesPlanEvent,
@@ -304,7 +306,7 @@ export function renderWorkoutLog() {
     }
     
     if (filter === 'todo') {
-        html += `<button onclick="toggleToolsMenu()" style="width:100%; background:transparent; color:var(--text-silver); border:1px dashed var(--border-highlight); padding:12px; margin-top:8px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ Add exercise</button>`;
+        html += `<button onclick="openAddExercisesModal()" style="width:100%; background:transparent; color:var(--text-silver); border:1px dashed var(--border-highlight); padding:12px; margin-top:8px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ Add exercise</button>`;
     }
     
     document.getElementById('active-log-list').innerHTML = html;
@@ -807,22 +809,21 @@ export function redrawModalExerciseChart() {
 export function populateSwapDropdown(exIdx) {
     const wrap = document.getElementById('sets-modal-swap-wrap');
     const select = document.getElementById('sets-modal-swap-select');
+    const label = document.getElementById('sets-modal-swap-label');
     const cardioWrap = document.getElementById('sets-modal-cardio-type-wrap');
     if (!wrap || !select) return;
 
     const item = store.activeLog.items[exIdx];
-    // Steady cardio / stretching / lactate use their own UI instead of muscle-group swap
-    if (!item || item.isWarmupGroup || isSteadyCardioLogItem(item) || isStaticStretchingLogItem(item) || isLactateHitLogItem(item) || !item.exercise.muscle_group) {
+    // Steady cardio / stretching / lactate use their own UI instead of slot swap
+    if (!item || item.isWarmupGroup || isSteadyCardioLogItem(item) || isStaticStretchingLogItem(item) || isLactateHitLogItem(item) || item.isCoreBlock) {
         wrap.style.display = 'none';
         return;
     }
 
     if (cardioWrap) cardioWrap.style.display = 'none';
 
-    const group = item.exercise.muscle_group;
-    const equivalents = store.globalExerciseDB.filter(e =>
-        e.muscle_group === group && e.name !== item.exercise.name && !isExerciseBanned(e.id)
-    );
+    const slot = resolveItemSlotLabel(item);
+    const equivalents = getEquivalentExercises(item);
 
     if (equivalents.length === 0) {
         wrap.style.display = 'none';
@@ -830,8 +831,51 @@ export function populateSwapDropdown(exIdx) {
     }
 
     wrap.style.display = 'block';
+    if (label) {
+        label.textContent = slot
+            ? `Swap for equivalent (${slot})`
+            : 'Swap for equivalent (same slot)';
+    }
     select.innerHTML = `<option value="">Keep: ${item.exercise.name}</option>` +
         equivalents.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+}
+
+export function swapExerciseInLog(newId) {
+    if (!newId || window.currentModalExIdx === null || window.currentModalExIdx === undefined) return;
+    const exIdx = window.currentModalExIdx;
+    const newEx = store.globalExerciseDB.find(e => e.id == newId);
+    if (!newEx) return;
+
+    const item = store.activeLog.items[exIdx];
+    const oldName = item?.exercise?.name;
+    const slotLabel = resolveItemSlotLabel(item);
+    const oldSets = item.sets;
+    store.activeLog.items[exIdx].exercise = newEx;
+    store.activeLog.items[exIdx].sets = oldSets.map(s => ({ ...s, completed: false, locked: false }));
+    if (slotLabel && !store.activeLog.items[exIdx].slotLabel) {
+        store.activeLog.items[exIdx].slotLabel = slotLabel;
+    }
+
+    // Mid-month swap updates the locked monthly plan for this session type
+    try {
+        const focus = window.manualSessionKind || document.getElementById('today-focus')?.value || '';
+        const sid = sessionTypeIdFromFocus(focus);
+        if (sid) {
+            updateLockedExerciseInPlan(sid, {
+                slotLabel,
+                oldName,
+                newName: newEx.name,
+                itemIndex: null
+            });
+        }
+    } catch (e) { /* ignore */ }
+
+    document.getElementById('sets-modal-title').innerText = newEx.name;
+    renderExerciseSets();
+    drawModalExerciseChart(newEx.name, false);
+    populateSwapDropdown(exIdx);
+    populateCardioTypePicker(exIdx);
+    if (navigator.vibrate) navigator.vibrate(40);
 }
 
 /** Cardio modalities available for steady-state type selection. */
@@ -956,23 +1000,6 @@ export function selectCardioTypeInLog(newId) {
     renderExerciseSets();
     populateCardioTypePicker(exIdx);
     drawModalExerciseChart(newEx.name, false);
-    if (navigator.vibrate) navigator.vibrate(40);
-}
-
-export function swapExerciseInLog(newId) {
-    if (!newId || window.currentModalExIdx === null || window.currentModalExIdx === undefined) return;
-    const exIdx = window.currentModalExIdx;
-    const newEx = store.globalExerciseDB.find(e => e.id == newId);
-    if (!newEx) return;
-
-    const oldSets = store.activeLog.items[exIdx].sets;
-    store.activeLog.items[exIdx].exercise = newEx;
-    store.activeLog.items[exIdx].sets = oldSets.map(s => ({ ...s, completed: false, locked: false }));
-    document.getElementById('sets-modal-title').innerText = newEx.name;
-    renderExerciseSets();
-    drawModalExerciseChart(newEx.name, false);
-    populateSwapDropdown(exIdx);
-    populateCardioTypePicker(exIdx);
     if (navigator.vibrate) navigator.vibrate(40);
 }
 
@@ -1662,40 +1689,45 @@ export function toggleToolsMenu() {
     setManualAddBtnSymbol(opening);
     const foodSel = document.getElementById('select-food');
     const exSel = document.getElementById('select-exercise');
+    const addExBtn = document.getElementById('btn-open-add-exercises');
     if (!opening) {
         if (foodSel) foodSel.style.display = 'none';
         if (exSel) exSel.style.display = 'none';
+        if (addExBtn) addExBtn.style.display = 'none';
         return;
     }
     refreshTemplateSelector();
     if (store.activeLog.type === 'workout') {
-        try { updateExerciseDropdowns(); } catch (e) { /* ignore */ }
         if (foodSel) foodSel.style.display = 'none';
-        if (exSel) exSel.style.display = 'block';
+        if (exSel) exSel.style.display = 'none';
+        if (addExBtn) addExBtn.style.display = 'block';
     } else if (['breakfast', 'lunch', 'dinner', 'snack'].includes(store.activeLog.type)) {
         if (foodSel) foodSel.style.display = 'block';
         if (exSel) exSel.style.display = 'none';
+        if (addExBtn) addExBtn.style.display = 'none';
     } else {
         if (foodSel) foodSel.style.display = 'none';
         if (exSel) exSel.style.display = 'none';
+        if (addExBtn) addExBtn.style.display = 'none';
     }
 }
 
 export function manualAdd() {
-    if (store.activeLog.type === 'workout') addExerciseToActiveLog(); else addFoodToActiveLog();
+    if (store.activeLog.type === 'workout') {
+        openAddExercisesModal();
+        return;
+    }
+    addFoodToActiveLog();
     // Keep manual add open until the user closes it or leaves the zone
     const menu = document.getElementById('tools-menu');
     if (menu) menu.classList.remove('hidden');
     setManualAddBtnSymbol(true);
     const foodSel = document.getElementById('select-food');
     const exSel = document.getElementById('select-exercise');
-    if (store.activeLog.type === 'workout') {
-        if (foodSel) foodSel.style.display = 'none';
-        if (exSel) exSel.style.display = 'block';
-    } else {
-        if (foodSel) foodSel.style.display = 'block';
-        if (exSel) exSel.style.display = 'none';
-    }
+    const addExBtn = document.getElementById('btn-open-add-exercises');
+    if (foodSel) foodSel.style.display = 'block';
+    if (exSel) exSel.style.display = 'none';
+    if (addExBtn) addExBtn.style.display = 'none';
 }
 
 export function startManualWorkout(buttonElement = null) {

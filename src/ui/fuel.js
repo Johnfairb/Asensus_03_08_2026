@@ -15,6 +15,7 @@ import {
   toggleExerciseBan,
   toggleFoodBan,
 } from '../domain/bans.js';
+import { replaceBannedExerciseInLockedPlans } from '../domain/exercise-slots.js';
 import {
   applyDietFilter,
   categoryToHeading,
@@ -609,7 +610,12 @@ export function toggleBanFromLibraryDetail() {
         loadInventory();
         openFoodDetail(id);
     } else if (kind === 'exercise') {
-        toggleExerciseBan(id);
+        const wasBanned = isExerciseBanned(id);
+        const nextBanned = toggleExerciseBan(id);
+        if (!wasBanned && nextBanned) {
+            const ex = (store.globalExerciseDB || []).find(e => String(e.id) === String(id));
+            replaceBannedExerciseInLockedPlans(id, ex?.name);
+        }
         loadExercises();
         openExerciseDetail(id);
     }

@@ -1,12 +1,13 @@
 /**
- * Monthly Progress summary — visible from the last day of a month
- * through the first 7 days of the next month.
+ * Monthly Progress summary — visible from the last day of a billing period
+ * through the first 7 days of the next period.
  */
 import { store } from '../state/store.js';
 import { getDiaryFieldsForMode } from './diary-schema.js';
+import { getActiveBillingSummaryPeriod, parseISODate, daysInMonth, dateToISO as billingDateToISO } from './billing-month.js';
 
 function dateToISO(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return billingDateToISO(d);
 }
 
 function loadDayJournalLite(dateStr) {
@@ -29,22 +30,19 @@ function loadDayJournalLite(dateStr) {
   return null;
 }
 
-function daysInMonth(year, monthIndex) {
-  return new Date(year, monthIndex + 1, 0).getDate();
-}
-
-/** Which calendar month's summary should show right now (or null). */
+/** Which billing period's summary should show right now (or null). */
 export function getActiveSummaryMonth(now = new Date()) {
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const day = now.getDate();
-  const last = daysInMonth(y, m);
-  if (day === last) return { year: y, month: m };
-  if (day >= 1 && day <= 7) {
-    const prev = new Date(y, m - 1, 1);
-    return { year: prev.getFullYear(), month: prev.getMonth() };
-  }
-  return null;
+  const period = getActiveBillingSummaryPeriod(now);
+  if (!period) return null;
+  const start = parseISODate(period.startDate);
+  if (!start) return null;
+  return {
+    year: start.getFullYear(),
+    month: start.getMonth(),
+    startDate: period.startDate,
+    endDate: period.endDate,
+    periodKey: period.periodKey
+  };
 }
 
 function eachDayOfMonth(year, month) {
@@ -54,13 +52,36 @@ function eachDayOfMonth(year, month) {
   return out;
 }
 
+/** Inclusive of startDate, exclusive of endDate (anniversary). */
+function eachDayOfPeriod(startISO, endISO) {
+  const start = parseISODate(startISO);
+  const end = parseISODate(endISO);
+  if (!start || !end) return [];
+  const out = [];
+  const cur = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 12, 0, 0);
+  const endT = end.getTime();
+  while (cur.getTime() < endT) {
+    out.push(new Date(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+function daysForSummary(activeOrYear, maybeMonth) {
+  if (activeOrYear && typeof activeOrYear === 'object' && activeOrYear.startDate) {
+    return eachDayOfPeriod(activeOrYear.startDate, activeOrYear.endDate);
+  }
+  return eachDayOfMonth(activeOrYear, maybeMonth);
+}
+
 function localeKey(d) {
   return d.toLocaleDateString();
 }
 
-function bestExerciseProgress(year, month) {
-  const start = new Date(year, month, 1).getTime();
-  const end = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
+function bestExerciseProgress(days) {
+  if (!days.length) return null;
+  const start = days[0].getTime();
+  const end = days[days.length - 1].getTime() + 86400000 - 1;
   const byEx = new Map();
 
   Object.values(store.globalGroupedHistory || {}).forEach(day => {
@@ -92,14 +113,13 @@ function bestExerciseProgress(year, month) {
   return best;
 }
 
-function diaryMonthlyAverages(year, month) {
+function diaryMonthlyAverages(days) {
   const fieldIds = new Map();
   ['practice', 'match', 'gym', 'lactate'].forEach(mode => {
     getDiaryFieldsForMode(mode).filter(f => f.type === 'quantitative').forEach(f => {
       if (!fieldIds.has(f.id)) fieldIds.set(f.id, f.label);
     });
   });
-  // Always include classic keys
   [['rpe', 'RPE'], ['athletic', 'Athletic'], ['mental', 'Mental'], ['matchPerformance', 'Match perf']].forEach(([id, label]) => {
     if (!fieldIds.has(id)) fieldIds.set(id, label);
   });
@@ -108,7 +128,7 @@ function diaryMonthlyAverages(year, month) {
   const counts = {};
   fieldIds.forEach((_, id) => { sums[id] = 0; counts[id] = 0; });
 
-  eachDayOfMonth(year, month).forEach(d => {
+  days.forEach(d => {
     const j = loadDayJournalLite(dateToISO(d)) || loadDayJournalLite(localeKey(d));
     if (!j) return;
     const bag = { ...(j.fields || {}), ...j };
@@ -131,22 +151,22 @@ function diaryMonthlyAverages(year, month) {
   return avgs;
 }
 
-function averageSleep(year, month) {
+function averageSleep(days) {
   let sum = 0;
   let n = 0;
-  eachDayOfMonth(year, month).forEach(d => {
+  days.forEach(d => {
     const v = parseFloat(localStorage.getItem(`sleep_${localeKey(d)}`));
     if (Number.isFinite(v) && v > 0) { sum += v; n += 1; }
   });
   return n ? Math.round((sum / n) * 10) / 10 : null;
 }
 
-function adherencePercent(year, month) {
+function adherencePercent(days) {
   const targetCals = store.userConfig?.targets?.cals || 2000;
   const targetCost = store.userConfig?.budget || 50;
   let scored = 0;
   let hit = 0;
-  eachDayOfMonth(year, month).forEach(d => {
+  days.forEach(d => {
     const data = store.globalGroupedHistory?.[localeKey(d)];
     if (!data || !(data.macros?.cals > 0)) return;
     scored += 1;
@@ -158,8 +178,7 @@ function adherencePercent(year, month) {
   return Math.round((hit / scored) * 100);
 }
 
-function weightChange(year, month) {
-  const days = eachDayOfMonth(year, month);
+function weightChange(days) {
   let first = null;
   let last = null;
   days.forEach(d => {
@@ -176,12 +195,12 @@ function weightChange(year, month) {
   return { from: first, to: last, delta: Math.round((last - first) * 10) / 10 };
 }
 
-function budgetDelta(year, month) {
+function budgetDelta(days) {
   const dailyBudget = Number(store.userConfig?.budget) || 0;
   if (dailyBudget <= 0) return null;
   let spent = 0;
   let daysWithFood = 0;
-  eachDayOfMonth(year, month).forEach(d => {
+  days.forEach(d => {
     const data = store.globalGroupedHistory?.[localeKey(d)];
     if (!data || !(data.macros?.cals > 0)) return;
     spent += Number(data.macros.cost) || 0;
@@ -193,18 +212,23 @@ function budgetDelta(year, month) {
   return { spent: Math.round(spent * 100) / 100, budget: Math.round(budget * 100) / 100, net, days: daysWithFood };
 }
 
-export function computeMonthlySummary(year, month) {
-  const monthLabel = new Date(year, month, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+export function computeMonthlySummary(year, month, period = null) {
+  const days = period?.startDate
+    ? eachDayOfPeriod(period.startDate, period.endDate)
+    : eachDayOfMonth(year, month);
+  const monthLabel = period?.startDate
+    ? `${period.startDate} → ${period.endDate}`
+    : new Date(year, month, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   return {
     year,
     month,
     monthLabel,
-    bestExercise: bestExerciseProgress(year, month),
-    diaryAverages: diaryMonthlyAverages(year, month),
-    avgSleep: averageSleep(year, month),
-    adherencePct: adherencePercent(year, month),
-    weight: weightChange(year, month),
-    budget: budgetDelta(year, month)
+    bestExercise: bestExerciseProgress(days),
+    diaryAverages: diaryMonthlyAverages(days),
+    avgSleep: averageSleep(days),
+    adherencePct: adherencePercent(days),
+    weight: weightChange(days),
+    budget: budgetDelta(days)
   };
 }
 
@@ -217,7 +241,7 @@ export function renderMonthlySummaryBanner() {
     host.innerHTML = '';
     return;
   }
-  const s = computeMonthlySummary(active.year, active.month);
+  const s = computeMonthlySummary(active.year, active.month, active);
   const exLine = s.bestExercise
     ? `<div class="monthly-summary-row"><span>Top progress</span><strong>${s.bestExercise.name}</strong><em>+${s.bestExercise.pct}% (${s.bestExercise.delta > 0 ? '+' : ''}${s.bestExercise.delta} kg)</em></div>`
     : `<div class="monthly-summary-row"><span>Top progress</span><strong>No lifting progression data</strong></div>`;

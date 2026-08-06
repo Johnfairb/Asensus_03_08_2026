@@ -10,6 +10,7 @@ import { generateWorkoutTemplate } from '../domain/workout-generator.js';
 import { renderWorkoutLog } from './drive.js';
 import { clearWorkoutDraft, saveWorkoutDraft } from '../domain/workout-draft.js';
 import { resetWorkoutTimer, startWorkoutTimer } from './workout-timer.js';
+import { sessionTypeIdFromFocus, confirmSessionExercises, sessionNeedsExerciseConfirm, getCyclePlan } from '../domain/workout-cycle.js';
 
 // ==========================================
 // 7. TEMPLATE MANAGER & GHOST PLANNER
@@ -628,6 +629,22 @@ export function acceptGhostTemplate() {
     if (!window.manualSessionKind) {
         const focus = document.getElementById('today-focus')?.value || '';
         window.manualSessionKind = focus || 'Full Body / Strength';
+    }
+    // Lock exercises for this session type for the rest of the billing month
+    if (store.activeLog.type === 'workout') {
+        try {
+            const focus = window.manualSessionKind || document.getElementById('today-focus')?.value || '';
+            const sid = sessionTypeIdFromFocus(focus);
+            if (sid) {
+                const needs = sessionNeedsExerciseConfirm(sid);
+                const existing = getCyclePlan(sid);
+                if (needs || existing?.exercisesConfirmed) {
+                    confirmSessionExercises(sid, store.currentGhostItems);
+                }
+            }
+        } catch (e) {
+            console.warn('confirmSessionExercises failed', e);
+        }
     }
     document.getElementById('ghost-template-container').classList.add('hidden');
     store.ghostOverrides = {};

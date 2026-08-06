@@ -29,22 +29,179 @@ import {
 } from './session-prep.js';
 import { roundToEquipment } from './thermodynamics.js';
 import { renderActiveLog } from '../ui/templates.js';
-import { ensureCycleStarted, ensureCyclePlansForProgramme } from './workout-cycle.js';
+import { ensureCycleStarted, ensureCyclePlansForProgramme, sessionTypeIdFromFocus, sessionNeedsExerciseConfirm, confirmSessionExercises } from './workout-cycle.js';
+import { getEquivalentExercises, resolveItemSlotLabel } from './exercise-slots.js';
 import { latestPhaseWeight, strengthLoadFromHypertrophy, resolveLogPeriodization } from './periodization-logs.js';
 
 // ==========================================
 // 8. ELITE WORKOUT ENGINE (DRIVE TAB)
 // ==========================================
+
+function emptySetForExercise(ex) {
+    return { weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, completed: false };
+}
+
+/** Add one or more exercises (by id). Before Confirm workout → ghost; after → active log. */
+export function addExercisesByIds(ids) {
+    const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+    if (!list.length) return;
+
+    const ghostOpen = store.activeLog.type === 'workout'
+        && document.getElementById('ghost-template-container')
+        && !document.getElementById('ghost-template-container').classList.contains('hidden')
+        && !window._workoutSessionConfirmed;
+
+    list.forEach((id) => {
+        const ex = store.globalExerciseDB.find(e => e.id == id || String(e.id) === String(id));
+        if (!ex) return;
+        if (store.fatigueLockouts[ex.muscle_group]) {
+            if (!confirm(`System Optimization Notice: The [${ex.muscle_group.toUpperCase()}] muscle group is in a recovery phase. Loading this mechanical pathway may be suboptimal. Proceed with override?`)) {
+                return;
+            }
+        }
+        const entry = {
+            exercise: ex,
+            sets: [emptySetForExercise(ex)],
+            plannedSets: 1,
+            slotLabel: null,
+            isExtra: true,
+            note: 'Extra'
+        };
+        if (ghostOpen) {
+            store.currentGhostItems.push(entry);
+        } else {
+            store.activeLog.items.push({
+                exercise: ex,
+                sets: [emptySetForExercise(ex)],
+                isExtra: true
+            });
+        }
+    });
+
+    if (ghostOpen) {
+        renderGhostWorkoutFromItems();
+    } else {
+        renderActiveLog();
+    }
+}
+
 export function addExerciseToActiveLog() {
     const select = document.getElementById('select-exercise');
-    if(!select.value) return;
-    const ex = store.globalExerciseDB.find(e => e.id == select.value);
-    
-    if(store.fatigueLockouts[ex.muscle_group]) {
-        if(!confirm(`System Optimization Notice: The [${ex.muscle_group.toUpperCase()}] muscle group is in a recovery phase. Loading this mechanical pathway may be suboptimal. Proceed with override?`)) { select.value = ''; return; }
+    if (!select?.value) return;
+    addExercisesByIds([select.value]);
+    select.value = '';
+}
+
+/** Swap an exercise in the ghost preview (pre-confirm). */
+export function swapGhostExercise(ghostIdx, newId) {
+    if (!newId && newId !== 0) return;
+    const item = store.currentGhostItems[ghostIdx];
+    if (!item || !item.exercise) return;
+    const newEx = store.globalExerciseDB.find(e => e.id == newId || String(e.id) === String(newId));
+    if (!newEx) return;
+    item.exercise = newEx;
+    if (item.sets) {
+        item.sets = item.sets.map(s => ({ ...s, completed: false, locked: false }));
     }
-    store.activeLog.items.push({ exercise: ex, sets: [{ weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, completed: false }] }); // rpe variable used for RIR internally to avoid breaking DB
-    select.value = ''; renderActiveLog();
+    renderGhostWorkoutFromItems();
+}
+
+export function renderGhostWorkoutFromItems() {
+    const content = document.getElementById('ghost-content');
+    const container = document.getElementById('ghost-template-container');
+    if (!content || !container) return;
+
+    const focus = document.getElementById('today-focus')?.value || window.manualSessionKind || '';
+    const sessionTypeId = sessionTypeIdFromFocus(focus) || sessionTypeIdFromFocus(window.manualSessionKind || '');
+    const allowSwap = sessionNeedsExerciseConfirm(sessionTypeId);
+    const phaseStr = getSeasonPhase();
+
+    let html = '';
+    if (allowSwap) {
+        html += `<div style="margin-bottom:12px; padding:10px 12px; border:1px solid rgba(212,175,55,0.35); border-radius:8px; background:rgba(212,175,55,0.06); font-family:'Roboto Mono'; font-size:11px; color:var(--gold-accent); line-height:1.45;">
+            Review exercises — swap any for an equivalent in the same slot, then Confirm workout to lock them for this month.
+        </div>`;
+    }
+
+    store.currentGhostItems.forEach((item, idx) => {
+        if (item.isWarmupGroup) {
+            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
+                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Warmup</div>
+                <div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note || 'Includes pulse raising, mobilisation, shoulder warmup & dynamic stretching'}</div>
+            </div>`;
+            return;
+        }
+        if (item.isCoreBlock) {
+            const n = item.plannedSets || (item.sets || []).length;
+            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
+                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Core Circuit</div>
+                <div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc;"><span>Circuits</span><span style="color:#D4AF37; font-weight:bold;">${n} set${n === 1 ? '' : 's'}</span></div>
+            </div>`;
+            return;
+        }
+        if (item.isStretchGroup || /stretch/i.test(item.exercise?.name || '')) {
+            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
+                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Stretching</div>
+            </div>`;
+            return;
+        }
+        if (item.isSportSessionBlock) {
+            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
+                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">${item.exercise.name}</div>
+            </div>`;
+            return;
+        }
+
+        const slot = resolveItemSlotLabel(item);
+        const equivalents = allowSwap && !item.isExtra ? getEquivalentExercises(item) : [];
+        html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
+            <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom: 4px;">
+                <div style="font-size: 12px; color:#D4AF37; font-weight:800; text-transform:uppercase;">${item.exercise.name}</div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button type="button" onclick="openVideoModal('${String(item.exercise.name).replace(/'/g, "\\'")}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:4px 8px; border-radius:4px; color:var(--text-silver); font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">🎥 FORM</button>
+                </div>
+            </div>`;
+        if (slot) {
+            html += `<div style="font-size:9px; color:var(--text-muted); margin-bottom:6px; font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.5px;">${slot}${item.isExtra ? ' · Extra' : ''}</div>`;
+        } else if (item.isExtra) {
+            html += `<div style="font-size:9px; color:var(--text-muted); margin-bottom:6px; font-family:'Roboto Mono';">EXTRA</div>`;
+        }
+        if (item.note) html += `<div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note}</div>`;
+        if (equivalents.length) {
+            html += `<label style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; display:block; margin-bottom:4px;">Swap equivalent</label>
+                <select class="input-field" style="font-size:12px; padding:8px; margin-bottom:8px;" onchange="swapGhostExercise(${idx}, this.value)">
+                    <option value="">Keep: ${item.exercise.name}</option>
+                    ${equivalents.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
+                </select>`;
+        }
+        const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
+        if (workSets.length) {
+            const sample = workSets[0];
+            const nSets = typeof item.plannedSets === 'number' ? item.plannedSets : workSets.length;
+            const reps = sample.reps || 10;
+            const load = Number(sample.weight) > 0 ? `${sample.weight}kg` : 'BW';
+            html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;">
+                <span>${load}</span>
+                <span style="color:#D4AF37; font-weight:bold; font-family:'Roboto Mono';">${nSets}×${reps}</span>
+            </div>`;
+        }
+        html += `</div>`;
+    });
+
+    if (isHypertrophyFocus(focus) && window.currentHypertrophySession) {
+        const hs = window.currentHypertrophySession;
+        html = `<div style="margin-bottom:14px; padding:10px 12px; border:1px solid rgba(212,175,55,0.35); border-radius:8px; background:rgba(212,175,55,0.06); font-family:'Roboto Mono'; font-size:11px; color:var(--gold-accent); font-weight:800; letter-spacing:0.5px; text-transform:uppercase;">Hypertrophy · ${hs.label || 'Session'} · Stick to rest times</div>` + html;
+    } else if (isStrengthFocus(focus) && window.currentStrengthSession) {
+        html = `<div style="margin-bottom:14px; padding:10px 12px; border:1px solid rgba(212,175,55,0.35); border-radius:8px; background:rgba(212,175,55,0.06); font-family:'Roboto Mono'; font-size:11px; color:var(--gold-accent); font-weight:800; letter-spacing:1px; text-transform:uppercase;">Strength Session ${window.currentStrengthSession} · Monthly movement picks</div>` + html;
+    }
+
+    content.innerHTML = html;
+    container.classList.remove('hidden');
+    const lockBtn = document.getElementById('btn-lock-in-route');
+    if (lockBtn) {
+        lockBtn.style.display = '';
+        lockBtn.textContent = 'Confirm workout';
+    }
 }
 
 export function addSetToExercise(exIdx) {
@@ -1032,96 +1189,14 @@ export async function generateWorkoutTemplate() {
         });
     });
 
-    store.currentGhostItems.forEach(item => {
-        if (item.isWarmupGroup) {
-            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
-                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Warmup</div>
-                <div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note || 'Includes pulse raising, mobilisation, shoulder warmup & dynamic stretching'}</div>
-                <div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc;"><span>Blocks</span><span style="color:#D4AF37; font-weight:bold;">${item.sets.length} parts</span></div>
-            </div>`;
-            return;
-        }
-        if (item.isCoreBlock) {
-            const n = item.plannedSets || (item.sets || []).length;
-            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
-                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Core Circuit</div>
-                <div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note || '5 exercises × 20 · no rest between · 1 min between sets'}</div>
-                <div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc;"><span>Circuits</span><span style="color:#D4AF37; font-weight:bold;">${n} set${n === 1 ? '' : 's'}</span></div>
-            </div>`;
-            return;
-        }
-        if (item.isStretchGroup || /stretch/i.test(item.exercise?.name || '')) {
-            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
-                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Stretching</div>
-            </div>`;
-            return;
-        }
-        if (item.isSportSessionBlock) {
-            html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
-                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">${item.exercise.name}</div>
-            </div>`;
-            return;
-        }
-        html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
-            <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom: 4px;">
-                <div style="font-size: 12px; color:#D4AF37; font-weight:800; text-transform:uppercase;">${item.exercise.name}</div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <button type="button" onclick="openVideoModal('${String(item.exercise.name).replace(/'/g, "\\'")}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:4px 8px; border-radius:4px; color:var(--text-silver); font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">🎥 FORM</button>
-                </div>
-            </div>`;
-        if (item.note) html += `<div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic; display:flex; align-items:center; gap:4px;"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg> ${item.note}</div>`;
-        
-        // Adaptation: reserve a form-video cue under each lift
-        if (phaseStr === 'OffSeason_Adaptation' && !item.isWarmupGroup) {
-            html += `<div style="font-size:9px; color:var(--text-muted); margin-bottom:8px; font-family:'Roboto Mono'; border:1px dashed var(--border-subtle); border-radius:6px; padding:8px;">Form check space — tap FORM before loading. Keep the bar path identical for all 50 reps.</div>`;
-        }
-
-        const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
-        const lactateSets = (item.sets || []).filter(s => s && s.isLactateHit);
-        const isCardio = (item.exercise.domain || '').toLowerCase() === 'cardio';
-
-        if (lactateSets.length) {
-            lactateSets.forEach((set, idx) => {
-                const rest = set.restTime > 0 ? ` · ${set.restTime}s rest` : '';
-                html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;"><span>Interval ${idx + 1}</span><span style="color:#D4AF37; font-weight:bold;">${set.duration_sec}s work${rest}</span></div>`;
-            });
-        } else if (isCardio && item.sets?.[0]) {
-            const set = item.sets[0];
-            const dist = set.distance_km > 0 ? `${set.distance_km} km` : 'Distance';
-            html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;"><span>Session</span><span style="color:#D4AF37; font-weight:bold;">${dist} · duration from timer</span></div>`;
-        } else if (workSets.length) {
-            const sample = workSets[0];
-            const nSets = typeof item.plannedSets === 'number' ? item.plannedSets : workSets.length;
-            const reps = pData.reps === 50 ? '50' : (sample.reps || pData.reps || 10);
-            const load = Number(sample.weight) > 0 ? `${sample.weight}kg` : 'BW';
-            html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;">
-                <span>${load}</span>
-                <span style="color:#D4AF37; font-weight:bold; font-family:'Roboto Mono';">${nSets}×${reps}</span>
-            </div>`;
-        } else if ((item.sets || []).some(s => s && s.isText)) {
-            const textSet = (item.sets || []).find(s => s && s.isText);
-            html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;"><span>Target</span><span style="color:#D4AF37; font-weight:bold;">${textSet.reps || ''}</span></div>`;
-        }
-        html += `</div>`;
-    });
-
-    if (useHypertrophy && window.currentHypertrophySession) {
-        const hs = window.currentHypertrophySession;
-        html = `<div style="margin-bottom:14px; padding:10px 12px; border:1px solid rgba(212,175,55,0.35); border-radius:8px; background:rgba(212,175,55,0.06); font-family:'Roboto Mono'; font-size:11px; color:var(--gold-accent); font-weight:800; letter-spacing:0.5px; text-transform:uppercase;">Hypertrophy · ${hs.label || 'Session'} · Stick to rest times</div>` + html;
-    } else if (isStrengthFocus(focus) && window.currentStrengthSession) {
-        html = `<div style="margin-bottom:14px; padding:10px 12px; border:1px solid rgba(212,175,55,0.35); border-radius:8px; background:rgba(212,175,55,0.06); font-family:'Roboto Mono'; font-size:11px; color:var(--gold-accent); font-weight:800; letter-spacing:1px; text-transform:uppercase;">Strength Session ${window.currentStrengthSession} · Monthly movement picks locked</div>` + html;
-    }
-
-    content.innerHTML = html; 
-    container.classList.remove('hidden');
-    const lockBtn = document.getElementById('btn-lock-in-route');
-    if (lockBtn) {
-        lockBtn.style.display = '';
-        lockBtn.textContent = 'Confirm workout';
-    }
+    renderGhostWorkoutFromItems();
     } catch (err) {
         console.error('generateWorkoutTemplate failed:', err);
-        content.innerHTML = `<div style="text-align:center;"><p style="font-size:13px; color:#FF3B30; font-weight:bold;">Could not build GPS workout.</p><p style="font-size:11px; color:var(--text-muted); margin-top:10px;">${String(err && err.message ? err.message : err)}</p></div>`;
-        container.classList.remove('hidden');
+        const content = document.getElementById('ghost-content');
+        const container = document.getElementById('ghost-template-container');
+        if (content) {
+            content.innerHTML = `<div style="text-align:center;"><p style="font-size:13px; color:#FF3B30; font-weight:bold;">Could not build GPS workout.</p><p style="font-size:11px; color:var(--text-muted); margin-top:10px;">${String(err && err.message ? err.message : err)}</p></div>`;
+        }
+        if (container) container.classList.remove('hidden');
     }
 }

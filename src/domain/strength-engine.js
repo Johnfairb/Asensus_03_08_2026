@@ -5,6 +5,7 @@ import { HYPERTROPHY_POOLS, isHypertrophyPhase } from './hypertrophy-engine.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
 import { buildStrengthMetaMap, EXERCISE_CATALOG } from './exercise-catalog.js';
 import { loadExercises } from '../ui/fuel.js';
+import { getBillingMonthKey } from './billing-month.js';
 
 // --- STRENGTH ENGINE: compounds A/B, isolations, core circuits, monthly rotation ---
 // Compound exercise lists come from HYPERTROPHY_POOLS (uniform pick; no weightings).
@@ -142,13 +143,17 @@ export function getStrengthWeightedPick(options) {
 }
 
 export function getStrengthMonthKey() {
-    // Prefer active ~4-week workout cycle; fall back to calendar month.
+    // Prefer active monthly workout cycle; else billing anniversary period.
     try {
         const raw = JSON.parse(localStorage.getItem('ascensus_workout_cycle_v1') || 'null');
         if (raw?.startDate) return raw.startDate;
     } catch (e) { /* ignore */ }
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    try {
+        return getBillingMonthKey();
+    } catch (e) {
+        const d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
 }
 
 function shuffleInPlace(arr) {
@@ -436,7 +441,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
     const maxTime = (prefs && prefs.maxTime) || store.userConfig.maxGymTime || 90;
     const tier = getStrengthTimeTierFromPrefs(prefs, maxTime, setBudget);
 
-    // Custom cycle override for this strength session
+    // Custom / confirmed cycle override for this strength session
     try {
         const plans = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}');
         const locked = plans && plans[`strength_${session}`];
@@ -448,11 +453,12 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
                 const workSets = (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText);
                 return {
                     name,
-                    slotLabel: 'Custom',
+                    slotLabel: it.slotLabel || 'Custom',
                     notes: 'Custom cycle workout',
                     sets: workSets.length || it.plannedSets || compoundSets,
                     setsOverride: workSets.length || it.plannedSets || compoundSets,
                     isIsolation: !!it.isIsolation,
+                    isExtra: !!it.isExtra,
                     isStrengthCompound: !it.isIsolation,
                     role: it.isIsolation ? 'isolation' : 'compound',
                     targetReps: it.isIsolation ? 8 : 5,
@@ -460,6 +466,44 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
                 };
             }).filter(Boolean);
             return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items, source: 'custom' };
+        }
+        if (locked?.exercisesConfirmed && Array.isArray(locked.lockedItems) && locked.lockedItems.length) {
+            const compoundSets = strengthSetsForTier(tier, 'compound');
+            const items = locked.lockedItems
+                .filter((it) => it && (it.exercise?.name || it.name) && !it.isWarmupGroup && !it.isStretchGroup && !it.isCoreBlock)
+                .map((it) => {
+                    const name = it.exercise?.name || it.name;
+                    const workSets = (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText);
+                    return {
+                        name,
+                        slotLabel: it.slotLabel || null,
+                        notes: it.note || it.notes || 'Confirmed for this month',
+                        sets: workSets.length || it.plannedSets || compoundSets,
+                        setsOverride: workSets.length || it.plannedSets || compoundSets,
+                        isIsolation: !!it.isIsolation,
+                        isExtra: !!it.isExtra,
+                        isStrengthCompound: !!it.isStrengthCompound || !it.isIsolation,
+                        isStrengthIsolation: !!it.isStrengthIsolation,
+                        role: it.role || (it.isIsolation ? 'isolation' : 'compound'),
+                        targetReps: it.isIsolation ? 8 : 5,
+                        restSec: it.isIsolation ? 120 : 240
+                    };
+                });
+            // Re-attach core block if present in locked items
+            locked.lockedItems.filter((it) => it?.isCoreBlock).forEach((it) => {
+                items.push({
+                    name: 'Core Circuit',
+                    slotLabel: 'Core',
+                    notes: it.note || it.notes || '',
+                    sets: it.plannedSets || (it.sets || []).length || 1,
+                    setsOverride: it.plannedSets || (it.sets || []).length || 1,
+                    isCoreBlock: true,
+                    coreExercises: it.coreExercises || [],
+                    role: 'core',
+                    restSec: 60
+                });
+            });
+            return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items, source: 'confirmed' };
         }
     } catch (e) { /* generated path */ }
 

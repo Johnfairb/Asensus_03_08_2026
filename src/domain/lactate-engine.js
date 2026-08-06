@@ -2,6 +2,7 @@
  * Lactate / HIT session engine.
  * Baselines → RPE-scaled intensity targets; HIT block duration from desired RPE.
  */
+import { getBillingMonthKeyNumber } from './billing-month.js';
 
 const BASELINE_STORAGE_KEY = 'ascensus_lactate_baselines_v1';
 
@@ -176,8 +177,12 @@ function mulberry32(seed) {
 }
 
 export function getLactateMonthKey(date = new Date()) {
-    const d = date instanceof Date ? date : new Date(date);
-    return d.getFullYear() * 100 + (d.getMonth() + 1);
+    try {
+        return getBillingMonthKeyNumber(date);
+    } catch (e) {
+        const d = date instanceof Date ? date : new Date(date);
+        return d.getFullYear() * 100 + (d.getMonth() + 1);
+    }
 }
 
 function formatSec(sec) {

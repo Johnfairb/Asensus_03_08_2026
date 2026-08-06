@@ -3,6 +3,8 @@ import { syncTrackerPillUI } from '../domain/fitness-hud.js';
 import { generateGroceryList } from '../domain/grocery.js';
 import { updateInjuryStatusPanel } from '../domain/periodization.js';
 import { applyUserConfigToDom, calculateTDEE, restoreSyncedLocalState } from '../domain/thermodynamics.js';
+import { setMonthAnchorISO, ensureMonthAnchor } from '../domain/billing-month.js';
+import { ensureCycleStarted } from '../domain/workout-cycle.js';
 import { nextObStep, syncAuthThemeUI } from '../ui/auth-onboarding.js';
 import { loadExercises, loadInventory } from '../ui/fuel.js';
 import { loadHistory } from '../ui/journey.js';
@@ -70,6 +72,13 @@ export async function bootOperatorProfile() {
             // -- OPERATOR EXISTS: LOAD SETTINGS --
             store.userConfig = { ...store.userConfig, ...profile.config };
             restoreSyncedLocalState(store.userConfig.syncedLocal);
+            if (store.userConfig.monthAnchorDate) {
+                setMonthAnchorISO(store.userConfig.monthAnchorDate);
+            } else {
+                // Existing users without an anchor: seed today so months align going forward
+                ensureMonthAnchor(new Date());
+            }
+            ensureCycleStarted(new Date());
             applyUserConfigToDom();
             if (typeof syncTrackerPillUI === 'function') syncTrackerPillUI();
             if (typeof updateInjuryStatusPanel === 'function') updateInjuryStatusPanel();

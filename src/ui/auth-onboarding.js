@@ -2,6 +2,8 @@ import { store } from '../state/store.js';
 import { generateGroceryList } from '../domain/grocery.js';
 import { needsFoodSeedSync, syncOfficialFoods } from '../domain/food-catalog.js';
 import { calculateTDEE, captureSyncedLocalState } from '../domain/thermodynamics.js';
+import { setMonthAnchorISO, dateToISO } from '../domain/billing-month.js';
+import { ensureCycleStarted } from '../domain/workout-cycle.js';
 import { bootOperatorProfile } from '../services/auth.js';
 import { loadExercises, loadInventory } from './fuel.js';
 
@@ -98,6 +100,11 @@ export async function completeOnboarding() {
         }
         
         calculateTDEE();
+
+        // Billing / workout month anchor = onboarding complete day (later: payment date)
+        const anchor = dateToISO(new Date());
+        setMonthAnchorISO(anchor);
+        ensureCycleStarted(new Date());
 
         const log = document.getElementById('ob-boot-log');
         log.innerText = "UPLOADING TO SUPABASE...";

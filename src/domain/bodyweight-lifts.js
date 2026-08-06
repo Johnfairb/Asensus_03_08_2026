@@ -4,6 +4,7 @@
 import { getExerciseMeta, normalizeExerciseName, resolveCatalogName } from './exercise-catalog.js';
 import { setExerciseBanned } from './bans.js';
 import { store } from '../state/store.js';
+import { getBillingMonthKey } from './billing-month.js';
 
 const TRICEP_ISO_SWAP_POOL = [
     'Rope Push Down', 'Bar Push Down', 'Single Push Down', 'Cable French Press',
@@ -43,7 +44,11 @@ const FIXED_SWAPS = {
 };
 
 function monthKey(d = new Date()) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    try {
+        return getBillingMonthKey(d);
+    } catch (e) {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
 }
 
 function loadState() {
