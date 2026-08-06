@@ -181,7 +181,21 @@ export function generateGroceryList() {
     const wCarb = store.userConfig.baselineTargets.carb * days;
     const wFat = store.userConfig.baselineTargets.fat * days;
 
-    const getFoods = (cat) => excludeBannedFoods(store.globalFoodDB.filter(f => f._category === cat));
+    const getFoods = (cat) => {
+        let list = excludeBannedFoods(store.globalFoodDB.filter(f => f._category === cat));
+        // Prefer animal protein for grocery PRO when diet allows
+        if (cat === 'PRO') {
+            const diet = store.userConfig?.diet;
+            if (diet !== 'Vegan' && diet !== 'Vegetarian') {
+                const animal = list.filter(f => {
+                    const h = String(f._heading || f.heading || '').toLowerCase();
+                    return h === 'meat' || h === 'fish' || h === 'animal products';
+                });
+                if (animal.length) list = animal;
+            }
+        }
+        return list;
+    };
     const shopAisles = emptyAisleBuckets();
     /** @type {Map<string|number, object>} */
     const shopMetaById = new Map();

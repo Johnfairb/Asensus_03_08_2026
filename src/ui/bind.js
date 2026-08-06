@@ -24,14 +24,14 @@ import {
 } from './journey.js';
 import { showShopStyleInfo, toggleFoodHeading } from '../domain/food-catalog.js';
 import { cancelExEdit, cancelFoodEdit, closeLibraryDetail, deleteItem, editExercise, editFood, editFromLibraryDetail, filterBoot, loadExercises, loadInventory, openExerciseDetail, openFoodDetail, saveExerciseToCloud, saveFoodToCloud, syncPackSizeFieldMode, toggleBanFromLibraryDetail, toggleExForm, togglePantryForm } from './fuel.js';
-import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, drawModalExerciseChart, redrawModalExerciseChart, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, beginExerciseLog, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, resumeInProgressWorkout, selectCardioTypeInLog, setWorkoutLogFilter, showConstraintInfo, startExecution, startManualWorkout, stopInProgressWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, toggleConstraint, togglePrepChildExpand, togglePrepPartExpand, toggleStretchListExpand, toggleSetComplete, toggleToolsMenu, updateWorkoutSet, workoutCardDragLeave, workoutCardDragOver, workoutCardDragStart, workoutCardDrop, workoutCardTouchEnd, workoutCardTouchStart } from './drive.js';
+import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, drawModalExerciseChart, redrawModalExerciseChart, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, beginExerciseLog, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, resumeInProgressWorkout, selectCardioTypeInLog, setWorkoutLogFilter, showConstraintInfo, startExecution, startManualWorkout, stopInProgressWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, toggleConstraint, togglePrepChildExpand, togglePrepPartExpand, toggleStretchListExpand, toggleSetComplete, toggleToolsMenu, updateWorkoutSet, workoutCardDragLeave, workoutCardDragOver, workoutCardDragStart, workoutCardDrop, workoutCardTouchEnd, workoutCardTouchStart, openManualGymRestModal, closeManualGymRestModal, toggleManualRestCustomFields, confirmManualGymRestPrefs } from './drive.js';
 import { dismissPlannedWarmupFromLog, dismissPlannedStretchFromLog, saveSessionPrepSettings } from '../domain/session-prep.js';
 import { closeLactateHitPicker, confirmLactateHitPicker, filterLactateHitOptions, openLactateHitPicker, toggleLactateHitType, selectLactateDesiredRpe, confirmLactateDesiredRpe, lactateWizardBackToTypes, lactateWizardBackToRpe, openLactateBaselineRedo, toggleLactateRedoType, confirmLactateRedoSelection, submitLactateBaselineStep, adjustLactateSessionRpe, openLactateBaselineRedoFromSession, redoLactateBaselineForType } from './lactate-ui.js';
 import { exportData, injectPitchData } from './demos.js';
 import { drawExerciseChart, drawMacroChart, drawUnifiedChart, executeSundayForecast, filterExerciseChartList, onProgressRangeChange, selectExerciseForChart } from './charts.js';
 import { completeOnboarding, nextObStep, selectAuthTheme, selectObCard, triggerBootSequence } from './auth-onboarding.js';
 import { handleAuth, handleSignOut, quickLogin } from '../services/auth.js';
-import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, swapGhostExercise } from '../domain/workout-generator.js';
+import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, swapGhostExercise, unmergeSuperset } from '../domain/workout-generator.js';
 import { openAddExercisesModal, closeAddExercisesModal, confirmAddExercisesModal } from './add-exercises-modal.js';
 import { calculateAchievability, handleFocusChange, handleSportChange, onGymDaysOrPhaseUiChange, onHybridSplitChange, onSeasonPhaseChange, roundToEquipment, saveSettings, toggleRestStop } from '../domain/thermodynamics.js';
 import { addFixedSchedule, closeFixedScheduleModal, closeSleepModal, closeVideoModal, commitMatchSession, commitPracticeSession, deleteFixedSchedule, deleteSportDiaryFromLog, editSportDiaryFromLog, generateFutureTimeline, getTeachingPoints, getVideoDirectives, openFixedScheduleModal, openFuturePlan, openMatchLogModal, openPracticeLogModal, openSleepModal, openVideoModal, selectTeachingPointVideo, submitSleepLog, syncSleepHoursWarning, switchDayPlanSubTab, toggleSchedTimeVisibility } from '../domain/route-planner.js';
@@ -92,6 +92,7 @@ export function bindUi() {
   window.addDropSetToSupersetSide = addDropSetToSupersetSide;
   window.addSupersetRound = addSupersetRound;
   window.addSupersetWithNext = addSupersetWithNext;
+  window.unmergeSuperset = unmergeSuperset;
   window.workoutCardDragStart = workoutCardDragStart;
   window.workoutCardDragOver = workoutCardDragOver;
   window.workoutCardDragLeave = workoutCardDragLeave;
@@ -159,6 +160,10 @@ export function bindUi() {
   window.editOrphanWorkoutLogs = editOrphanWorkoutLogs;
   window.beginManualWorkoutSession = beginManualWorkoutSession;
   window.beginManualWorkoutAfterType = beginManualWorkoutAfterType;
+  window.openManualGymRestModal = openManualGymRestModal;
+  window.closeManualGymRestModal = closeManualGymRestModal;
+  window.toggleManualRestCustomFields = toggleManualRestCustomFields;
+  window.confirmManualGymRestPrefs = confirmManualGymRestPrefs;
   window.closeGroceryDetail = closeGroceryDetail;
   window.generateDailyFoodLog = generateDailyFoodLog;
   window.generateDailyExerciseLog = generateDailyExerciseLog;

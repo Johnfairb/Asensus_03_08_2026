@@ -1586,6 +1586,28 @@
         </div>
     </div>
 
+    <!-- MANUAL GYM REST PREFS -->
+    <div id="manual-gym-rest-modal" class="hidden" style="position: fixed; top: 0; left: 50%; width: 100%; max-width: 390px; height: 100%; background: transparent; z-index: 21060; display: flex; justify-content: center; align-items: center; padding: 20px; transform: translateX(-50%); box-sizing: border-box;" onclick="if(event.target===this) closeManualGymRestModal()">
+        <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); transform: none; animation: none;" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:15px;">Rest times</h2>
+                <button type="button" onclick="closeManualGymRestModal()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p style="font-size:11px; color:var(--text-muted); margin:0 0 14px 0; line-height:1.4;">Set work-set rest for this gym session. Warmups use ¼ after the first and ½ after the second (compounds only). Custom skips rest timers.</p>
+            <label style="display:flex; align-items:center; gap:10px; margin-bottom:14px; font-size:12px; color:var(--text-main); cursor:pointer;">
+                <input type="checkbox" id="manual-rest-custom" onchange="toggleManualRestCustomFields()" style="width:16px; height:16px;">
+                Custom — no rest timers
+            </label>
+            <div id="manual-rest-fields">
+                <label style="display:block; font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Compound rest (seconds)</label>
+                <input type="number" id="manual-rest-compound" class="input-field" min="0" step="15" value="180" inputmode="numeric" style="margin-bottom:12px;">
+                <label style="display:block; font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Isolation rest (seconds)</label>
+                <input type="number" id="manual-rest-isolation" class="input-field" min="0" step="15" value="90" inputmode="numeric" style="margin-bottom:16px;">
+            </div>
+            <button type="button" class="btn-primary is-primary" style="margin:0; width:100%;" onclick="confirmManualGymRestPrefs()">Start gym session</button>
+        </div>
+    </div>
+
     <!-- LOAD SAVED WORKOUT PICKER -->
     <div id="load-workout-modal" class="hidden" style="position: fixed; top: 0; left: 50%; width: 100%; max-width: 390px; height: 100%; background: transparent; z-index: 21000; display: flex; justify-content: center; align-items: center; padding: 20px; transform: translateX(-50%); box-sizing: border-box;" onclick="if(event.target===this) closeLoadWorkoutPicker()">
         <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); max-height: 80vh; overflow:hidden; display:flex; flex-direction:column; transform: none; animation: none;" onclick="event.stopPropagation()">

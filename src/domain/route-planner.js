@@ -23,7 +23,7 @@ import { calculateTDEE, computeDayNutritionTargets, persistUserConfigToCloud } f
 import { recordHydrationMl, specificEventName } from '../lib/food-parse.js';
 import { drawMacroChart } from '../ui/charts.js';
 import { upsertTodaySleep } from './body-metrics.js';
-import { getTonightSleepTargetHours } from './sleep-rpe.js';
+import { getTonightSleepTargetHours, sleepHoursFromTotalRpe } from './sleep-rpe.js';
 import { configureJournalModal } from '../ui/drive.js';
 import { buildDiaryEntryFromForm } from '../ui/diary-ui.js';
 import { loadDayJournal, loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveMatchJournalEntry, savePracticeJournalEntry, deleteMatchJournalEntry, deletePracticeJournalEntry } from '../ui/journey.js';
@@ -1645,6 +1645,7 @@ export function generateFutureTimeline() {
             const recipeNames = getDayRecipeNames({
                 tPro: macros.tPro,
                 tCarb: macros.tCarb,
+                tFat: macros.tFat,
                 forDate: futureDate
             });
             if (recipeNames.length) {
@@ -1682,6 +1683,7 @@ function sumSimulatedDayMacros(macros, forDate) {
     const meals = resolveDayMealItems({
         tPro: macros.tPro,
         tCarb: macros.tCarb,
+        tFat: macros.tFat,
         forDate
     });
     let pro = 0, carb = 0, fat = 0;
@@ -1734,6 +1736,23 @@ function buildPlanSleepTargetHtml(forDate = new Date()) {
     let hours = 8.5;
     try {
         hours = getTonightSleepTargetHours(forDate) || 8.5;
+        // Before sessions are logged, estimate from planned events so Plan → Food is useful
+        const events = getPlannedDayEvents(forDate) || [];
+        let plannedRpe = 0;
+        events.forEach((ev) => {
+            const s = String(ev || '');
+            if (/^rest$/i.test(s)) return;
+            if (isStrengthEvent(s) || /hypertrophy|gym|full body/i.test(s)) plannedRpe += 5;
+            else if (isLactateEvent(s)) plannedRpe += 7;
+            else if (isPracticeEvent(s) || isGameEvent(s)) plannedRpe += 7;
+            else if (isSteadyCardio(s)) plannedRpe += 2;
+            else if (s && !/^rest\b/i.test(s)) plannedRpe += 5;
+        });
+        if (plannedRpe > 0) {
+            const fromPlan = sleepHoursFromTotalRpe(plannedRpe);
+            // Prefer the higher of logged load vs planned estimate
+            if (fromPlan > hours) hours = fromPlan;
+        }
     } catch (e) {
         hours = 8.5;
     }
@@ -1741,7 +1760,7 @@ function buildPlanSleepTargetHtml(forDate = new Date()) {
     return `<div style="margin-bottom:16px; padding:12px 14px; border:1px solid rgba(212,175,55,0.28); border-radius:10px; background:rgba(212,175,55,0.06);">
         <div style="font-size:9px; color:var(--gold-accent); font-family:'Roboto Mono',monospace; font-weight:800; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">Tonight's sleep target</div>
         <div style="font-size:20px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono',monospace;">${label} h</div>
-        <div style="font-size:11px; color:var(--text-muted); margin-top:6px; line-height:1.4;">Set from this day's training load. Log it the following morning on the Sleep badge.</div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:6px; line-height:1.4;">Based on this day's training load. Log it the following morning on the Sleep badge (that morning's log = tonight's sleep).</div>
     </div>`;
 }
 
@@ -2147,6 +2166,7 @@ export function openFuturePlan(dateStr, focus, totalCals, isoDate) {
             + buildMealPlanCardsHtml({
                 tPro: macros.tPro,
                 tCarb: macros.tCarb,
+                tFat: macros.tFat,
                 includeLog: false,
                 forDate: planDate,
                 plain: true

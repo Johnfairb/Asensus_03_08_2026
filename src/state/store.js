@@ -27,6 +27,8 @@ export const store = {
     networkShowLift: true
   },
   activeLog: { type: 'breakfast', items: [] },
+  /** Manual gym session rest prefs: { active, custom, compoundSec, isolationSec } | null */
+  manualGymRest: null,
   consumedToday: { cals: 0, pro: 0, carb: 0, fat: 0, cost: 0, mealsLogged: 0, water: 0 },
   fatigueLockouts: {},
   offlineQueue: JSON.parse(localStorage.getItem('ascensus_offline_queue')) || [],

@@ -13,7 +13,7 @@ const HIT_TYPE_LABELS_RE = new RegExp(
     'i'
 );
 import { saveSettings } from '../domain/thermodynamics.js';
-import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, canSupersetPair, createSupersetFromIndices, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem } from '../domain/workout-generator.js';
+import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, canSupersetPair, createSupersetFromIndices, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
 import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase } from '../domain/hypertrophy-engine.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
@@ -253,9 +253,11 @@ export function renderWorkoutLog() {
             && nextItem && canSupersetPair(item, nextItem);
         const restSlot = isLactateHit
             ? lactateRestSlotHtml(item, exIdx)
-            : (canSuperset
-                ? `<button type="button" onclick="addSupersetWithNext(${exIdx})" style="width:100%; margin-top:10px; background:transparent; color:var(--text-silver); border:1px dashed var(--border-subtle); padding:8px; border-radius:6px; cursor:pointer; font-size:10px; font-family:'Roboto Mono';">+ Superset with next</button>`
-                : '');
+            : (item.isSuperset
+                ? `<button type="button" onclick="unmergeSuperset(${exIdx})" style="width:100%; margin-top:10px; background:transparent; color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:8px; border-radius:6px; cursor:pointer; font-size:10px; font-family:'Roboto Mono';">Unmerge superset</button>`
+                : (canSuperset
+                    ? `<button type="button" onclick="addSupersetWithNext(${exIdx})" style="width:100%; margin-top:10px; background:transparent; color:var(--text-silver); border:1px dashed var(--border-subtle); padding:8px; border-radius:6px; cursor:pointer; font-size:10px; font-family:'Roboto Mono';">+ Superset with next</button>`
+                    : ''));
 
         const displayName = (item.isStretchGroup || isStaticStretchingLogItem(item))
             ? 'Stretching'
@@ -1386,6 +1388,7 @@ export function renderExerciseSets() {
             <button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'A')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · A</button>
             <button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'B')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · B</button>
             <button type="button" onclick="addSupersetRound(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD ROUND (A+B)</button>
+            <button type="button" onclick="unmergeSuperset(${exIdx})" style="width:100%; margin-top:8px; background:transparent; color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-family:'Roboto Mono';">Unmerge into two exercises</button>
         </div>`;
     } else {
         html += `<div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
@@ -1533,7 +1536,7 @@ export function toggleSetComplete(exIdx, setIdx) {
     // Core circuits: allow 60s between Set 1 / Set 2 / …
     // Lactate intervals always start their protocol rest after a logged set
     const isWarmupOrText = item.isWarmupGroup || (setObj.isText && !isLactate && !item.isCoreBlock);
-    const skipRest = !isLactate && (isWarmupOrText || isSteadyCardioLogItem(item));
+    const skipRest = !isLactate && (isWarmupOrText || isSteadyCardioLogItem(item) || !!(store.manualGymRest?.custom));
 
     if (setObj.completed && item.isCoreBlock && setObj.restTime > 0 && item.sets[setIdx + 1]) {
         startRestOnSet(exIdx, setIdx + 1, setObj.restTime);
@@ -1762,6 +1765,16 @@ export function beginManualWorkoutSession(kind, opts = {}) {
         return;
     }
 
+    // Gym / lifting: ask for compound vs isolation rest (or custom = no timers)
+    const isGymManual = !isSteadyCardio(normalized) && !isLactateEvent(normalized);
+    if (isGymManual && !opts.afterRestPrefs) {
+        openManualGymRestModal(normalized);
+        return;
+    }
+    if (!isGymManual) {
+        store.manualGymRest = null;
+    }
+
     // Steady / Lactate should use the same GPS template + log UI as a planned day
     const usePlanTemplate = isSteadyCardio(normalized) || isLactateEvent(normalized);
     window.manualWorkoutMode = !usePlanTemplate;
@@ -1803,6 +1816,48 @@ export function beginManualWorkoutSession(kind, opts = {}) {
         window._workoutSessionConfirmed = true;
         saveWorkoutDraft({ elapsedMs: 0 });
     }
+}
+
+export function openManualGymRestModal(kind) {
+    window._pendingManualRestKind = kind || window.manualSessionKind || 'Full Body / Strength';
+    const modal = document.getElementById('manual-gym-rest-modal');
+    const customEl = document.getElementById('manual-rest-custom');
+    const compoundEl = document.getElementById('manual-rest-compound');
+    const isolationEl = document.getElementById('manual-rest-isolation');
+    if (customEl) customEl.checked = false;
+    if (compoundEl) compoundEl.value = store.manualGymRest?.compoundSec || 180;
+    if (isolationEl) isolationEl.value = store.manualGymRest?.isolationSec || 90;
+    toggleManualRestCustomFields();
+    if (modal) modal.classList.remove('hidden');
+}
+
+export function closeManualGymRestModal() {
+    document.getElementById('manual-gym-rest-modal')?.classList.add('hidden');
+}
+
+export function toggleManualRestCustomFields() {
+    const custom = !!document.getElementById('manual-rest-custom')?.checked;
+    const fields = document.getElementById('manual-rest-fields');
+    if (fields) fields.style.opacity = custom ? '0.4' : '1';
+    const compoundEl = document.getElementById('manual-rest-compound');
+    const isolationEl = document.getElementById('manual-rest-isolation');
+    if (compoundEl) compoundEl.disabled = custom;
+    if (isolationEl) isolationEl.disabled = custom;
+}
+
+export function confirmManualGymRestPrefs() {
+    const custom = !!document.getElementById('manual-rest-custom')?.checked;
+    const compoundSec = Math.max(0, parseInt(document.getElementById('manual-rest-compound')?.value, 10) || 180);
+    const isolationSec = Math.max(0, parseInt(document.getElementById('manual-rest-isolation')?.value, 10) || 90);
+    store.manualGymRest = {
+        active: true,
+        custom,
+        compoundSec,
+        isolationSec
+    };
+    closeManualGymRestModal();
+    const kind = window._pendingManualRestKind || window.manualSessionKind || 'Full Body / Strength';
+    beginManualWorkoutSession(kind, { afterRestPrefs: true });
 }
 
 // Bridge for route.js (avoids circular import of beginManualWorkoutSession)
@@ -2040,6 +2095,7 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
 
     window.manualWorkoutMode = false;
     window.editingSessionId = null;
+    store.manualGymRest = null;
 
     if (type === 'workout') {
         if (isGuidanceOff('workout')) {
@@ -2324,6 +2380,7 @@ export function closeExecutionZone(opts = {}) {
         window.editingSessionId = null;
         window._lactateHitSelection = null;
         window._hitClassDiaryOnly = false;
+        store.manualGymRest = null;
         if (store.activeLog?.type === 'workout') store.activeLog.items = [];
     }
 

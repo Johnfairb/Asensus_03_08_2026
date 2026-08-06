@@ -10,9 +10,11 @@ import {
     equipmentForExercise,
     getDumbbellIncrement,
     getHypertrophySessionRoutine,
+    HYPERTROPHY_EXERCISE_META,
     isHypertrophyFocus,
     isHypertrophyPhase,
     progressHypertrophyWeight,
+    resolveWarmupRestOptions,
     roundUpLoad
 } from './hypertrophy-engine.js';
 import {
@@ -59,12 +61,16 @@ export function addExercisesByIds(ids) {
                 return;
             }
         }
+        const isIso = !!(HYPERTROPHY_EXERCISE_META[ex.name]?.role === 'isolation');
+        const restOpts = resolveWarmupRestOptions(isIso);
+        const workRest = restOpts.mode === 'none' ? 0 : restOpts.workRestSec;
         const entry = {
             exercise: ex,
-            sets: [emptySetForExercise(ex)],
+            sets: [{ weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, completed: false, restTime: workRest }],
             plannedSets: 1,
             slotLabel: null,
             isExtra: true,
+            isIsolation: isIso,
             note: 'Extra'
         };
         if (ghostOpen) {
@@ -72,8 +78,9 @@ export function addExercisesByIds(ids) {
         } else {
             store.activeLog.items.push({
                 exercise: ex,
-                sets: [emptySetForExercise(ex)],
-                isExtra: true
+                sets: [{ weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, completed: false, restTime: workRest }],
+                isExtra: true,
+                isIsolation: isIso
             });
         }
     });
@@ -306,6 +313,56 @@ export function createSupersetFromIndices(idxA, idxB) {
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) {
         try { window.renderExerciseSets?.(); } catch (e) { /* ignore */ }
     }
+    renderActiveLog();
+    return true;
+}
+
+/** Split a merged superset back into two separate exercise cards. */
+export function unmergeSuperset(exIdx) {
+    const items = store.activeLog?.items;
+    const item = items?.[exIdx];
+    if (!item?.isSuperset || !Array.isArray(item.sides) || item.sides.length < 2) {
+        alert('Not a merged superset.');
+        return false;
+    }
+
+    const rebuildSide = (sideKey) => {
+        const meta = item.sides.find(s => s.key === sideKey) || {};
+        const sideSets = (item.sets || [])
+            .filter(s => s && s.side === sideKey)
+            .map(s => {
+                const clone = JSON.parse(JSON.stringify(s));
+                delete clone.side;
+                delete clone.round;
+                return clone;
+            });
+        return {
+            exercise: JSON.parse(JSON.stringify(meta.exercise || { name: `Exercise ${sideKey}` })),
+            note: item.note || '',
+            sets: sideSets.length ? sideSets : [{ weight: 0, reps: 10, rpe: 2, completed: false, restTime: 90 }],
+            plannedSets: typeof meta.plannedSets === 'number' ? meta.plannedSets : undefined,
+            isIsolation: !!meta.isIsolation,
+            role: meta.role || null,
+            workWeightKg: meta.workWeightKg,
+            needsWeightFind: !!meta.needsWeightFind,
+            needsBwGate: !!meta.needsBwGate,
+            weightFinderResolved: !!meta.weightFinderResolved,
+            bwGateResolved: !!meta.bwGateResolved,
+            isExtra: !!item.isExtra
+        };
+    };
+
+    const a = rebuildSide('A');
+    const b = rebuildSide('B');
+    items.splice(exIdx, 1, a, b);
+
+    if (window.currentModalExIdx === exIdx) {
+        try { window.closeExerciseSetsModal?.(); } catch (e) { /* ignore */ }
+        window.currentModalExIdx = null;
+    } else if (window.currentModalExIdx != null && window.currentModalExIdx > exIdx) {
+        window.currentModalExIdx += 1;
+    }
+
     renderActiveLog();
     return true;
 }
@@ -1104,13 +1161,35 @@ export async function generateWorkoutTemplate() {
         const itemReps = item.isAux ? 12
             : (item.isStrengthIsolation ? (item.targetReps || 8)
                 : (useHypertrophy ? 10 : pData.reps));
-        const itemRest = item.isAux ? 60
+        let itemRest = item.isAux ? 60
             : (item.isStrengthIsolation ? (item.restSec || 120)
                 : (useHypertrophy ? 90 : pData.rest_sec));
+        // Manual gym session: override work rest from session prefs
+        if (store.manualGymRest?.active) {
+            if (store.manualGymRest.custom) {
+                itemRest = 0;
+            } else {
+                const isIso = !!item.isIsolation || !!item.isStrengthIsolation;
+                itemRest = isIso
+                    ? (Number(store.manualGymRest.isolationSec) || 90)
+                    : (Number(store.manualGymRest.compoundSec) || 180);
+            }
+        }
 
         // Per-exercise warmups (strength + hypertrophy) — same warmup weight logic
         if (!item.isText && !isCardioEx && !item.isLactateHit) {
-            const wu = buildHypertrophyWarmupSets(exObj.name, tWeight, itemReps, !!item.isIsolation || !!item.isStrengthIsolation);
+            const wuOpts = {
+                workRestSec: itemRest,
+                mode: (store.manualGymRest?.active && store.manualGymRest?.custom) ? 'none'
+                    : (store.manualGymRest?.active ? 'manual' : 'phase')
+            };
+            const wu = buildHypertrophyWarmupSets(
+                exObj.name,
+                tWeight,
+                itemReps,
+                !!item.isIsolation || !!item.isStrengthIsolation,
+                wuOpts
+            );
             setsArray.push(...wu);
         }
 

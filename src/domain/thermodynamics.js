@@ -383,11 +383,18 @@ function collectPlannedEventRpes(dateObj) {
     return rpes;
 }
 
-function macrosFromCalories(targetCals) {
+/**
+ * Protein first at 2 g/kg bodyweight (calories from protein are a consequence of food quantity).
+ * Leftover calories → 70% carbs / 30% fat. If protein already exceeds the calorie aim, carb/fat = 0.
+ */
+function macrosFromCalories(targetCals, config = store.userConfig) {
     const cals = Math.max(0, Math.round(targetCals));
-    const pro = Math.round((cals * 0.40) / 4);
-    const carb = Math.round((cals * 0.40) / 4);
-    const fat = Math.round((cals * 0.20) / 9);
+    const weightKg = Number(config?.weight) || 80;
+    const pro = Math.max(0, Math.round(weightKg * 2));
+    const proCals = pro * 4;
+    const leftover = Math.max(0, cals - proCals);
+    const carb = Math.round((leftover * 0.70) / 4);
+    const fat = Math.round((leftover * 0.30) / 9);
     return { cals, pro, carb, fat };
 }
 
@@ -462,7 +469,7 @@ export function explainDayNutritionTargets(dateObj = new Date(), config = store.
         }
     }
 
-    const macros = macrosFromCalories(targetCals);
+    const macros = macrosFromCalories(targetCals, config);
     return {
         bmr: Math.round(BMR),
         activityMult: mult,

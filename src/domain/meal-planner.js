@@ -12,6 +12,22 @@ function availableFoods(list) {
     return excludeBannedFoods(applyDietFilter(list || []));
 }
 
+/** Meat / fish / animal products — used for the ≥90% animal protein rule (skipped for vegan/veg). */
+export function isAnimalProteinFood(food) {
+    if (!food) return false;
+    const h = String(food._heading || food.heading || '').toLowerCase();
+    return h === 'meat' || h === 'fish' || h === 'animal products';
+}
+
+function shouldEnforceAnimalProtein() {
+    const diet = store.userConfig?.diet;
+    return diet !== 'Vegan' && diet !== 'Vegetarian';
+}
+
+function animalProteinFoods(list) {
+    return (list || []).filter(isAnimalProteinFood);
+}
+
 function dayOfYear(dateObj) {
     const d = dateObj instanceof Date ? dateObj : new Date();
     return Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
@@ -70,9 +86,17 @@ function slotCategory(role) {
     return 'MISC';
 }
 
-function resolveFood(slotKey, cat, defaultKeyword, customList, planDate, budgetSaver) {
+function resolveFood(slotKey, cat, defaultKeyword, customList, planDate, budgetSaver, opts = {}) {
     let foods = customList || availableFoods(store.globalFoodDB.filter(f => f._category === cat));
+    if (opts.animalOnly && cat === 'PRO') {
+        const animal = animalProteinFoods(foods);
+        if (animal.length) foods = animal;
+    }
     if (foods.length === 0) foods = store.globalFoodDB.filter(f => f._category === cat);
+    if (opts.animalOnly && cat === 'PRO') {
+        const animal = animalProteinFoods(foods);
+        if (animal.length) foods = animal;
+    }
     if (foods.length === 0) {
         return {
             id: null,
@@ -102,9 +126,14 @@ function resolveFood(slotKey, cat, defaultKeyword, customList, planDate, budgetS
         : [];
     // Cross-category fallback (e.g. chickpeas/lentils listed as CARB but used as PRO prefer)
     if (!keywordMatches.length && keyword) {
-        keywordMatches = availableFoods(store.globalFoodDB).filter(f =>
+        let cross = availableFoods(store.globalFoodDB).filter(f =>
             (f._cleanName || '').toLowerCase().includes(keyword)
         );
+        if (opts.animalOnly) {
+            const animalCross = animalProteinFoods(cross);
+            if (animalCross.length) cross = animalCross;
+        }
+        keywordMatches = cross;
     }
     if (keywordMatches.length) {
         const prefHit = keywordMatches.find(f => (f.preference_score || 0) > 0);
@@ -117,7 +146,7 @@ function resolveFood(slotKey, cat, defaultKeyword, customList, planDate, budgetS
     return sorted[doy % sorted.length];
 }
 
-function scaleSlotMass(slot, food, activePro, activeCarb, meal) {
+function scaleSlotMass(slot, food, activePro, activeCarb, activeFat, meal) {
     const cat = slotCategory(slot.role);
     if (slot.fixedMass != null) {
         return smartRoundMass(slot.fixedMass, food._cleanName, cat);
@@ -129,11 +158,12 @@ function scaleSlotMass(slot, food, activePro, activeCarb, meal) {
         if (activeCarb <= 0) return 0;
         return smartRoundMass((activeCarb / Math.max(0.1, food.carbs_per_100g || 1)) * 100, food._cleanName, 'CARB');
     }
+    if (cat === 'FAT') {
+        if (activeFat <= 0) return 0;
+        return smartRoundMass((activeFat / Math.max(0.1, food.fat_per_100g || 1)) * 100, food._cleanName, 'FAT');
+    }
     if (cat === 'VEG_G' || cat === 'VEG_C') {
         return meal === 'lunch' ? 150 : 100;
-    }
-    if (cat === 'FAT') {
-        return smartRoundMass(10, food._cleanName, 'FAT');
     }
     if (cat === 'LIQUID') {
         return 150;
@@ -145,15 +175,21 @@ function scaleSlotMass(slot, food, activePro, activeCarb, meal) {
  * Resolve breakfast/lunch/dinner from the flexible recipe catalog.
  * Returns [{ meal, recipeId, recipeName, items, instructions }].
  */
-export function resolveDayMealItems({ tPro, tCarb, forDate = new Date() } = {}) {
+export function resolveDayMealItems({ tPro, tCarb, tFat, forDate = new Date() } = {}) {
     if (!store.userConfig.targets || !store.globalFoodDB.length) return [];
 
     const Goal = store.userConfig.goal;
     const mealsTotal = store.userConfig.mealsPerDay || 3;
     const basePro = tPro != null ? tPro : store.userConfig.targets.pro;
     const baseCarb = tCarb != null ? tCarb : store.userConfig.targets.carb;
+    const baseFat = tFat != null ? tFat : store.userConfig.targets.fat;
     const activePro = basePro / mealsTotal;
     const activeCarb = baseCarb / mealsTotal;
+    const activeFat = (baseFat || 0) / mealsTotal;
+    const enforceAnimal = shouldEnforceAnimalProtein();
+    // ≥90% of protein from meat/fish/animal products (skipped for vegan/vegetarian)
+    const animalProShare = enforceAnimal ? 0.9 : 1;
+    const otherProShare = 1 - animalProShare;
 
     const zeroPrep = isZeroPrepOn();
     const budgetSaver = isBudgetSaverOn();
@@ -167,6 +203,7 @@ export function resolveDayMealItems({ tPro, tCarb, forDate = new Date() } = {}) 
         const items = [];
         let usedScaledPro = false;
         let usedScaledCarb = false;
+        let usedScaledFat = false;
         const slots = recipe.slots || [];
 
         slots.forEach((slot, idx) => {
@@ -185,42 +222,74 @@ export function resolveDayMealItems({ tPro, tCarb, forDate = new Date() } = {}) 
                 prefer = store.userConfig.diet === 'Vegan' ? 'Vegan Protein' : 'Whey';
             }
 
-            const slotKey = `${meal}_${cat}_${idx}`;
-            const food = resolveFood(slotKey, cat, prefer, list, planDate, budgetSaver);
-
-            // Only one scaled PRO and one scaled CARB per meal (first non-fixed of each)
             const isPrimaryPro = cat === 'PRO' && slot.fixedMass == null && !usedScaledPro;
             const isPrimaryCarb = cat === 'CARB' && slot.fixedMass == null && !usedScaledCarb;
+            const isPrimaryFat = cat === 'FAT' && slot.fixedMass == null && !usedScaledFat;
+
+            // Primary PRO for omnivore diets: prefer animal sources (≥90% rule)
+            const animalOnly = isPrimaryPro && enforceAnimal && !zeroPrep;
+
+            const slotKey = `${meal}_${cat}_${idx}`;
+            const food = resolveFood(slotKey, cat, prefer, list, planDate, budgetSaver, { animalOnly });
 
             let mass;
             if (isPrimaryPro) {
-                mass = scaleSlotMass({ ...slot, role: 'PRO' }, food, activePro, activeCarb, meal);
+                const proTarget = activePro * animalProShare;
+                mass = scaleSlotMass({ ...slot, role: 'PRO' }, food, proTarget, activeCarb, activeFat, meal);
                 usedScaledPro = true;
             } else if (isPrimaryCarb) {
-                mass = scaleSlotMass({ ...slot, role: 'CARB' }, food, activePro, activeCarb, meal);
+                mass = scaleSlotMass({ ...slot, role: 'CARB' }, food, activePro, activeCarb, activeFat, meal);
                 usedScaledCarb = true;
+            } else if (isPrimaryFat) {
+                mass = scaleSlotMass({ ...slot, role: 'FAT' }, food, activePro, activeCarb, activeFat, meal);
+                usedScaledFat = true;
             } else if (slot.fixedMass != null) {
-                mass = scaleSlotMass(slot, food, activePro, activeCarb, meal);
+                mass = scaleSlotMass(slot, food, activePro, activeCarb, activeFat, meal);
             } else if (slot.optional) {
                 // Optional non-primary extras: small fixed garnish
                 mass = cat === 'FAT' ? 10 : cat === 'LIQUID' ? 150 : (cat === 'VEG_G' || cat === 'VEG_C' ? 80 : 50);
                 mass = smartRoundMass(mass, food._cleanName, cat);
             } else {
-                mass = scaleSlotMass(slot, food, activePro, activeCarb, meal);
+                mass = scaleSlotMass(slot, food, activePro, activeCarb, activeFat, meal);
             }
 
-            if (mass <= 0 && cat === 'CARB') return;
+            if (mass <= 0 && (cat === 'CARB' || cat === 'FAT')) return;
             if (slot.optional && !food.id) return;
 
             items.push({ food, mass, role: cat });
         });
 
-        // Guarantee at least PRO (+ CARB if needed) if slots failed
+        // Top up remaining ~10% protein from any PRO source when enforcing animal split
+        if (enforceAnimal && otherProShare > 0 && usedScaledPro) {
+            const otherTarget = activePro * otherProShare;
+            if (otherTarget > 0.5) {
+                const proList = availableFoods(store.globalFoodDB.filter(f => f._category === 'PRO'));
+                const fOther = resolveFood(`${meal}_pro_other`, 'PRO', zeroPrep ? 'Whey' : '', proList, planDate, budgetSaver, { animalOnly: false });
+                if (fOther?.id || fOther?._cleanName) {
+                    const mass = smartRoundMass(
+                        (otherTarget / Math.max(0.1, fOther.protein_per_100g || 1)) * 100,
+                        fOther._cleanName,
+                        'PRO'
+                    );
+                    if (mass > 0) items.push({ food: fOther, mass, role: 'PRO' });
+                }
+            }
+        }
+
+        // Guarantee at least PRO (+ CARB/FAT if needed) if slots failed
         if (!items.length) {
-            const fPro = resolveFood(`${meal}_pro`, 'PRO', meal === 'breakfast' ? 'Egg' : 'Chicken', null, planDate, budgetSaver);
+            const fPro = resolveFood(
+                `${meal}_pro`,
+                'PRO',
+                meal === 'breakfast' ? 'Egg' : 'Chicken',
+                null,
+                planDate,
+                budgetSaver,
+                { animalOnly: enforceAnimal }
+            );
             items.push({
                 food: fPro,
-                mass: smartRoundMass((activePro / Math.max(0.1, fPro.protein_per_100g)) * 100, fPro._cleanName, 'PRO'),
+                mass: smartRoundMass((activePro * animalProShare / Math.max(0.1, fPro.protein_per_100g)) * 100, fPro._cleanName, 'PRO'),
                 role: 'PRO'
             });
             if (activeCarb > 0) {
@@ -231,6 +300,19 @@ export function resolveDayMealItems({ tPro, tCarb, forDate = new Date() } = {}) 
                     role: 'CARB'
                 });
             }
+            if (activeFat > 0) {
+                const fFat = resolveFood(`${meal}_fat`, 'FAT', 'Olive', null, planDate, budgetSaver);
+                items.push({
+                    food: fFat,
+                    mass: smartRoundMass((activeFat / Math.max(0.1, fFat.fat_per_100g)) * 100, fFat._cleanName, 'FAT'),
+                    role: 'FAT'
+                });
+            }
+        } else if (activeFat > 0 && !usedScaledFat) {
+            // Recipes without a scaled FAT slot still need leftover fat filled
+            const fFat = resolveFood(`${meal}_fat`, 'FAT', 'Olive', null, planDate, budgetSaver);
+            const mass = smartRoundMass((activeFat / Math.max(0.1, fFat.fat_per_100g || 1)) * 100, fFat._cleanName, 'FAT');
+            if (mass > 0) items.push({ food: fFat, mass, role: 'FAT' });
         }
 
         return {
@@ -244,8 +326,8 @@ export function resolveDayMealItems({ tPro, tCarb, forDate = new Date() } = {}) 
 }
 
 /** Display-only: sum planned B/L/D cost for the day (no budget enforcement). */
-export function getPlannedDayCost({ tPro, tCarb, forDate = new Date() } = {}) {
-    const meals = resolveDayMealItems({ tPro, tCarb, forDate });
+export function getPlannedDayCost({ tPro, tCarb, tFat, forDate = new Date() } = {}) {
+    const meals = resolveDayMealItems({ tPro, tCarb, tFat, forDate });
     let cost = 0;
     meals.forEach(entry => {
         (entry.items || []).forEach(item => {
@@ -257,15 +339,15 @@ export function getPlannedDayCost({ tPro, tCarb, forDate = new Date() } = {}) {
 }
 
 /** Recipe names for the day (week-card food lines). */
-export function getDayRecipeNames({ tPro, tCarb, forDate = new Date() } = {}) {
-    return resolveDayMealItems({ tPro, tCarb, forDate })
+export function getDayRecipeNames({ tPro, tCarb, tFat, forDate = new Date() } = {}) {
+    return resolveDayMealItems({ tPro, tCarb, tFat, forDate })
         .map(m => m.recipeName)
         .filter(Boolean);
 }
 
 /** Unique food names for the day (week-card ingredient line). */
-export function getDayIngredientNames({ tPro, tCarb, forDate = new Date() } = {}) {
-    const meals = resolveDayMealItems({ tPro, tCarb, forDate });
+export function getDayIngredientNames({ tPro, tCarb, tFat, forDate = new Date() } = {}) {
+    const meals = resolveDayMealItems({ tPro, tCarb, tFat, forDate });
     const seen = new Set();
     const names = [];
     meals.forEach(({ items }) => {
@@ -281,12 +363,13 @@ export function getDayIngredientNames({ tPro, tCarb, forDate = new Date() } = {}
 
 /**
  * Breakfast/Lunch/Dinner cards matching Today's plan.
- * @param {{ tPro?: number, tCarb?: number, includeLog?: boolean, forDate?: Date, headerHtml?: string, plain?: boolean }} opts
+ * @param {{ tPro?: number, tCarb?: number, tFat?: number, includeLog?: boolean, forDate?: Date, headerHtml?: string, plain?: boolean }} opts
  */
 export function buildMealPlanCardsHtml(opts = {}) {
     const {
         tPro = store.userConfig.targets?.pro,
         tCarb = store.userConfig.targets?.carb,
+        tFat = store.userConfig.targets?.fat,
         includeLog = true,
         forDate = new Date(),
         headerHtml = '',
@@ -309,7 +392,7 @@ export function buildMealPlanCardsHtml(opts = {}) {
 
     const planDate = forDate instanceof Date ? forDate : new Date(forDate);
     const iso = `${planDate.getFullYear()}-${String(planDate.getMonth() + 1).padStart(2, '0')}-${String(planDate.getDate()).padStart(2, '0')}`;
-    const meals = resolveDayMealItems({ tPro, tCarb, forDate: planDate });
+    const meals = resolveDayMealItems({ tPro, tCarb, tFat, forDate: planDate });
     let html = headerHtml || '';
 
     meals.forEach(({ meal, recipeId, recipeName }) => {
@@ -387,9 +470,11 @@ export function openMealDetail(mealKey, iso, tPro, tCarb, recipeId = '') {
 
     const dayPro = (tPro != null && tPro > 0) ? tPro : store.userConfig.targets?.pro;
     const dayCarb = (tCarb != null && tCarb > 0) ? tCarb : store.userConfig.targets?.carb;
+    const dayFat = store.userConfig.targets?.fat;
     const meals = resolveDayMealItems({
         tPro: dayPro,
         tCarb: dayCarb,
+        tFat: dayFat,
         forDate
     });
 
