@@ -171,7 +171,20 @@
 
         <!-- STEP 3: The Engine (Diet & Sport) -->
         <div id="ob-step-3" class="ob-step hidden">
+            <div class="ob-step-actions ob-step-actions-top">
+                <button type="button" id="btn-lock-boot-gps" class="btn-primary is-primary" style="margin-top:0;" onclick="triggerBootSequence()">LOCK &amp; BOOT GPS</button>
+                <p style="font-size:10px; color:var(--text-muted); text-align:center; margin:8px 0 0; font-family:'Roboto Mono';">Scroll for options · tick both boxes below · then press LOCK &amp; BOOT GPS</p>
+            </div>
             <div class="ob-step-body">
+                <div style="margin-bottom: 15px; border: 1px solid var(--border-highlight); padding: 12px; border-radius: 8px;">
+                    <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0 0 10px 0;">
+                        <input type="checkbox" id="ob-req-gym" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have access to a commercial gym.
+                    </label>
+                    <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0;">
+                        <input type="checkbox" id="ob-req-scale" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have a digital food/body scale.
+                    </label>
+                </div>
+
                 <label style="margin-top:0;">Dietary Matrix</label>
                 <div class="ob-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 15px; gap: 8px;">
                     <div class="ob-card active" onclick="selectObCard(this, 'ob-diet', 'Standard')">STANDARD</div>
@@ -220,22 +233,12 @@
                         <option value="No">No (Use Machine Alternatives)</option>
                     </select>
                 </div>
-
-                <div style="margin-bottom: 8px; border: 1px solid var(--border-highlight); padding: 12px; border-radius: 8px;">
-                    <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0 0 10px 0;">
-                        <input type="checkbox" id="ob-req-gym" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have access to a commercial gym.
-                    </label>
-                    <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0;">
-                        <input type="checkbox" id="ob-req-scale" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have a digital food/body scale.
-                    </label>
-                </div>
             </div>
             <div class="ob-step-actions">
                 <div style="display:flex; gap:10px;">
-                    <button type="button" class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(2)">← BACK</button>
-                    <button type="button" class="btn-primary" style="flex:2; background: var(--gold-glow); border-color: var(--gold-accent); color: var(--gold-accent);" onclick="triggerBootSequence()">LOCK &amp; BOOT GPS</button>
+                    <button type="button" class="btn-primary" style="flex:1; margin-top:0; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(2)">← BACK</button>
+                    <button type="button" class="btn-primary is-primary" style="flex:2; margin-top:0;" onclick="triggerBootSequence()">LOCK &amp; BOOT GPS</button>
                 </div>
-                <p style="font-size:10px; color:var(--text-muted); text-align:center; margin:8px 0 0; font-family:'Roboto Mono';">Tick both boxes above, then press LOCK &amp; BOOT GPS</p>
                 <button type="button" class="btn-primary" style="margin-top: 10px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">SIGN OUT / SWITCH ACCOUNT</button>
             </div>
         </div>

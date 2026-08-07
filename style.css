@@ -1319,21 +1319,23 @@ body.dependent-mode .hud-label::after {
 }
 
 #onboarding-container .ob-header {
-    flex-shrink: 0;
+    flex: 0 0 auto;
     text-align: center;
     margin-bottom: 12px;
 }
 
 #onboarding-container .ob-step:not(.hidden) {
-    display: flex;
+    display: flex !important;
     flex-direction: column;
     flex: 1 1 auto;
+    height: 0; /* force flex child to respect parent height */
     min-height: 0;
     overflow: hidden;
 }
 
 #onboarding-container .ob-step-body {
     flex: 1 1 auto;
+    height: 0;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
@@ -1342,10 +1344,26 @@ body.dependent-mode .hud-label::after {
 }
 
 #onboarding-container .ob-step-actions {
-    flex-shrink: 0;
+    flex: 0 0 auto;
     padding-top: 10px;
+    padding-bottom: 4px;
     border-top: 1px solid var(--border-subtle);
     background: var(--bg-void);
+    z-index: 5;
+}
+
+#onboarding-container .ob-step-actions-top {
+    border-top: none;
+    border-bottom: 1px solid var(--border-subtle);
+    padding-top: 0;
+    padding-bottom: 10px;
+    margin-bottom: 8px;
+}
+
+#btn-lock-boot-gps {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
 #boot-screen {
