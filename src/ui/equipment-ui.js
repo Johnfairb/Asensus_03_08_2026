@@ -14,7 +14,11 @@ let _pendingConfirmAfterPick = null;
 
 export function ensureEquipmentPickModal() {
     let el = document.getElementById('equipment-pick-modal');
-    if (el) return el;
+    const host = document.querySelector('.iphone-screen') || document.body;
+    if (el) {
+        if (el.parentElement !== host) host.appendChild(el);
+        return el;
+    }
     el = document.createElement('div');
     el.id = 'equipment-pick-modal';
     el.className = 'hidden';
@@ -37,7 +41,6 @@ export function ensureEquipmentPickModal() {
     el.addEventListener('click', (e) => {
         if (e.target === el) { /* block dismiss — must pick */ }
     });
-    const host = document.querySelector('.iphone-screen') || document.body;
     host.appendChild(el);
     return el;
 }
