@@ -130,9 +130,9 @@ export async function bootOperatorProfile() {
             const missingTable = String(error.code || '') === 'PGRST205'
                 || /could not find the table/i.test(String(error.message || ''));
             const hint = missingTable
-                ? ' Missing table public.user_profiles — run supabase/create_user_profiles.sql in the SQL Editor.'
+                ? ' Your Supabase DB is missing tables. Open SQL Editor and run ALL of supabase/schema.sql (not just user_profiles), then reload.'
                 : ' Check RLS on user_profiles.';
-            await recoverToSignIn(`[ ERROR ] Profile fetch failed: ${detail}.${hint} Signed out — fix DB, then sign in again.`);
+            await recoverToSignIn(`[ ERROR ] ${detail}.${hint}`);
             return;
         }
 
