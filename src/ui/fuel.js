@@ -2,6 +2,12 @@ import { store } from '../state/store.js';
 import { generateDailyMealPlan } from '../domain/meal-planner.js';
 import { STRENGTH_EXERCISE_META } from '../domain/strength-engine.js';
 import {
+    formatMuscleList,
+    getExerciseMeta,
+    getExerciseSessionLabel,
+    resolveCatalogName
+} from '../domain/exercise-catalog.js';
+import {
     canEditIncrements,
     DEFAULT_PROFILES,
     editableIncrementCodes,
