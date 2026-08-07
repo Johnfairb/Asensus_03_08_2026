@@ -43,14 +43,18 @@ export function syncAuthThemeUI() {
 
 export function nextObStep(stepNumber) {
     document.querySelectorAll('.ob-step').forEach(step => step.classList.add('hidden'));
-    document.getElementById(`ob-step-${stepNumber}`).classList.remove('hidden');
-    
+    const stepEl = document.getElementById(`ob-step-${stepNumber}`);
+    if (stepEl) stepEl.classList.remove('hidden');
+
     const titles = ["OPERATOR BIOMETRICS", "CHASSIS & TARGET", "SYSTEM LOGIC"];
     document.getElementById('ob-phase-title').innerText = `PHASE ${stepNumber} / 3`;
     document.getElementById('ob-main-title').innerText = titles[stepNumber - 1];
-    
+
     let progress = stepNumber === 1 ? '33%' : (stepNumber === 2 ? '66%' : '100%');
     document.getElementById('ob-progress').style.width = progress;
+
+    const body = stepEl?.querySelector('.ob-step-body');
+    if (body) body.scrollTop = 0;
 }
 
 export function triggerBootSequence() {

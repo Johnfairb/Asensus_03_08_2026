@@ -96,7 +96,7 @@
 
     <!-- FIRST ASCENT ONBOARDING (ELITE PROGRESSIVE) -->
     <div id="onboarding-container" class="auth-panel hidden">
-        <div style="text-align: center; margin-bottom: 20px;">
+        <div class="ob-header">
             <div class="text-gold" id="ob-phase-title">PHASE 1 / 3</div>
             <h1 style="font-size: 20px;" id="ob-main-title">OPERATOR BIOMETRICS</h1>
             <div class="progress-bar-bg" style="width: 60%; margin: 15px auto 0 auto;"><div id="ob-progress" class="progress-bar-fill" style="background-color: var(--gold-accent); width: 33%;"></div></div>
@@ -104,134 +104,142 @@
 
         <!-- STEP 1: Basic Biometrics -->
         <div id="ob-step-1" class="ob-step">
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <div style="flex: 1;"><label style="margin-top:0;">Height (cm)</label><input type="number" id="ob-height" class="input-field" placeholder="180"></div>
-                <div style="flex: 1;"><label style="margin-top:0;">Age</label><input type="number" id="ob-age" class="input-field" placeholder="25"></div>
+            <div class="ob-step-body">
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <div style="flex: 1;"><label style="margin-top:0;">Height (cm)</label><input type="number" id="ob-height" class="input-field" placeholder="180"></div>
+                    <div style="flex: 1;"><label style="margin-top:0;">Age</label><input type="number" id="ob-age" class="input-field" placeholder="25"></div>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="margin-top:0;">Body Fat % (Optional, improves macro accuracy)</label>
+                    <input type="number" id="ob-bf" class="input-field" placeholder="e.g. 15">
+                </div>
+                <label style="margin-top:0;">Biological Sex</label>
+                <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 8px;">
+                    <div class="ob-card active" onclick="selectObCard(this, 'ob-sex', 'Male')">MALE</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-sex', 'Female')">FEMALE</div>
+                    <input type="hidden" id="ob-sex" value="Male">
+                </div>
             </div>
-            <div style="margin-bottom: 15px;">
-                <label style="margin-top:0;">Body Fat % (Optional, improves macro accuracy)</label>
-                <input type="number" id="ob-bf" class="input-field" placeholder="e.g. 15">
+            <div class="ob-step-actions">
+                <button type="button" class="btn-primary" style="border-color: var(--silver-accent); color: var(--silver-accent);" onclick="nextObStep(2)">NEXT PARAMETERS →</button>
+                <button type="button" class="btn-primary" style="margin-top: 10px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">SIGN OUT / SWITCH ACCOUNT</button>
             </div>
-            <label style="margin-top:0;">Biological Sex</label>
-            <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 20px;">
-                <div class="ob-card active" onclick="selectObCard(this, 'ob-sex', 'Male')">MALE</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-sex', 'Female')">FEMALE</div>
-                <input type="hidden" id="ob-sex" value="Male">
-            </div>
-            <button class="btn-primary" style="border-color: var(--silver-accent); color: var(--silver-accent);" onclick="nextObStep(2)">NEXT PARAMETERS →</button>
-            <button class="btn-primary" style="margin-top: 12px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">SIGN OUT / SWITCH ACCOUNT</button>
         </div>
 
         <!-- STEP 2: The Chassis (Weight & Goal) -->
         <div id="ob-step-2" class="ob-step hidden">
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <div style="flex: 1;"><label style="margin-top:0;">Current Weight (kg)</label><input type="number" id="ob-weight" class="input-field" placeholder="80"></div>
-                <div style="flex: 1;"><label style="margin-top:0;">Target Weight (kg)</label><input type="number" id="ob-target" class="input-field" placeholder="75"></div>
-            </div>
-            
-            <label style="margin-top:0;">Lifting Experience</label>
-            <select id="ob-experience" class="input-field" onchange="document.getElementById('1rm-container').style.display = this.value === 'Advanced' ? 'block' : 'none'">
-                <option value="Beginner">Beginner (< 1 Year)</option>
-                <option value="Advanced">Advanced (> 1 Year)</option>
-            </select>
-            
-            <div id="1rm-container" style="display:none; background:var(--bg-surface-elevated); padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid var(--border-subtle);">
-                <label style="margin-top:0; color:var(--gold-accent);">Current 1 Rep Max (kg)</label>
-                <div style="display:flex; gap:8px;">
-                    <input type="number" id="ob-1rm-squat" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Squat">
-                    <input type="number" id="ob-1rm-bench" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Bench">
-                    <input type="number" id="ob-1rm-dead" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Deadlift">
+            <div class="ob-step-body">
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <div style="flex: 1;"><label style="margin-top:0;">Current Weight (kg)</label><input type="number" id="ob-weight" class="input-field" placeholder="80"></div>
+                    <div style="flex: 1;"><label style="margin-top:0;">Target Weight (kg)</label><input type="number" id="ob-target" class="input-field" placeholder="75"></div>
+                </div>
+
+                <label style="margin-top:0;">Lifting Experience</label>
+                <select id="ob-experience" class="input-field" onchange="document.getElementById('1rm-container').style.display = this.value === 'Advanced' ? 'block' : 'none'">
+                    <option value="Beginner">Beginner (&lt; 1 Year)</option>
+                    <option value="Advanced">Advanced (&gt; 1 Year)</option>
+                </select>
+
+                <div id="1rm-container" style="display:none; background:var(--bg-surface-elevated); padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid var(--border-subtle);">
+                    <label style="margin-top:0; color:var(--gold-accent);">Current 1 Rep Max (kg)</label>
+                    <div style="display:flex; gap:8px;">
+                        <input type="number" id="ob-1rm-squat" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Squat">
+                        <input type="number" id="ob-1rm-bench" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Bench">
+                        <input type="number" id="ob-1rm-dead" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Deadlift">
+                    </div>
+                </div>
+
+                <label style="margin-top:0;">Primary Directive</label>
+                <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 8px; gap: 8px;">
+                    <div class="ob-card active" onclick="selectObCard(this, 'ob-goal', 'Fat_Loss')" style="grid-column: span 2;">FAT LOSS (CALORIC DEFICIT)</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Muscle_Gain')" style="grid-column: span 2;">MUSCLE GAIN (SURPLUS)</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Maintenance')" style="grid-column: span 2;">MAINTENANCE (RECOMP)</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Strength')">STRENGTH</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Power')">POWER</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Endurance')" style="grid-column: span 2;">ENDURANCE</div>
+                    <input type="hidden" id="ob-goal" value="Fat_Loss">
                 </div>
             </div>
-
-            <label style="margin-top:0;">Primary Directive</label>
-            <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 20px; gap: 8px;">
-                <div class="ob-card active" onclick="selectObCard(this, 'ob-goal', 'Fat_Loss')" style="grid-column: span 2;">FAT LOSS (CALORIC DEFICIT)</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Muscle_Gain')" style="grid-column: span 2;">MUSCLE GAIN (SURPLUS)</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Maintenance')" style="grid-column: span 2;">MAINTENANCE (RECOMP)</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Strength')">STRENGTH</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Power')">POWER</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-goal', 'Endurance')" style="grid-column: span 2;">ENDURANCE</div>
-                <input type="hidden" id="ob-goal" value="Fat_Loss">
+            <div class="ob-step-actions">
+                <div style="display:flex; gap:10px;">
+                    <button type="button" class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(1)">← BACK</button>
+                    <button type="button" class="btn-primary" style="flex:2; border-color: var(--silver-accent); color: var(--silver-accent);" onclick="nextObStep(3)">NEXT PARAMETERS →</button>
+                </div>
+                <button type="button" class="btn-primary" style="margin-top: 10px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">ABORT / SIGN OUT</button>
             </div>
-
-            <div style="display:flex; gap:10px;">
-                <button class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(1)">← BACK</button>
-                <button class="btn-primary" style="flex:2; border-color: var(--silver-accent); color: var(--silver-accent);" onclick="nextObStep(3)">NEXT PARAMETERS →</button>
-            </div>
-            <button class="btn-primary" style="margin-top: 12px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">ABORT / SIGN OUT</button>
         </div>
 
         <!-- STEP 3: The Engine (Diet & Sport) -->
         <div id="ob-step-3" class="ob-step hidden">
-            <label style="margin-top:0;">Dietary Matrix</label>
-            <div class="ob-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 15px; gap: 8px;">
-                <div class="ob-card active" onclick="selectObCard(this, 'ob-diet', 'Standard')">STANDARD</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Vegan')">VEGAN</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Vegetarian')">VEGETARIAN</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Halal')">HALAL</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Gluten-Free')">GF</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Dairy-Free')">DAIRY-FREE</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Nut-Free')" style="grid-column: span 3;">NUT-FREE</div>
-                <input type="hidden" id="ob-diet" value="Standard">
-            </div>
+            <div class="ob-step-body">
+                <label style="margin-top:0;">Dietary Matrix</label>
+                <div class="ob-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 15px; gap: 8px;">
+                    <div class="ob-card active" onclick="selectObCard(this, 'ob-diet', 'Standard')">STANDARD</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Vegan')">VEGAN</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Vegetarian')">VEGETARIAN</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Halal')">HALAL</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Gluten-Free')">GF</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Dairy-Free')">DAIRY-FREE</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-diet', 'Nut-Free')" style="grid-column: span 3;">NUT-FREE</div>
+                    <input type="hidden" id="ob-diet" value="Standard">
+                </div>
 
-            <label style="margin-top:0; display:flex; align-items:center; gap:8px;">
-                How do you shop?
-                <button type="button" class="info-tip-btn" onclick="showShopStyleInfo('ob')" title="What do these options mean?" aria-label="Info about shopping options">ℹ</button>
-            </label>
-            <div id="ob-shop-style-tip" class="hidden" style="font-size:11px; color:var(--text-silver); line-height:1.45; margin:0 0 12px 0; padding:10px 12px; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-surface-elevated); font-family:'Roboto Mono';"></div>
-            <div class="ob-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 15px; gap: 8px;">
-                <div class="ob-card active" onclick="selectObCard(this, 'ob-shop-style', 'Cheap')">CHEAP</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-shop-style', 'Middle')">MIDDLE</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-shop-style', 'Quality')">QUALITY</div>
-                <input type="hidden" id="ob-shop-style" value="Cheap">
-            </div>
-
-            <label style="margin-top:0;">Sport Specificity</label>
-            <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 15px; gap: 8px;">
-                <div class="ob-card active" onclick="selectObCard(this, 'ob-sport', 'None')">NONE / HYPERTROPHY</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Football')">FOOTBALL</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Basketball')">BASKETBALL</div>
-                <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Rugby')">RUGBY / POWER</div>
-                <input type="hidden" id="ob-sport" value="None">
-            </div>
-            
-            <div style="background:var(--bg-surface-elevated); padding:12px; border-radius:8px; border:1px solid var(--border-subtle); margin-bottom:15px;">
-                <label style="margin-top:0;">Injury History (Prehab Injection)</label>
-                <select id="ob-injury" class="input-field" style="margin-bottom:10px; padding:10px; font-size:12px;">
-                    <option value="None">None</option>
-                    <option value="Shoulder">Shoulder / Rotator Cuff</option>
-                    <option value="LowerBack">Lower Back / Disc</option>
-                    <option value="Knee">Knees / Patellar</option>
-                </select>
-                
-                <label style="margin-top:0;">Can you do 5 strict Pull-Ups & Dips?</label>
-                <select id="ob-bodyweight-test" class="input-field" style="margin-bottom:0; padding:10px; font-size:12px;">
-                    <option value="Yes">Yes</option>
-                    <option value="No">No (Use Machine Alternatives)</option>
-                </select>
-            </div>
-
-            <div style="margin-bottom: 20px; border: 1px solid var(--border-highlight); padding: 12px; border-radius: 8px;">
-                <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0 0 10px 0;">
-                    <input type="checkbox" id="ob-req-gym" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have access to a commercial gym.
+                <label style="margin-top:0; display:flex; align-items:center; gap:8px;">
+                    How do you shop?
+                    <button type="button" class="info-tip-btn" onclick="showShopStyleInfo('ob')" title="What do these options mean?" aria-label="Info about shopping options">ℹ</button>
                 </label>
-                <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0;">
-                    <input type="checkbox" id="ob-req-scale" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have a digital food/body scale.
-                </label>
-            </div>
+                <div id="ob-shop-style-tip" class="hidden" style="font-size:11px; color:var(--text-silver); line-height:1.45; margin:0 0 12px 0; padding:10px 12px; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-surface-elevated); font-family:'Roboto Mono';"></div>
+                <div class="ob-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 15px; gap: 8px;">
+                    <div class="ob-card active" onclick="selectObCard(this, 'ob-shop-style', 'Cheap')">CHEAP</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-shop-style', 'Middle')">MIDDLE</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-shop-style', 'Quality')">QUALITY</div>
+                    <input type="hidden" id="ob-shop-style" value="Cheap">
+                </div>
 
-            <div style="position: sticky; bottom: 0; padding: 12px 0 4px; background: linear-gradient(180deg, transparent 0%, var(--bg-void) 28%); z-index: 2;">
+                <label style="margin-top:0;">Sport Specificity</label>
+                <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 15px; gap: 8px;">
+                    <div class="ob-card active" onclick="selectObCard(this, 'ob-sport', 'None')">NONE / HYPERTROPHY</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Football')">FOOTBALL</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Basketball')">BASKETBALL</div>
+                    <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Rugby')">RUGBY / POWER</div>
+                    <input type="hidden" id="ob-sport" value="None">
+                </div>
+
+                <div style="background:var(--bg-surface-elevated); padding:12px; border-radius:8px; border:1px solid var(--border-subtle); margin-bottom:15px;">
+                    <label style="margin-top:0;">Injury History (Prehab Injection)</label>
+                    <select id="ob-injury" class="input-field" style="margin-bottom:10px; padding:10px; font-size:12px;">
+                        <option value="None">None</option>
+                        <option value="Shoulder">Shoulder / Rotator Cuff</option>
+                        <option value="LowerBack">Lower Back / Disc</option>
+                        <option value="Knee">Knees / Patellar</option>
+                    </select>
+
+                    <label style="margin-top:0;">Can you do 5 strict Pull-Ups &amp; Dips?</label>
+                    <select id="ob-bodyweight-test" class="input-field" style="margin-bottom:0; padding:10px; font-size:12px;">
+                        <option value="Yes">Yes</option>
+                        <option value="No">No (Use Machine Alternatives)</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 8px; border: 1px solid var(--border-highlight); padding: 12px; border-radius: 8px;">
+                    <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0 0 10px 0;">
+                        <input type="checkbox" id="ob-req-gym" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have access to a commercial gym.
+                    </label>
+                    <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0;">
+                        <input type="checkbox" id="ob-req-scale" style="width:16px; height:16px; accent-color:var(--gold-accent);"> I have a digital food/body scale.
+                    </label>
+                </div>
+            </div>
+            <div class="ob-step-actions">
                 <div style="display:flex; gap:10px;">
-                    <button class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(2)">← BACK</button>
-                    <button class="btn-primary" style="flex:2; background: var(--gold-glow); border-color: var(--gold-accent); color: var(--gold-accent);" onclick="triggerBootSequence()">LOCK &amp; BOOT GPS</button>
+                    <button type="button" class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(2)">← BACK</button>
+                    <button type="button" class="btn-primary" style="flex:2; background: var(--gold-glow); border-color: var(--gold-accent); color: var(--gold-accent);" onclick="triggerBootSequence()">LOCK &amp; BOOT GPS</button>
                 </div>
                 <p style="font-size:10px; color:var(--text-muted); text-align:center; margin:8px 0 0; font-family:'Roboto Mono';">Tick both boxes above, then press LOCK &amp; BOOT GPS</p>
-                <button class="btn-primary" style="margin-top: 10px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">SIGN OUT / SWITCH ACCOUNT</button>
+                <button type="button" class="btn-primary" style="margin-top: 10px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">SIGN OUT / SWITCH ACCOUNT</button>
             </div>
         </div>
-        
+
         <!-- STEP 4: Terminal Boot Sequence -->
         <div id="ob-step-boot" class="ob-step hidden" style="text-align: center; padding: 40px 0;">
             <img src="assets/logo-mark.svg" alt="Ascensus" class="boot-logo boot-logo-sm" style="margin-bottom: 20px;">
