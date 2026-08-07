@@ -99,16 +99,40 @@ export async function handleSignOut() {
     window.location.reload(); 
 }
 
+async function recoverToSignIn(message) {
+    const bootStatus = document.getElementById('boot-status');
+    if (bootStatus) bootStatus.innerText = message || 'BOOT FAILED.';
+    try {
+        if (store.supabaseClient) await store.supabaseClient.auth.signOut();
+    } catch (e) { /* ignore */ }
+    store.currentUser = null;
+    showAuthForm();
+    const status = document.getElementById('auth-status');
+    if (status) status.innerText = message || '[ ERROR ] Could not load profile. Signed out — try again.';
+}
+
 export async function bootOperatorProfile() {
-    document.getElementById('boot-status').innerText = "SYNCING PROFILE...";
-    
+    const bootStatus = document.getElementById('boot-status');
+    if (bootStatus) bootStatus.innerText = 'SYNCING PROFILE...';
+
+    if (!store.supabaseClient || !store.currentUser?.id) {
+        await recoverToSignIn('[ ERROR ] No signed-in session. Please sign in.');
+        return;
+    }
+
     try {
         // Fetch profile. We use maybeSingle() instead of single() so it doesn't error out if the row doesn't exist yet.
         const { data: profile, error } = await store.supabaseClient.from('user_profiles').select('config').eq('id', store.currentUser.id).maybeSingle();
-        
+
         if (error) {
-            console.error("Supabase Fetch Error:", error);
-            alert("Database Error: Could not fetch profile.");
+            console.error('Supabase Fetch Error:', error);
+            const detail = error.message || error.code || 'Could not fetch profile';
+            const missingTable = String(error.code || '') === 'PGRST205'
+                || /could not find the table/i.test(String(error.message || ''));
+            const hint = missingTable
+                ? ' Missing table public.user_profiles — run supabase/create_user_profiles.sql in the SQL Editor.'
+                : ' Check RLS on user_profiles.';
+            await recoverToSignIn(`[ ERROR ] Profile fetch failed: ${detail}.${hint} Signed out — fix DB, then sign in again.`);
             return;
         }
 
@@ -126,29 +150,30 @@ export async function bootOperatorProfile() {
             applyUserConfigToDom();
             if (typeof syncTrackerPillUI === 'function') syncTrackerPillUI();
             if (typeof updateInjuryStatusPanel === 'function') updateInjuryStatusPanel();
-            
+
             calculateTDEE();
-            
+
             // Hide Auth/Onboarding, Show Main App
             document.getElementById('auth-layer').classList.add('hidden');
             document.getElementById('app-container').classList.remove('hidden');
-            
+
             // Load app data
             await loadInventory();
             loadExercises();
             loadTemplates();
-            loadHistory(); 
+            loadHistory();
             generateGroceryList();
-            
+
         } else {
             // -- BRAND NEW USER: SHOW ONBOARDING --
             document.getElementById('boot-screen').classList.add('hidden');
             document.getElementById('auth-form-container').classList.add('hidden');
             document.getElementById('onboarding-container').classList.remove('hidden');
+            document.getElementById('auth-layer').classList.remove('hidden');
             nextObStep(1); // Ensure we start at step 1
         }
     } catch (err) {
-        console.error("Critical Boot Error:", err);
-        alert("Critical Error during boot. Check console.");
+        console.error('Critical Boot Error:', err);
+        await recoverToSignIn(`[ ERROR ] Boot failed: ${err?.message || 'unknown'}. Signed out — try again.`);
     }
 }
