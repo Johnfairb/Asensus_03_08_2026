@@ -18,21 +18,27 @@ export function ensureEquipmentPickModal() {
     el = document.createElement('div');
     el.id = 'equipment-pick-modal';
     el.className = 'hidden';
-    el.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:transparent;z-index:5000;display:flex;justify-content:center;align-items:center;padding:20px;';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
     el.innerHTML = `
-        <div class="modal-content stealth-panel" style="width:100%;max-width:390px;background:var(--bg-surface);max-height:85vh;overflow-y:auto;" onclick="event.stopPropagation()">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                <h2 style="color:var(--text-main);font-family:'Roboto Mono',monospace;font-size:13px;text-transform:uppercase;margin:0;letter-spacing:1px;">Choose equipment</h2>
+        <div class="modal-content stealth-panel equipment-pick-sheet" onclick="event.stopPropagation()">
+            <div class="sheet-handle" style="margin:0 auto 12px;"></div>
+            <div style="padding:0 16px 4px;">
+                <div style="font-family:'Roboto Mono';font-size:10px;color:var(--gold-accent);font-weight:800;letter-spacing:1px;text-transform:uppercase;">Confirm workout</div>
+                <h2 style="color:var(--text-main);font-family:'Roboto Mono',monospace;font-size:15px;text-transform:uppercase;margin:4px 0 0;letter-spacing:1px;">Choose equipment</h2>
+                <p style="font-size:11px;color:var(--text-muted);line-height:1.45;margin:8px 0 0;">Required for each exercise below before the plan locks.</p>
             </div>
-            <p style="font-size:12px;color:var(--text-silver);line-height:1.45;margin:0 0 14px;">Pick how each exercise is loaded. Required before confirming this workout.</p>
-            <div id="equipment-pick-list" style="display:flex;flex-direction:column;gap:14px;"></div>
-            <p id="equipment-pick-error" class="hidden" style="font-size:11px;color:#ff6b6b;margin:12px 0 0;font-family:'Roboto Mono';"></p>
-            <button type="button" class="btn-primary" style="margin-top:16px;" onclick="confirmEquipmentPicks()">Confirm choices</button>
+            <div id="equipment-pick-list" class="equipment-pick-list"></div>
+            <p id="equipment-pick-error" class="hidden" style="font-size:11px;color:#ff6b6b;margin:0;padding:0 16px;font-family:'Roboto Mono';"></p>
+            <div style="padding:12px 16px calc(16px + env(safe-area-inset-bottom, 0px));border-top:1px solid var(--border-subtle);">
+                <button type="button" class="btn-primary is-primary" style="margin:0;width:100%;" onclick="confirmEquipmentPicks()">Confirm choices</button>
+            </div>
         </div>`;
     el.addEventListener('click', (e) => {
         if (e.target === el) { /* block dismiss — must pick */ }
     });
-    document.body.appendChild(el);
+    const host = document.querySelector('.iphone-screen') || document.body;
+    host.appendChild(el);
     return el;
 }
 
@@ -52,14 +58,14 @@ export function gateConfirmForEquipmentPicks(onReady) {
     }
     list.innerHTML = needing.map(({ name, options }, i) => {
         const radios = options.map((code) => `
-            <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border-subtle);border-radius:8px;cursor:pointer;">
+            <label class="equipment-pick-option">
                 <input type="radio" name="eq-pick-${i}" value="${code}" />
-                <span style="font-size:12px;color:var(--text-main);">${optionLabel(code)}</span>
+                <span>${optionLabel(code)}</span>
             </label>`).join('');
         return `
-            <div data-eq-name="${name.replace(/"/g, '&quot;')}" data-eq-idx="${i}">
-                <div style="font-family:'Roboto Mono';font-size:11px;color:var(--gold-accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">${name}</div>
-                <div style="display:flex;flex-direction:column;gap:6px;">${radios}</div>
+            <div class="equipment-pick-row" data-eq-name="${name.replace(/"/g, '&quot;')}" data-eq-idx="${i}">
+                <div class="equipment-pick-name">${name}</div>
+                <div class="equipment-pick-options">${radios}</div>
             </div>`;
     }).join('');
     modal.classList.remove('hidden');
