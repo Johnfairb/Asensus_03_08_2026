@@ -546,8 +546,8 @@ export const EXERCISE_CATALOG = {
     'Side-sit on Hyperextension Bench': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'ql', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
     'Pallof Press': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
     'Wood-chop': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Roman Chair Knee Raise': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Roman Chair Leg Raise': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Knee Raise Machine': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Knee Raise Machine Leg Raise': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
     'Hanging Knee Raise': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
     'Hanging Leg Raise': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
     'Suitcase Carry': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
@@ -624,7 +624,10 @@ export function resolveCatalogName(name) {
         'back extension': 'Hyperextension',
         'pallor press': 'Pallof Press',
         'walk lunge': 'Walk Lunge',
-        'goblet squat': 'Goblet Squat'
+        'goblet squat': 'Goblet Squat',
+        'roman chair': 'Knee Raise Machine',
+        'roman chair knee raise': 'Knee Raise Machine',
+        'roman chair leg raise': 'Knee Raise Machine Leg Raise'
     };
     return aliases[key] || null;
 }

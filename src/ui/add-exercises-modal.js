@@ -55,7 +55,7 @@ export function openAddExercisesModal() {
                 <span style="font-size:13px;color:var(--text-main);">${safeName}</span>
             </label>`;
         }).join('');
-        return `<details open style="margin-bottom:12px;">
+        return `<details style="margin-bottom:12px;">
             <summary style="font-family:'Roboto Mono';font-size:11px;font-weight:800;color:var(--gold-accent);text-transform:uppercase;letter-spacing:0.5px;cursor:pointer;padding:6px 0;">${heading}</summary>
             <div>${rows || `<div style="font-size:11px;color:var(--text-muted);padding:8px 0;">None</div>`}</div>
         </details>`;

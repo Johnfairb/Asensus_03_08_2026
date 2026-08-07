@@ -358,12 +358,12 @@ function resolveLactateRpe(dateIso) {
     return null;
 }
 
-/** RPE multipliers for practice / match / lactate (missing RPE → 7). */
+/** RPE multipliers for practice / match / lactate (missing RPE → 7). Applies to the day after the event. */
 function eventRpeMultiplier(rpe) {
     const r = rpe == null || !Number.isFinite(Number(rpe)) ? DEFAULT_EVENT_RPE : Number(rpe);
-    if (r <= 5) return 1.2;
-    if (r <= 7) return 1.3;
-    return 1.5;
+    if (r <= 5) return 1.05;
+    if (r <= 7) return 1.2;
+    return 1.3;
 }
 
 /** Collect planned sport-event RPEs for a calendar day (one entry per event type on the plan). */
@@ -418,13 +418,13 @@ export function explainDayNutritionTargets(dateObj = new Date(), config = store.
 
     const BMR = computeBmr(config);
     const factors = [];
-    let mult = 1.3; // baseline (no prior activity)
+    let mult = 1.3; // baseline when nothing calorie-affecting happened yesterday or two days ago
     factors.push({ label: 'Baseline activity', detail: '×1.3 on BMR', mult: 1.3 });
 
     const yesterdayEvents = getPlannedDayEvents(yesterday) || [];
     if (yesterdayEvents.some(isStrengthEvent)) {
-        mult *= 1.3;
-        factors.push({ label: 'Yesterday strength (planned)', detail: '×1.3', mult: 1.3 });
+        mult *= 1.2;
+        factors.push({ label: 'Yesterday strength (planned)', detail: '×1.2', mult: 1.2 });
     }
 
     for (const rpe of collectPlannedEventRpes(yesterday)) {
@@ -437,22 +437,15 @@ export function explainDayNutritionTargets(dateObj = new Date(), config = store.
         });
     }
 
+    // High RPE (8+): next day gets ×1.3 via eventRpeMultiplier; two days after gets ×1.05
     for (const rpe of collectPlannedEventRpes(twoDaysAgo)) {
         if (rpe >= 8) {
-            mult *= 1.2;
-            factors.push({ label: `RPE ${rpe} two days ago`, detail: '×1.2 recovery bump', mult: 1.2 });
+            mult *= 1.05;
+            factors.push({ label: `RPE ${rpe} two days ago`, detail: '×1.05 recovery bump', mult: 1.05 });
         }
     }
 
-    const todayEvents = getPlannedDayEvents(day) || [];
-    if (todayEvents.some(isStrengthEvent)) {
-        mult *= 1.1;
-        factors.push({ label: 'Today strength (planned)', detail: '×1.1', mult: 1.1 });
-    }
-    if (todayEvents.some(isPracticeEvent)) {
-        mult *= 1.1;
-        factors.push({ label: 'Today practice (planned)', detail: '×1.1', mult: 1.1 });
-    }
+    // Same-day strength / practice / match / lactate: no calorie bump (×1)
 
     let maintenanceCals = BMR * mult;
     let goalMult = 1;

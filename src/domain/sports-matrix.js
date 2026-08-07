@@ -15,7 +15,7 @@ export const AUXILIARY_DICTIONARY = {
     groin: ["Cable Adductor"],
     glute_medius: ["Glute Abduction Machine", "Cable Abduction"], 
     ankle: ["3-Way Ankle (Controlled Eccentric)", "Wobble Board Proprioception"],
-    core: ["Marcasciano Crunch", "Roman Chair"],
+    core: ["Marcasciano Crunch", "Knee Raise Machine"],
     serratus: ["DB Pullovers"], 
     neck: ["Neck Resistance (Isometric)"],
     elbow: ["Bicep Curls", "Reverse Curls", "DB Wrist Flexion"],

@@ -842,7 +842,7 @@ export function getAttachedAuxForStrengthDay(dateStr, sportData) {
 }
 
 export async function migrateStrengthExerciseLabels() {
-    if (localStorage.getItem('ascensus_strength_label_v6') === 'done') return;
+    if (localStorage.getItem('ascensus_strength_label_v7') === 'done') return;
     try {
         if (!store.supabaseClient) return;
         const { data: existing, error } = await store.supabaseClient.from('exercise_inventory').select('id, name, domain, muscle_group');
@@ -884,7 +884,10 @@ export async function migrateStrengthExerciseLabels() {
             'front raises': 'Standing Dumbbell Front Raise',
             'lateral raises': 'Lateral Raise',
             'pec flyes': 'Flye',
-            'db pullovers': 'Pullover'
+            'db pullovers': 'Pullover',
+            'roman chair': 'Knee Raise Machine',
+            'roman chair knee raise': 'Knee Raise Machine',
+            'roman chair leg raise': 'Knee Raise Machine Leg Raise'
         };
 
         for (const ex of (existing || [])) {
@@ -937,6 +940,7 @@ export async function migrateStrengthExerciseLabels() {
 
         await dedupeExerciseInventory();
 
+        localStorage.setItem('ascensus_strength_label_v7', 'done');
         localStorage.setItem('ascensus_strength_label_v6', 'done');
         localStorage.setItem('ascensus_strength_label_v5', 'done');
         localStorage.setItem('ascensus_strength_label_v4', 'done');

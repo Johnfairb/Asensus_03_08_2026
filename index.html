@@ -1599,9 +1599,9 @@
                 Custom — no rest timers
             </label>
             <div id="manual-rest-fields">
-                <label style="display:block; font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Compound rest (seconds)</label>
+                <label style="display:block; font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Compound rest (seconds) <span style="text-transform:none; letter-spacing:0;">(recommended: 180)</span></label>
                 <input type="number" id="manual-rest-compound" class="input-field" min="0" step="15" value="180" inputmode="numeric" style="margin-bottom:12px;">
-                <label style="display:block; font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Isolation rest (seconds)</label>
+                <label style="display:block; font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Isolation rest (seconds) <span style="text-transform:none; letter-spacing:0;">(recommended: 90)</span></label>
                 <input type="number" id="manual-rest-isolation" class="input-field" min="0" step="15" value="90" inputmode="numeric" style="margin-bottom:16px;">
             </div>
             <button type="button" class="btn-primary is-primary" style="margin:0; width:100%;" onclick="confirmManualGymRestPrefs()">Start gym session</button>
@@ -1930,7 +1930,7 @@
     </div>
 
 
-    <div id="add-exercises-modal" class="hidden" style="position:fixed;inset:0;z-index:2200;background:rgba(0,0,0,0.55);display:flex;justify-content:center;align-items:flex-end;padding:0;" onclick="if(event.target===this)closeAddExercisesModal()">
+    <div id="add-exercises-modal" class="hidden" style="position:fixed;inset:0;z-index:21100;background:rgba(0,0,0,0.55);display:flex;justify-content:center;align-items:flex-end;padding:0;" onclick="if(event.target===this)closeAddExercisesModal()">
         <div class="modal-content stealth-panel" style="width:100%;max-width:430px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;border-radius:16px 16px 0 0;margin:0;" onclick="event.stopPropagation()">
             <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 8px;">
                 <div>
