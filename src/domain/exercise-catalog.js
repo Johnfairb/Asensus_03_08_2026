@@ -21,6 +21,9 @@ function ex(partial) {
         ppl: 'Push',
         inProgramming: true,
         bodyweight: false,
+        /** Load codes from PDF: B D Ca Fca Cca M C P free, or multi e.g. ['B','D']. Empty = no weight. */
+        loadOptions: ['B'],
+        cableDefault: 'Fca',
         ...partial
     };
 }
@@ -29,31 +32,36 @@ function ex(partial) {
 export const EXERCISE_CATALOG = {
     // —— Legs · Posterior compound ——
     'Deadlift': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'hinge', laterality: 'Bilateral', role: 'compound',
         muscle_group: 'hamstrings', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings'],
         secondary: ['Calves', 'Upper traps', 'Grip']
     }),
     'Sumo Deadlift': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'hinge', laterality: 'Bilateral', role: 'compound',
         muscle_group: 'hamstrings', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Adductors'],
         secondary: ['Calves', 'Traps', 'Grip']
     }),
     'Romanian Deadlift': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'hinge', laterality: 'Bilateral', role: 'compound',
         muscle_group: 'hamstrings', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Hamstrings'],
         secondary: ['Calves', 'Traps', 'Grip']
     }),
     'Rack Deadlift': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'hinge', laterality: 'Bilateral', role: 'compound',
         muscle_group: 'hamstrings', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Hamstrings'],
         secondary: ['Calves', 'Traps', 'Grip', 'Quads']
     }),
     'Single Leg Deadlift': ex({
-        domain: 'strength', movement: 'hinge', laterality: 'Unilateral', dumbbell: true, role: 'compound',
+        loadOptions: ['B'],
+        domain: 'strength', movement: 'hinge', laterality: 'Unilateral', dumbbell: false, role: 'compound',
         muscle_group: 'hamstrings', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Glute medius'],
         secondary: ['Calves', 'Traps', 'Grip', 'Adductors']
@@ -61,54 +69,63 @@ export const EXERCISE_CATALOG = {
 
     // —— Legs · Anterior compound ——
     'Squat': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'flexion', laterality: 'Bilateral', role: 'compound',
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings'],
         secondary: ['Calves', 'Adductors']
     }),
     'Sumo Squat': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'flexion', laterality: 'Bilateral', role: 'compound',
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Adductors'],
         secondary: ['Calves']
     }),
     'Front Squat': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'flexion', laterality: 'Bilateral', role: 'compound',
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads'],
         secondary: ['Calves', 'Hamstrings']
     }),
     'Goblet Squat': ex({
+        loadOptions: ['D'],
         domain: 'strength', movement: 'flexion', laterality: 'Bilateral', dumbbell: true, role: 'compound',
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Quads', 'Hamstrings', 'Adductors'],
         secondary: ['Calves', 'Lower back']
     }),
     'Split Squat': ex({
-        domain: 'strength', movement: 'flexion', laterality: 'Unilateral', dumbbell: true, role: 'compound',
+        loadOptions: ['B'],
+        domain: 'strength', movement: 'flexion', laterality: 'Unilateral', dumbbell: false, role: 'compound',
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Glute medius'],
         secondary: ['Calves', 'Adductors']
     }),
     'Lunge': ex({
-        domain: 'strength', movement: 'flexion', laterality: 'Unilateral', dumbbell: true, role: 'compound',
+        loadOptions: ['B', 'D'],
+        domain: 'strength', movement: 'flexion', laterality: 'Unilateral', dumbbell: false, role: 'compound',
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Glute medius'],
         secondary: ['Calves', 'Adductors']
     }),
     'Walk Lunge': ex({
+        loadOptions: ['D'],
         domain: 'strength', movement: 'flexion', laterality: 'Unilateral', dumbbell: true, role: 'compound',
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Glute medius'],
         secondary: ['Calves', 'Adductors']
     }),
     'Bulgarian Squat': ex({
-        domain: 'strength', movement: 'flexion', laterality: 'Unilateral', dumbbell: true, role: 'compound',
+        loadOptions: ['B', 'D'],
+        domain: 'strength', movement: 'flexion', laterality: 'Unilateral', dumbbell: false, role: 'compound',
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Glute medius'],
         secondary: ['Calves', 'Adductors', 'Hip flexors']
     }),
     'Pistol Squat': ex({
+        loadOptions: ['D'],
         domain: 'strength', movement: 'flexion', laterality: 'Unilateral', role: 'compound',
         muscle_group: 'quad', ppl: 'Legs', bodyweight: true,
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Glute medius'],
@@ -116,12 +133,14 @@ export const EXERCISE_CATALOG = {
     }),
     // Library only — not programmed for hypertrophy or strength
     'Leg Press': ex({
+        loadOptions: ['P'],
         domain: 'strength', movement: 'flexion', laterality: 'Bilateral', lateralityEither: true, role: 'compound',
         muscle_group: 'quad', ppl: 'Legs', inProgramming: false,
         primary: ['Glute max', 'Quads', 'Hamstrings'],
         secondary: ['Calves', 'Adductors']
     }),
     'Wide Leg Press': ex({
+        loadOptions: ['P'],
         domain: 'strength', movement: 'flexion', laterality: 'Bilateral', lateralityEither: true, role: 'compound',
         muscle_group: 'quad', ppl: 'Legs', inProgramming: false,
         primary: ['Glute max', 'Quads', 'Hamstrings', 'Adductors'],
@@ -130,52 +149,62 @@ export const EXERCISE_CATALOG = {
 
     // —— Legs · Isolations ——
     'Leg Extension': ex({
+        loadOptions: ['C', 'P'],
         domain: 'lifting', movement: 'quad isolation', role: 'isolation',
         muscle_group: 'quad', ppl: 'Legs',
         primary: ['Quads'], secondary: []
     }),
     // Library only — not programmed for hypertrophy or strength
     'Hack Squat': ex({
+        loadOptions: ['P'],
         domain: 'lifting', movement: 'quad isolation', role: 'isolation',
         muscle_group: 'quad', ppl: 'Legs', inProgramming: false,
         primary: ['Quads'], secondary: ['Calves', 'Hamstrings']
     }),
     'Calf Raise Machine': ex({
+        loadOptions: ['P', 'M'],
         domain: 'lifting', movement: 'calf isolation', laterality: 'Bilateral', role: 'isolation',
         muscle_group: 'calves', ppl: 'Legs',
         primary: ['Calves'], secondary: []
     }),
     'Calf Raise Barbell': ex({
+        loadOptions: ['B'],
         domain: 'lifting', movement: 'calf isolation', laterality: 'Bilateral', role: 'isolation',
         muscle_group: 'calves', ppl: 'Legs',
         primary: ['Calves'], secondary: []
     }),
     'Single Calf Raise': ex({
+        loadOptions: ['B', 'D'],
         domain: 'lifting', movement: 'calf isolation', laterality: 'Unilateral', role: 'isolation',
         muscle_group: 'calves', ppl: 'Legs',
         primary: ['Calves'], secondary: ['Glute medius']
     }),
     'Adductor Machine': ex({
+        loadOptions: ['M'],
         domain: 'lifting', movement: 'groin isolation', role: 'isolation',
         muscle_group: 'groin', ppl: 'Legs',
         primary: ['Adductors'], secondary: []
     }),
     'Abductor Machine': ex({
+        loadOptions: ['M'],
         domain: 'lifting', movement: 'abductor isolation', role: 'isolation',
         muscle_group: 'glute', ppl: 'Legs',
         primary: ['Glute medius', 'Glute minimus'], secondary: []
     }),
     'Seated Hamstring Curl': ex({
+        loadOptions: ['C'],
         domain: 'lifting', movement: 'hamstring isolation', role: 'isolation',
         muscle_group: 'hamstrings', ppl: 'Legs',
         primary: ['Hamstrings'], secondary: ['Calves']
     }),
     'Lying Hamstring Curl': ex({
+        loadOptions: ['C'],
         domain: 'lifting', movement: 'hamstring isolation', role: 'isolation',
         muscle_group: 'hamstrings', ppl: 'Legs',
         primary: ['Hamstrings'], secondary: ['Calves']
     }),
     'Hyperextension': ex({
+        loadOptions: ['P', 'D'],
         domain: 'lifting', movement: 'lower back isolation', role: 'isolation',
         muscle_group: 'core', ppl: 'Legs',
         primary: ['Glute max', 'Hamstrings', 'Lower back'], secondary: ['Calves']
@@ -183,54 +212,49 @@ export const EXERCISE_CATALOG = {
 
     // —— Horizontal push ——
     'Bench Press': ex({
+        loadOptions: ['B', 'D'],
         domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
         muscle_group: 'lower_chest', ppl: 'Push',
         primary: ['Pecs', 'Front delts', 'Triceps'],
         secondary: ['Lats', 'Rotator cuff']
     }),
-    'Dumbbell Bench Press': ex({
-        domain: 'strength', movement: 'horizontal push', dumbbell: true, role: 'compound',
-        muscle_group: 'lower_chest', ppl: 'Push',
-        primary: ['Pecs', 'Front delts', 'Triceps'],
-        secondary: ['Lats', 'Rotator cuff']
-    }),
     'Close Grip Bench Press': ex({
+        loadOptions: ['B', 'D'],
         domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
         muscle_group: 'lower_chest', ppl: 'Push',
         primary: ['Pecs', 'Triceps'],
         secondary: ['Lats', 'Rotator cuff', 'Front delts']
     }),
     'Decline Bench Press': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
         muscle_group: 'lower_chest', ppl: 'Push',
         primary: ['Pecs', 'Front delts', 'Triceps'],
         secondary: ['Lats', 'Rotator cuff']
     }),
-    'Neutral Bench Press': ex({
-        domain: 'strength', movement: 'horizontal push', dumbbell: true, grip: 'neutral', role: 'compound',
-        muscle_group: 'lower_chest', ppl: 'Push',
-        primary: ['Pecs', 'Front delts', 'Triceps'],
-        secondary: ['Lats', 'Rotator cuff']
-    }),
     'Dip': ex({
+        loadOptions: ['P'],
         domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
         muscle_group: 'lower_chest', ppl: 'Push', bodyweight: true,
         primary: ['Pecs', 'Front delts', 'Triceps'],
         secondary: ['Lats', 'Rotator cuff', 'Lower traps']
     }),
     'Press-up': ex({
+        loadOptions: [],
         domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
         muscle_group: 'lower_chest', ppl: 'Push', bodyweight: true,
         primary: ['Pecs', 'Front delts', 'Triceps'],
         secondary: ['Lats', 'Rotator cuff', 'Core']
     }),
     'Close Grip Press-up': ex({
+        loadOptions: [],
         domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
         muscle_group: 'lower_chest', ppl: 'Push', bodyweight: true,
         primary: ['Pecs', 'Front delts', 'Triceps'],
         secondary: ['Lats', 'Rotator cuff', 'Core']
     }),
     'Machine Bench Press': ex({
+        loadOptions: ['C'],
         domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
         muscle_group: 'lower_chest', ppl: 'Push',
         primary: ['Pecs', 'Front delts', 'Triceps'],
@@ -239,26 +263,31 @@ export const EXERCISE_CATALOG = {
 
     // —— Pec isolation ——
     'Flye': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'pec isolation', dumbbell: true, role: 'isolation',
         muscle_group: 'lower_chest', ppl: 'Push',
         primary: ['Pecs', 'Front delts'], secondary: ['Rotator cuff']
     }),
     'Incline Flye': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'pec isolation', dumbbell: true, role: 'isolation',
         muscle_group: 'upper_chest', ppl: 'Push',
         primary: ['Upper pecs', 'Front delt'], secondary: ['Rotator cuff']
     }),
     'Pullover': ex({
-        domain: 'lifting', movement: 'pec isolation', dumbbell: true, role: 'isolation',
+        loadOptions: ['B', 'D'],
+        domain: 'lifting', movement: 'pec isolation', dumbbell: false, role: 'isolation',
         muscle_group: 'lower_chest', ppl: 'Push',
         primary: ['Lats', 'Pecs'], secondary: ['Triceps', 'Rear delt']
     }),
     'Cable Crossover': ex({
+        loadOptions: ['Ca'],
         domain: 'lifting', movement: 'pec isolation', role: 'isolation',
         muscle_group: 'lower_chest', ppl: 'Push',
         primary: ['Pecs'], secondary: ['Lats']
     }),
     'Pec Deck': ex({
+        loadOptions: ['M'],
         domain: 'lifting', movement: 'pec isolation', role: 'isolation',
         muscle_group: 'lower_chest', ppl: 'Push',
         primary: ['Pecs', 'Front delts'], secondary: []
@@ -266,54 +295,63 @@ export const EXERCISE_CATALOG = {
 
     // —— Vertical pull ——
     'Lat Machine Pull': ex({
+        loadOptions: ['M'],
         domain: 'strength', movement: 'vertical pull', grip: 'overhand', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Biceps', 'Rear delt'],
         secondary: ['Lower traps', 'Grip', 'Brachialis']
     }),
     'Lat Machine Chin-up': ex({
+        loadOptions: ['M'],
         domain: 'strength', movement: 'vertical pull', grip: 'underhand', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Biceps', 'Rear delt'],
         secondary: ['Lower traps', 'Grip']
     }),
     'Lat Machine Close Grip': ex({
+        loadOptions: ['M'],
         domain: 'strength', movement: 'vertical pull', grip: 'neutral', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Biceps', 'Rear delt'],
         secondary: ['Lower traps', 'Grip']
     }),
     'Lat Machine Single Pull': ex({
+        loadOptions: ['M'],
         domain: 'strength', movement: 'vertical pull', grip: 'neutral', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Biceps', 'Rear delt'],
         secondary: ['Lower traps', 'Grip', 'Rhomboids']
     }),
     'Low Pulley Wide Grip': ex({
+        loadOptions: ['M'],
         domain: 'strength', movement: 'vertical pull', grip: 'overhand', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Biceps', 'Rear delt'],
         secondary: ['Lower traps', 'Grip', 'Rhomboids']
     }),
     'Low Pulley Close Grip': ex({
+        loadOptions: ['Ca'],
         domain: 'strength', movement: 'vertical pull', grip: 'neutral', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Biceps', 'Rear delt'],
         secondary: ['Lower traps', 'Grip', 'Rhomboids']
     }),
     'Chin Up': ex({
+        loadOptions: ['P'],
         domain: 'strength', movement: 'vertical pull', grip: 'underhand', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull', bodyweight: true,
         primary: ['Lats', 'Biceps', 'Rear delt'],
         secondary: ['Lower traps', 'Grip']
     }),
     'Pull Up': ex({
+        loadOptions: ['P'],
         domain: 'strength', movement: 'vertical pull', grip: 'overhand', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull', bodyweight: true,
         primary: ['Lats', 'Biceps', 'Rear delt'],
         secondary: ['Lower traps', 'Grip']
     }),
     'Neutral Pull Up': ex({
+        loadOptions: ['P'],
         domain: 'strength', movement: 'vertical pull', grip: 'neutral', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull', bodyweight: true,
         primary: ['Lats', 'Biceps', 'Rear delt'],
@@ -322,36 +360,43 @@ export const EXERCISE_CATALOG = {
 
     // —— Horizontal pull ——
     'Underhand Barbell Row': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'horizontal pull', grip: 'underhand', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Pecs'], secondary: ['Middle traps', 'Rhomboids']
     }),
     'Overhand Barbell Row': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'horizontal pull', grip: 'overhand', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Pecs'], secondary: ['Middle traps', 'Rhomboids']
     }),
     'Dumbbell Row': ex({
+        loadOptions: ['D'],
         domain: 'strength', movement: 'horizontal pull', grip: 'neutral', dumbbell: true, role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Rear delt'], secondary: ['Middle traps', 'Grip']
     }),
     'Neutral Cable Row': ex({
+        loadOptions: ['M'],
         domain: 'strength', movement: 'horizontal pull', grip: 'neutral', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Rear delt'], secondary: ['Middle traps', 'Grip']
     }),
     'Overhand Cable Row': ex({
+        loadOptions: ['M'],
         domain: 'strength', movement: 'horizontal pull', grip: 'overhand', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Rear delt'], secondary: ['Middle traps', 'Grip']
     }),
     'Underhand Cable Row': ex({
+        loadOptions: ['M'],
         domain: 'strength', movement: 'horizontal pull', grip: 'underhand', role: 'compound',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Rear delt'], secondary: ['Middle traps', 'Grip']
     }),
     'Reverse Row': ex({
+        loadOptions: [],
         domain: 'lifting', movement: 'mid trap isolation', role: 'isolation',
         muscle_group: 'lats', ppl: 'Pull',
         primary: ['Lats', 'Rear delt'], secondary: ['Middle traps', 'Grip']
@@ -359,38 +404,38 @@ export const EXERCISE_CATALOG = {
 
     // —— Vertical push ——
     'Barbell Military Press': ex({
+        loadOptions: ['B'],
         domain: 'strength', movement: 'vertical push', dumbbell: false, role: 'compound',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Front delts', 'Triceps', 'Upper pecs'], secondary: ['Upper traps']
     }),
     'Seated Dumbbell Shoulder Press': ex({
+        loadOptions: ['D'],
         domain: 'strength', movement: 'vertical push', dumbbell: true, role: 'compound',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Front delts', 'Triceps', 'Upper pecs'], secondary: ['Upper traps']
     }),
     'Seated Dumbbell Screw Press': ex({
+        loadOptions: ['D'],
         domain: 'strength', movement: 'vertical push', dumbbell: true, role: 'compound',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Front delts', 'Triceps', 'Upper pecs'], secondary: ['Upper traps']
     }),
     'Machine Overhead Press': ex({
+        loadOptions: ['C'],
         domain: 'strength', movement: 'vertical push', dumbbell: false, role: 'compound',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Front delts', 'Triceps', 'Upper pecs'], secondary: ['Upper traps']
     }),
     'Incline Bench Press': ex({
+        loadOptions: ['B', 'D'],
         domain: 'strength', movement: 'vertical push', dumbbell: false, role: 'compound',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Front delts', 'Triceps', 'Upper pecs'],
         secondary: ['Lats', 'Rotator cuff']
     }),
-    'Dumbbell Incline Bench Press': ex({
-        domain: 'strength', movement: 'vertical push', dumbbell: true, role: 'compound',
-        muscle_group: 'shoulders', ppl: 'Push',
-        primary: ['Front delts', 'Triceps', 'Upper pecs'],
-        secondary: ['Lats', 'Rotator cuff']
-    }),
     'Incline Press-up': ex({
+        loadOptions: [],
         domain: 'strength', movement: 'vertical push', dumbbell: false, role: 'compound',
         muscle_group: 'shoulders', ppl: 'Push', bodyweight: true,
         primary: ['Front delts', 'Triceps', 'Upper pecs'],
@@ -399,51 +444,61 @@ export const EXERCISE_CATALOG = {
 
     // —— Shoulder isolations ——
     'Lateral Raise': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'side delt isolation', dumbbell: true, role: 'isolation',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Side delts'], secondary: ['Upper traps']
     }),
     'Lying 30 Degree Single Lateral Raise': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'side delt isolation', dumbbell: true, role: 'isolation',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Side delts'], secondary: ['Upper traps']
     }),
     'Cable Lateral Raise (Single)': ex({
+        loadOptions: ['Ca'],
         domain: 'lifting', movement: 'side delt isolation', role: 'isolation',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Side delts'], secondary: ['Upper traps']
     }),
     'Cable Lateral Raise (Double)': ex({
+        loadOptions: ['Ca'],
         domain: 'lifting', movement: 'side delt isolation', role: 'isolation',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Side delts'], secondary: ['Upper traps']
     }),
     'Upright Row': ex({
+        loadOptions: ['B'],
         domain: 'lifting', movement: 'side delt isolation', role: 'isolation',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Side delts'], secondary: ['Upper traps']
     }),
     'Lateral Rotation': ex({
+        loadOptions: ['Ca'],
         domain: 'lifting', movement: 'rotator cuff isolation', role: 'isolation',
         muscle_group: 'rotator_cuff', ppl: 'Push',
         primary: ['Rotator cuff'], secondary: []
     }),
     'Standing Dumbbell Front Raise': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'front delt isolation', dumbbell: true, role: 'isolation',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Front delts'], secondary: ['Upper traps']
     }),
     'Incline Dumbbell Front Raise': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'front delt isolation', dumbbell: true, role: 'isolation',
         muscle_group: 'shoulders', ppl: 'Push',
         primary: ['Front delts'], secondary: ['Upper traps']
     }),
     'Bent Over Rear Flye': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'rear delt isolation', dumbbell: true, role: 'isolation',
         muscle_group: 'shoulders', ppl: 'Pull',
         primary: ['Rear delts'], secondary: ['Middle traps', 'Rhomboids']
     }),
     'Machine Reverse Rear Flye': ex({
+        loadOptions: ['M'],
         domain: 'lifting', movement: 'rear delt isolation', role: 'isolation',
         muscle_group: 'shoulders', ppl: 'Pull',
         primary: ['Rear delts'], secondary: ['Middle traps', 'Rhomboids']
@@ -451,41 +506,49 @@ export const EXERCISE_CATALOG = {
 
     // —— Biceps ——
     'Barbell Curl': ex({
+        loadOptions: ['B'],
         domain: 'lifting', movement: 'bicep isolation', grip: 'underhand', dumbbell: false, role: 'isolation',
         muscle_group: 'biceps', ppl: 'Pull',
         primary: ['Biceps'], secondary: []
     }),
     'Dumbbell Curl': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'bicep isolation', grip: 'underhand', dumbbell: true, role: 'isolation',
         muscle_group: 'biceps', ppl: 'Pull',
         primary: ['Biceps'], secondary: []
     }),
     'Hammer Curl': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'bicep isolation', grip: 'neutral', dumbbell: true, role: 'isolation',
         muscle_group: 'biceps', ppl: 'Pull',
         primary: ['Biceps', 'Brachioradialis'], secondary: []
     }),
     'Reverse Curl': ex({
+        loadOptions: ['B'],
         domain: 'lifting', movement: 'bicep isolation', grip: 'overhand', role: 'isolation',
         muscle_group: 'biceps', ppl: 'Pull',
         primary: ['Brachialis'], secondary: ['Wrist extensors']
     }),
     'Cable Curl': ex({
+        loadOptions: ['Ca'],
         domain: 'lifting', movement: 'bicep isolation', grip: 'underhand', role: 'isolation',
         muscle_group: 'biceps', ppl: 'Pull',
         primary: ['Biceps'], secondary: []
     }),
     'Concentration Curl': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'bicep isolation', grip: 'underhand', dumbbell: true, role: 'isolation',
         muscle_group: 'biceps', ppl: 'Pull',
         primary: ['Biceps'], secondary: []
     }),
     'Preacher Curl EZ Bar': ex({
+        loadOptions: ['B'],
         domain: 'lifting', movement: 'bicep isolation', grip: 'underhand', role: 'isolation',
         muscle_group: 'biceps', ppl: 'Pull',
         primary: ['Biceps'], secondary: []
     }),
     'Dumbbell Preacher Curl': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'bicep isolation', grip: 'underhand', dumbbell: true, role: 'isolation',
         muscle_group: 'biceps', ppl: 'Pull',
         primary: ['Biceps'], secondary: []
@@ -493,71 +556,103 @@ export const EXERCISE_CATALOG = {
 
     // —— Triceps ——
     'Rope Push Down': ex({
+        loadOptions: ['Ca'],
         domain: 'lifting', movement: 'tricep isolation', role: 'isolation',
         muscle_group: 'triceps', ppl: 'Push',
         primary: ['Triceps'], secondary: ['Grip']
     }),
     'Bar Push Down': ex({
+        loadOptions: ['Ca'],
         domain: 'lifting', movement: 'tricep isolation', role: 'isolation',
         muscle_group: 'triceps', ppl: 'Push',
         primary: ['Triceps'], secondary: ['Grip']
     }),
     'Single Push Down': ex({
+        loadOptions: ['Ca'],
         domain: 'lifting', movement: 'tricep isolation', role: 'isolation',
         muscle_group: 'triceps', ppl: 'Push',
         primary: ['Triceps'], secondary: ['Grip']
     }),
     'Cable French Press': ex({
+        loadOptions: ['Ca'],
         domain: 'lifting', movement: 'tricep isolation', role: 'isolation',
         muscle_group: 'triceps', ppl: 'Push',
         primary: ['Triceps'], secondary: ['Grip']
     }),
     'Kick Back': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'tricep isolation', dumbbell: true, role: 'isolation',
         muscle_group: 'triceps', ppl: 'Push',
         primary: ['Triceps'], secondary: ['Grip']
     }),
     'Skull Crusher': ex({
+        loadOptions: ['B'],
         domain: 'lifting', movement: 'tricep isolation', role: 'isolation',
         muscle_group: 'triceps', ppl: 'Push',
         primary: ['Triceps'], secondary: ['Grip']
     }),
     'Single Overhead Seated French Press': ex({
+        loadOptions: ['D'],
         domain: 'lifting', movement: 'tricep isolation', dumbbell: true, role: 'isolation',
         muscle_group: 'triceps', ppl: 'Push',
         primary: ['Triceps'], secondary: ['Grip']
     }),
     'Reverse Dips': ex({
+        loadOptions: [],
         domain: 'lifting', movement: 'tricep isolation', role: 'isolation',
         muscle_group: 'triceps', ppl: 'Push', bodyweight: true,
         primary: ['Triceps', 'Front delt'], secondary: ['Lower traps']
     }),
 
     // —— Core (library only — not used in programming) ——
-    'Crunch': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Knees on Bench Crunch': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Feet Up Crunch': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Cable Crunch': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Reverse Crunch': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Plank': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Side Plank': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Dead Bug': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Toe Touch': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Side-sit on Hyperextension Bench': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'ql', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Pallof Press': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Wood-chop': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Knee Raise Machine': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Knee Raise Machine Leg Raise': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Hanging Knee Raise': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Hanging Leg Raise': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Suitcase Carry': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Turkish Get-up': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Russian Twist': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Standing Side Bend': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Halo': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Bulgarian Bag Circles': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Standing Cable Rotation': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
-    'Seated Cable Rotation': ex({ domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] })
+    'Crunch': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Knees on Bench Crunch': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Feet Up Crunch': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Cable Crunch': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Reverse Crunch': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Plank': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Side Plank': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Dead Bug': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Toe Touch': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Side-sit on Hyperextension Bench': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'ql', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Pallof Press': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Wood-chop': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Knee Raise Machine': ex({
+        loadOptions: ['M'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Knee Raise Machine Leg Raise': ex({
+        loadOptions: ['M'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Hanging Knee Raise': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Hanging Leg Raise': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Suitcase Carry': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Turkish Get-up': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Russian Twist': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Standing Side Bend': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Halo': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Bulgarian Bag Circles': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Standing Cable Rotation': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+    'Seated Cable Rotation': ex({
+        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] })
 };
 
 /** Strength core slot still uses these (logic unchanged); mapped to catalog names. */
@@ -581,9 +676,13 @@ export function resolveCatalogName(name) {
         'sumo squat': 'Sumo Squat',
         'bulgarian split squat': 'Bulgarian Squat',
         'trap bar deadlift': 'Rack Deadlift',
-        'db bench press': 'Dumbbell Bench Press',
-        'dumbell bench press': 'Dumbbell Bench Press',
-        'neutral db bench press': 'Neutral Bench Press',
+        'db bench press': 'Bench Press',
+        'dumbbell bench press': 'Bench Press',
+        'dumbell bench press': 'Bench Press',
+        'neutral db bench press': 'Bench Press',
+        'neutral bench press': 'Bench Press',
+        'dumbbell incline bench press': 'Incline Bench Press',
+        'db incline bench press': 'Incline Bench Press',
         'dips': 'Dip',
         'press up': 'Press-up',
         'push up': 'Press-up',
@@ -607,6 +706,13 @@ export function resolveCatalogName(name) {
         'lat pull-down': 'Lat Machine Pull',
         'bicep curls': 'Dumbbell Curl',
         'french press': 'Cable French Press',
+        'cable french press': 'Cable French Press',
+        'seated french press': 'Single Overhead Seated French Press',
+        'seated one arm french press': 'Single Overhead Seated French Press',
+        'one arm french press': 'Single Overhead Seated French Press',
+        'single arm french press': 'Single Overhead Seated French Press',
+        'overhead french press': 'Single Overhead Seated French Press',
+        'single overhead seated french press': 'Single Overhead Seated French Press',
         'calf raises': 'Calf Raise Machine',
         'quad extension': 'Leg Extension',
         'leg extensions': 'Leg Extension',
@@ -672,6 +778,8 @@ export function buildStrengthMetaMap() {
             lateralityEither: !!meta.lateralityEither,
             dumbbell: !!meta.dumbbell,
             grip: meta.grip || '',
+            loadOptions: Array.isArray(meta.loadOptions) ? meta.loadOptions.slice() : ['B'],
+            cableDefault: meta.cableDefault || 'Fca',
             muscle_group: meta.muscle_group,
             primary: meta.primary,
             secondary: meta.secondary,
@@ -694,6 +802,8 @@ export function buildHypertrophyMetaMap() {
             lateralityEither: !!meta.lateralityEither,
             dumbbell: !!meta.dumbbell,
             grip: meta.grip || '',
+            loadOptions: Array.isArray(meta.loadOptions) ? meta.loadOptions.slice() : ['B'],
+            cableDefault: meta.cableDefault || 'Fca',
             role: meta.role,
             muscle_group: meta.muscle_group,
             primary: (meta.primary || [])[0] || meta.muscle_group,

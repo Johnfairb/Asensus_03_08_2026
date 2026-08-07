@@ -6,6 +6,7 @@ import { checkMidnightRollover } from './lib/dates-rollover.js';
 import { bindUi } from './ui/bind.js';
 import { applyThemeChoice } from './ui/auth-onboarding.js';
 import { startNotificationScheduler } from './ui/notifications.js';
+import { syncRestTimersFromWallClock } from './ui/drive.js';
 
 installAlerts();
 bindUi();
@@ -23,6 +24,9 @@ setInterval(processOfflineQueue, 15000);
 setTimeout(seedDefaultDatabase, 2000);
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') checkMidnightRollover();
+  if (document.visibilityState === 'visible') {
+    checkMidnightRollover();
+    try { syncRestTimersFromWallClock(); } catch (e) { /* ignore */ }
+  }
 });
 setTimeout(checkMidnightRollover, 1000);

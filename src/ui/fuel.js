@@ -2,11 +2,12 @@ import { store } from '../state/store.js';
 import { generateDailyMealPlan } from '../domain/meal-planner.js';
 import { STRENGTH_EXERCISE_META } from '../domain/strength-engine.js';
 import {
-    formatMuscleList,
-    getExerciseMeta,
-    getExerciseSessionLabel,
-    resolveCatalogName
-} from '../domain/exercise-catalog.js';
+    canEditIncrements,
+    DEFAULT_PROFILES,
+    editableIncrementCodes,
+    optionLabel
+} from '../domain/load-increments.js';
+import { saveExerciseIncrementOverrides } from './equipment-ui.js';
 import { getLibraryMuscleGroup, LIBRARY_MUSCLE_ORDER } from '../domain/bodyweight-lifts.js';
 import { generateGroceryList } from '../domain/grocery.js';
 import {
@@ -581,6 +582,32 @@ export function openExerciseDetail(id) {
                 <div style="display:flex; flex-direction:column; gap:8px;">${teachingPoints}</div>
             </div>`);
         bodyParts.push(libraryDetailRow('Status', isExerciseBanned(id) ? 'Banned' : 'Allowed'));
+
+        if (canEditIncrements(displayName)) {
+            const codes = editableIncrementCodes(displayName);
+            const saved = store.userConfig?.exerciseIncrements?.[displayName] || {};
+            const panels = codes.map((code) => {
+                const def = DEFAULT_PROFILES[code] || { min: 0, step: 2.5 };
+                const row = saved[code] || {};
+                const minVal = row.min != null ? row.min : def.min;
+                const stepVal = row.step != null ? row.step : def.step;
+                return `
+                    <div style="padding:10px; border:1px solid var(--border-subtle); border-radius:10px; margin-bottom:8px;">
+                        <div class="hud-label" style="margin:0 0 8px 0;">${optionLabel(code)}</div>
+                        <label style="font-size:10px;">Minimum (kg)</label>
+                        <input type="number" step="0.1" class="input-field" id="inc-min-${code}" value="${minVal}" style="margin-bottom:8px;">
+                        <label style="font-size:10px;">Increment (kg)</label>
+                        <input type="number" step="0.1" class="input-field" id="inc-step-${code}" value="${stepVal}">
+                    </div>`;
+            }).join('');
+            bodyParts.push(`
+                <div class="detail-metric-row">
+                    <div class="hud-label" style="margin:0 0 8px 0;">Edit increments</div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Override min and step for each equipment option. Barbell and dumbbell use Manual / bar defaults.</div>
+                    ${panels}
+                    <button type="button" class="btn-primary is-secondary" style="margin:8px 0 0; width:100%;" onclick="saveExerciseIncrementsFromDetail('${String(displayName).replace(/'/g, "\\'")}')">Save increments</button>
+                </div>`);
+        }
     } else {
         bodyParts.push(libraryDetailRow('Status', isExerciseBanned(id) ? 'Banned' : 'Allowed'));
     }
@@ -590,6 +617,24 @@ export function openExerciseDetail(id) {
     const editBtn = document.getElementById('library-detail-edit-btn');
     if (editBtn) editBtn.classList.add('hidden');
     document.getElementById('library-detail-sheet')?.classList.remove('hidden');
+}
+
+export function saveExerciseIncrementsFromDetail(exName) {
+    const codes = editableIncrementCodes(exName);
+    const overrides = {};
+    codes.forEach((code) => {
+        const minEl = document.getElementById(`inc-min-${code}`);
+        const stepEl = document.getElementById(`inc-step-${code}`);
+        const min = parseFloat(minEl?.value);
+        const step = parseFloat(stepEl?.value);
+        overrides[code] = {
+            min: Number.isFinite(min) ? min : undefined,
+            step: Number.isFinite(step) && step > 0 ? step : undefined
+        };
+    });
+    saveExerciseIncrementOverrides(exName, overrides);
+    const ex = store.globalExerciseDB.find(e => resolveCatalogName(e.name) === exName || e.name === exName);
+    if (ex) openExerciseDetail(ex.id);
 }
 
 export function editFromLibraryDetail() {

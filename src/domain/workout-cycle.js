@@ -289,7 +289,8 @@ export function confirmSessionExercises(sessionTypeId, ghostItems) {
                 isIsolation: !!it.isIsolation,
                 isExtra: !!it.isExtra,
                 isSuperset: !!it.isSuperset,
-                sides: it.sides
+                sides: it.sides,
+                equipmentChoice: it.equipmentChoice || it.exercise?.equipmentChoice || null
             }));
         next.plan = {
             ...(next.plan || {}),

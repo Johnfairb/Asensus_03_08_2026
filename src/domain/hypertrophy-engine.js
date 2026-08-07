@@ -10,6 +10,15 @@ import {
     getExerciseMeta
 } from './exercise-catalog.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
+import {
+    applyWarmupRounding,
+    equipmentChoiceFromItem,
+    getDumbbellStepForWeight,
+    profileToLegacyEquipment,
+    resolveLoadProfile,
+    roundUpLoad as roundUpLoadCore,
+    skipsWeightProgression
+} from './load-increments.js';
 
 // horizontal push ↔ lower push | vertical push ↔ upper push
 // horizontal pull ↔ lower pull | vertical pull ↔ upper pull
@@ -24,9 +33,9 @@ export const HYPERTROPHY_POOLS = {
     anterior_unilateral: ['Bulgarian Squat', 'Split Squat', 'Lunge', 'Walk Lunge', 'Pistol Squat'],
     posterior_bilateral: ['Deadlift', 'Sumo Deadlift', 'Rack Deadlift', 'Romanian Deadlift'],
     posterior_unilateral: ['Single Leg Deadlift'],
-    horizontal_push_db: ['Dumbbell Bench Press', 'Neutral Bench Press'],
+    horizontal_push_db: ['Bench Press', 'Close Grip Bench Press'],
     horizontal_push_bb: ['Bench Press', 'Decline Bench Press', 'Close Grip Bench Press', 'Dip', 'Press-up', 'Machine Bench Press'],
-    vertical_push_db: ['Seated Dumbbell Shoulder Press', 'Seated Dumbbell Screw Press', 'Dumbbell Incline Bench Press'],
+    vertical_push_db: ['Seated Dumbbell Shoulder Press', 'Seated Dumbbell Screw Press', 'Incline Bench Press'],
     vertical_push_bb: ['Barbell Military Press', 'Machine Overhead Press', 'Incline Bench Press', 'Incline Press-up'],
     vertical_pull: [
         'Pull Up', 'Chin Up', 'Neutral Pull Up',
@@ -106,29 +115,34 @@ export function resolveHypertrophySessionKind(focus) {
     return null;
 }
 
-export function getDumbbellIncrement() {
-    const dom = document.getElementById('set-db-increment');
-    const raw = (dom && dom.value !== '') ? dom.value : store.userConfig.dumbbellIncrement;
-    const n = parseFloat(raw);
-    return Number.isFinite(n) && n > 0 ? n : 2;
+export function getDumbbellIncrement(weight = 10) {
+    const domLow = document.getElementById('set-db-inc-low');
+    const domMid = document.getElementById('set-db-inc-mid');
+    const domHigh = document.getElementById('set-db-inc-high');
+    if (domLow || domMid || domHigh) {
+        const w = Number(weight) || 0;
+        const el = w < 10 ? domLow : w < 20 ? domMid : domHigh;
+        const n = parseFloat(el?.value);
+        if (Number.isFinite(n) && n > 0) return n;
+    }
+    return getDumbbellStepForWeight(weight);
 }
 
 /** Round UP to equipment step (hypertrophy warmups / drop sets). */
-export function roundUpLoad(val, equipment = 'barbell') {
-    const v = Number(val) || 0;
-    if (v <= 0) return 0;
-    let step = 2.5;
-    if (equipment === 'dumbbell') step = getDumbbellIncrement();
-    else if (equipment === 'pullup_dip') step = 1.25;
-    return Math.ceil(v / step - 1e-9) * step;
+export function roundUpLoad(val, equipment = 'barbell', choice = null) {
+    return roundUpLoadCore(val, equipment, choice);
 }
 
-export function equipmentForExercise(name) {
-    const meta = HYPERTROPHY_EXERCISE_META[name];
-    if (!meta) return 'barbell';
-    if (BODYWEIGHT_COMPOUNDS.has(name)) return 'pullup_dip';
-    if (meta.dumbbell) return 'dumbbell';
-    return 'barbell';
+export function equipmentForExercise(name, choice = null) {
+    const profile = resolveLoadProfile(name, choice);
+    if (BODYWEIGHT_COMPOUNDS.has(name) && (profile.code === 'P' || profile.code === 'none')) {
+        return 'pullup_dip';
+    }
+    return profileToLegacyEquipment(profile);
+}
+
+export function loadProfileForExercise(name, choice = null, weight = null) {
+    return resolveLoadProfile(name, choice, { weight });
 }
 
 function shuffle(arr) {
@@ -831,9 +845,12 @@ export function resolveWarmupRestOptions(isIsolation) {
 }
 
 export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsolation, opts = {}) {
-    const eq = equipmentForExercise(exName);
+    const choice = opts.equipmentChoice || opts.choice || null;
+    const profile = resolveLoadProfile(exName, choice, { weight: workWeight });
     const w = Number(workWeight) || 0;
     const reps = Number(workReps) || 10;
+    // Second warmup uses half work-set reps (round up if odd / fractional)
+    const secondReps = Math.max(1, Math.ceil(reps / 2));
     const isIso = !!(isIsolation || HYPERTROPHY_EXERCISE_META[exName]?.role === 'isolation');
     const resolved = resolveWarmupRestOptions(isIso);
     const mode = opts.mode || resolved.mode;
@@ -841,62 +858,63 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
     const { afterFirst, afterSecond } = warmupRestPair({ isIsolation: isIso, workRestSec, mode });
     const sets = [];
 
+    const roundWu = (raw, index) => applyWarmupRounding(raw, profile, index);
+
     // Bodyweight compounds / Reverse Dips / press-ups / pistol, etc.
     if (isBodyweightWarmupLift(exName)) {
         // Reverse Dips at pure bodyweight: single BW warmup only
         if (exName === 'Reverse Dips' && w <= 0) {
             sets.push({
-                weight: 0, reps, rpe: 5, completed: false, isWarmup: true,
+                weight: 0, reps, completed: false, isWarmup: true,
                 partName: 'Warmup · Bodyweight', notes: 'Bodyweight', restTime: afterFirst
             });
             return sets;
         }
         if (w < 10) {
-            // Half ROM (same rep count) → bodyweight
+            // Half ROM (full work reps) → bodyweight (half work reps)
             sets.push({
-                weight: 0, reps, rpe: 5, completed: false, isWarmup: true,
+                weight: 0, reps, completed: false, isWarmup: true,
                 partName: 'Warmup · Half ROM', notes: 'Reduced range · same reps', restTime: afterFirst
             });
             sets.push({
-                weight: 0, reps, rpe: 5, completed: false, isWarmup: true,
-                partName: 'Warmup · Bodyweight', notes: 'Bodyweight', restTime: afterSecond
+                weight: 0, reps: secondReps, completed: false, isWarmup: true,
+                partName: 'Warmup · Bodyweight', notes: 'Bodyweight · half work reps', restTime: afterSecond
             });
             return sets;
         }
         if (w <= 20) {
             sets.push({
-                weight: 0, reps, rpe: 5, completed: false, isWarmup: true,
+                weight: 0, reps, completed: false, isWarmup: true,
                 partName: 'Warmup · Bodyweight', notes: 'Bodyweight', restTime: afterFirst
             });
             sets.push({
-                weight: roundUpLoad(w * 0.5, eq),
-                reps,
-                rpe: 5, completed: false, isWarmup: true,
-                partName: 'Warmup · ½ load', notes: 'Half work weight', restTime: afterSecond
+                weight: roundWu(w * 0.5, 2),
+                reps: secondReps,
+                completed: false, isWarmup: true,
+                partName: 'Warmup · ½ load', notes: 'Half work weight · half work reps', restTime: afterSecond
             });
             return sets;
         }
         // >20 kg added: same as normal compounds (½ then ¾)
         sets.push({
-            weight: roundUpLoad(w * 0.5, eq),
+            weight: roundWu(w * 0.5, 1),
             reps,
-            rpe: 5, completed: false, isWarmup: true,
+            completed: false, isWarmup: true,
             partName: 'Warmup · ½', notes: 'Half work weight', restTime: afterFirst
         });
         sets.push({
-            weight: roundUpLoad(w * 0.75, eq),
-            reps,
-            rpe: 5, completed: false, isWarmup: true,
-            partName: 'Warmup · ¾', notes: 'Three-quarter work weight', restTime: afterSecond
+            weight: roundWu(w * 0.75, 2),
+            reps: secondReps,
+            completed: false, isWarmup: true,
+            partName: 'Warmup · ¾', notes: 'Three-quarter work weight · half work reps', restTime: afterSecond
         });
         return sets;
     }
 
     if (isIso) {
         sets.push({
-            weight: roundUpLoad(w * 0.5, eq),
+            weight: roundUpLoad(w * 0.5, profile),
             reps,
-            rpe: 5,
             completed: false,
             isWarmup: true,
             partName: 'Warmup',
@@ -906,11 +924,10 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
         return sets;
     }
 
-    // Standard compounds: ½ then ¾ work weight (ascending to work sets)
+    // Standard compounds: ½ then ¾ work weight; second warmup at half work reps
     sets.push({
-        weight: roundUpLoad(w * 0.5, eq),
+        weight: roundWu(w * 0.5, 1),
         reps,
-        rpe: 5,
         completed: false,
         isWarmup: true,
         partName: 'Warmup · ½',
@@ -918,13 +935,12 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
         restTime: afterFirst
     });
     sets.push({
-        weight: roundUpLoad(w * 0.75, eq),
-        reps,
-        rpe: 5,
+        weight: roundWu(w * 0.75, 2),
+        reps: secondReps,
         completed: false,
         isWarmup: true,
         partName: 'Warmup · ¾',
-        notes: 'Three-quarter work weight',
+        notes: 'Three-quarter work weight · half work reps',
         restTime: afterSecond
     });
     return sets;
@@ -932,7 +948,10 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
 
 /** Hypertrophy load progression: all sets 8–12 → increase; plateau → −15%. */
 export function progressHypertrophyWeight(exName, hist, currentWeight, targetReps = 10) {
-    const eq = equipmentForExercise(exName);
+    if (skipsWeightProgression(exName)) {
+        return { weight: Number(currentWeight) || 0, note: null };
+    }
+    const profile = resolveLoadProfile(exName, null, { weight: currentWeight });
     let tWeight = Number(currentWeight) || 0;
     if (!hist || !hist.length || tWeight <= 0) return { weight: tWeight, note: null };
 
@@ -959,7 +978,7 @@ export function progressHypertrophyWeight(exName, hist, currentWeight, targetRep
         }).length;
         if (allSame && failedOften >= 2 && tWeight > 20) {
             return {
-                weight: roundUpLoad(tWeight * 0.85, eq),
+                weight: roundUpLoad(tWeight * 0.85, profile),
                 note: 'PLATEAU: Weight stuck — dropped 15%. Build back up slowly.'
             };
         }
@@ -975,9 +994,9 @@ export function progressHypertrophyWeight(exName, hist, currentWeight, targetRep
         return r >= 8 && r <= 12;
     });
     if (allInRange && recent.length >= 2) {
-        const step = eq === 'dumbbell' ? getDumbbellIncrement() : (eq === 'pullup_dip' ? 1.25 : 2.5);
+        const step = profile.step || (profile.code === 'D' ? getDumbbellIncrement(tWeight) : 2.5);
         return {
-            weight: roundUpLoad(tWeight + step, eq),
+            weight: roundUpLoad(tWeight + step, profile),
             note: 'PROGRESSION: All sets in 8–12. Load increased.'
         };
     }
@@ -998,25 +1017,26 @@ export function hypertrophyRestSeconds(rir) {
 export function workWeightFromFinder(finderKg, exName, opts = {}) {
     const raw = Number(finderKg) || 0;
     if (raw <= 0) return 0;
-    const eq = equipmentForExercise(exName);
-    let work = roundUpLoad(raw * 1.10, eq);
+    const choice = opts.equipmentChoice || opts.choice || null;
+    const profile = resolveLoadProfile(exName, choice, { weight: raw });
+    let work = roundUpLoad(raw * 1.10, profile);
     if (opts.forStrength) {
         try {
             // Inline +15% with BW so we don't circular-import periodization-logs here
             const meta = HYPERTROPHY_EXERCISE_META[exName];
             const isBw = BODYWEIGHT_COMPOUNDS.has(exName) || !!(meta && meta.bodyweight);
             const bw = isBw ? (Number(store.userConfig?.weight) || 0) : 0;
-            work = roundUpLoad(Math.max(0, (work + bw) * 1.15 - bw), eq);
+            work = roundUpLoad(Math.max(0, (work + bw) * 1.15 - bw), profile);
         } catch (e) { /* keep hyp work */ }
     }
     return work;
 }
 
 /** Round a known work weight to equipment increments. */
-export function roundHypertrophyWorkWeight(kg, exName) {
+export function roundHypertrophyWorkWeight(kg, exName, choice = null) {
     const raw = Number(kg) || 0;
     if (raw <= 0) return 0;
-    return roundUpLoad(raw, equipmentForExercise(exName));
+    return roundUpLoad(raw, resolveLoadProfile(exName, choice, { weight: raw }));
 }
 
 /**
@@ -1029,22 +1049,26 @@ export function applyHypertrophyWorkWeight(item, workKg) {
     if (!item || !item.exercise) return -1;
     if (item.isSuperset) return -1;
     const exName = item.exercise.name || '';
+    const choice = equipmentChoiceFromItem(item);
     const raw = Number(workKg);
     if (!Number.isFinite(raw) || raw < 0) return -1;
-    const w = raw === 0 ? 0 : roundHypertrophyWorkWeight(raw, exName);
+    const w = raw === 0 ? 0 : roundHypertrophyWorkWeight(raw, exName, choice);
 
     const workReps = (item.sets || []).find(s => s && !s.isWarmup && !s.isText)?.reps || 10;
     const isIso = !!(item.isIsolation || HYPERTROPHY_EXERCISE_META[exName]?.role === 'isolation');
     const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
     const planned = typeof item.plannedSets === 'number' ? item.plannedSets : Math.max(3, workSets.length || 3);
-    const restOpts = resolveWarmupRestOptions(isIso);
-    let rest = restOpts.mode === 'none' ? 0
-        : (restOpts.mode === 'manual' ? restOpts.workRestSec : hypertrophyRestSeconds(2));
-    if (restOpts.mode === 'phase' && !isHypertrophyPhase()) {
+    const restResolved = resolveWarmupRestOptions(isIso);
+    let rest = restResolved.mode === 'none' ? 0
+        : (restResolved.mode === 'manual' ? restResolved.workRestSec : hypertrophyRestSeconds(2));
+    if (restResolved.mode === 'phase' && !isHypertrophyPhase()) {
         rest = phaseDefaultWorkRestSec(isIso);
     }
 
-    const warmups = buildHypertrophyWarmupSets(exName, w, workReps, isIso, restOpts);
+    const warmups = buildHypertrophyWarmupSets(exName, w, workReps, isIso, {
+        ...restResolved,
+        equipmentChoice: choice
+    });
     const working = [];
     for (let i = 0; i < planned; i++) {
         const prev = workSets[i] || {};

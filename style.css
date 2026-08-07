@@ -1104,9 +1104,25 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
     padding-bottom: env(safe-area-inset-bottom, 0px) !important;
     z-index: 26000 !important;
 }
-#post-session-modal .modal-content {
+#post-session-modal .modal-content,
+#post-session-modal .post-session-sheet {
     margin-bottom: 0;
-    max-height: min(82vh, 640px) !important;
+    max-height: min(90dvh, 720px) !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+#post-session-modal .post-session-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+#post-session-modal .post-session-footer {
+    flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
 }
 
 /* Full-screen meal / workout execution focus */

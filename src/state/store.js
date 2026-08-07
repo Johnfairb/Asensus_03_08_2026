@@ -11,6 +11,8 @@ export const store = {
     weight: 84, targetWeight: 75, height: 180, age: 25, bodyFat: 0, sex: 'Male', activity: 1.55, goal: 'Fat_Loss',
     mealsPerDay: 3, budget: 15.00, trainingFreq: 4,
     gymWillingness: 4, maxGymTime: 90, bandAuxiliary: false, dumbbellIncrement: 2,
+    dbIncrements: { low: 1, mid: 2, high: 2 },
+    exerciseIncrements: {},
     hybridStrengthDays: 3, hybridHypertrophyDays: 1,
     baselineTargets: { cals: 0, pro: 0, carb: 0, fat: 0 },
     targets: { cals: 0, pro: 0, carb: 0, fat: 0 },

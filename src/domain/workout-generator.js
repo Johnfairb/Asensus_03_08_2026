@@ -8,7 +8,6 @@ import { buildAuxiliaryExerciseList, buildStrengthSessionRoutine, getGymPlanPref
 import {
     buildHypertrophyWarmupSets,
     equipmentForExercise,
-    getDumbbellIncrement,
     getHypertrophySessionRoutine,
     HYPERTROPHY_EXERCISE_META,
     isHypertrophyFocus,
@@ -29,7 +28,6 @@ import {
     resolveWarmupBlock,
     buildSportSessionBlock
 } from './session-prep.js';
-import { roundToEquipment } from './thermodynamics.js';
 import { renderActiveLog } from '../ui/templates.js';
 import { ensureCycleStarted, ensureCyclePlansForProgramme, sessionTypeIdFromFocus, sessionNeedsExerciseConfirm, confirmSessionExercises } from './workout-cycle.js';
 import { getEquivalentExercises, resolveItemSlotLabel } from './exercise-slots.js';
@@ -699,7 +697,7 @@ export async function generateWorkoutTemplate() {
         'Side Sit': 'Side-sit on Hyperextension Bench',
         'Sidesit': 'Side-sit on Hyperextension Bench',
         'Back Squat': 'Squat',
-        'DB Bench Press': 'Dumbbell Bench Press',
+        'DB Bench Press': 'Bench Press',
         'Dips': 'Dip',
         'Pull Ups': 'Pull Up',
         'Chin Ups': 'Chin Up',
@@ -870,13 +868,7 @@ export async function generateWorkoutTemplate() {
     }
 
     const roundLoad = (val, type) => {
-        if (type === 'dumbbell') {
-            const step = getDumbbellIncrement();
-            return Math.max(step, Math.round((Number(val) || 0) / step) * step);
-        }
-        if (typeof roundToEquipment === 'function') return roundToEquipment(val, type);
-        if (typeof window.roundEquipment === 'function') return window.roundEquipment(val, type);
-        return Math.round((Number(val) || 0) / 2.5) * 2.5;
+        return roundUpLoad(val, type || 'barbell');
     };
 
     mainRoutine.forEach(item => {

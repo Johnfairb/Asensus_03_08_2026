@@ -4,6 +4,7 @@ import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, SPORT_MATRIX } from '.
 import { HYPERTROPHY_POOLS, isHypertrophyPhase } from './hypertrophy-engine.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
 import { buildStrengthMetaMap, EXERCISE_CATALOG } from './exercise-catalog.js';
+import { skipsWeightProgression } from './load-increments.js';
 import { loadExercises } from '../ui/fuel.js';
 import { getBillingMonthKey } from './billing-month.js';
 
@@ -627,6 +628,7 @@ export function getStrengthSetSplit(session, totalSets) {
  * Progress isolation load when last session: set 1 ≥ 8 and every work set in 6–10.
  */
 export function progressStrengthIsolationWeight(exName, hist, currentWeight, equipmentRound) {
+    if (skipsWeightProgression(exName)) return { weight: currentWeight, note: '' };
     const name = String(exName || '').toLowerCase();
     const logs = (hist || []).filter(l => String(l.exercise || '').toLowerCase() === name);
     if (!logs.length) return { weight: currentWeight, note: '' };
@@ -856,8 +858,8 @@ export async function migrateStrengthExerciseLabels() {
             'wide squat': 'Sumo Squat',
             'bulgarian split squat': 'Bulgarian Squat',
             'trap bar deadlift': 'Rack Deadlift',
-            'db bench press': 'Dumbbell Bench Press',
-            'neutral db bench press': 'Neutral Bench Press',
+            'db bench press': 'Bench Press',
+            'neutral db bench press': 'Bench Press',
             'dips': 'Dip',
             'seated db press': 'Seated Dumbbell Shoulder Press',
             'military press': 'Barbell Military Press',
@@ -876,6 +878,13 @@ export async function migrateStrengthExerciseLabels() {
             'back extension': 'Hyperextension',
             'bicep curls': 'Dumbbell Curl',
             'french press': 'Cable French Press',
+            'cable french press': 'Cable French Press',
+            'seated french press': 'Single Overhead Seated French Press',
+            'seated one arm french press': 'Single Overhead Seated French Press',
+            'one arm french press': 'Single Overhead Seated French Press',
+            'single arm french press': 'Single Overhead Seated French Press',
+            'overhead french press': 'Single Overhead Seated French Press',
+            'single overhead seated french press': 'Single Overhead Seated French Press',
             'calf raises': 'Calf Raise Machine',
             'quad extension': 'Leg Extension',
             'hamstring curl': 'Seated Hamstring Curl',

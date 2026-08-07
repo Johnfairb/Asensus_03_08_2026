@@ -15,14 +15,21 @@ const HIT_TYPE_LABELS_RE = new RegExp(
 import { saveSettings } from '../domain/thermodynamics.js';
 import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, canSupersetPair, createSupersetFromIndices, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
 import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase } from '../domain/hypertrophy-engine.js';
+import {
+    allowsWeightInput,
+    catalogLoadOptions,
+    equipmentChoiceFromItem,
+    expandLoadChoices
+} from '../domain/load-increments.js';
+import { switchCableEquipment } from './equipment-ui.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
 import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart } from '../domain/periodization-logs.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
-import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry } from './journey.js';
+import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry, idbPutJournalMedia } from './journey.js';
 import { calculateTDEE } from '../domain/thermodynamics.js';
-import { notifyRestTimerDone } from './notifications.js';
+import { notifyRestTimerDone, ensureNotificationPermission } from './notifications.js';
 import { addFoodToActiveLog, loadGhostTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderActiveLog, setConfirmRouteButtons, switchLogType, updateExecutionAuxBlocks, updateExerciseDropdowns, updateSaveTemplateButtonLabel } from './templates.js';
 import { openAddExercisesModal } from './add-exercises-modal.js';
 import {
@@ -140,10 +147,11 @@ export function calculatePlates(targetWeight = null) {
         targetWeight = parseFloat(inputEl.value) || 0;
         isUI = true;
     }
-    if (targetWeight <= 20) {
+    if (targetWeight < 20) {
         if (isUI) document.getElementById('plate-visuals').innerText = "BAR ONLY";
         return "BAR ONLY";
     }
+    // ≥20 kg always uses a 20 kg bar
     let sideWeight = Math.round(((targetWeight - 20) / 2) * 100) / 100; 
     const plates = [25, 20, 15, 10, 5, 2.5, 1.25]; let loaded = [];
     for (let plate of plates) { while (sideWeight >= plate - 0.01) { loaded.push(plate); sideWeight = Math.round((sideWeight - plate) * 100) / 100; } }
@@ -420,6 +428,20 @@ export function toggleStretchListExpand(exIdx) {
     renderExerciseSets();
 }
 
+/** Mark / unmark the entire stretching routine (all parts), like a warmup block checkbox. */
+export function toggleStretchGroupComplete(exIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item || !isStaticStretchingLogItem(item)) return;
+    const parts = item.sets || [];
+    if (!parts.length) return;
+    const allDone = parts.every(s => s && s.completed);
+    parts.forEach(s => { if (s) s.completed = !allDone; });
+    if (navigator.vibrate) navigator.vibrate([50]);
+    renderExerciseSets();
+    if (window._workoutSessionConfirmed) saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+    calculateLiveFitnessScores();
+}
+
 /** Ask for work weight (first time on this exercise) before opening the sets log. */
 export function beginExerciseLog(exIdx) {
     if (maybePromptWeightFinder(exIdx, { openLogAfter: true })) return;
@@ -475,7 +497,9 @@ function maybeRebuildLiftWarmups(item, workKg) {
     const workSets = nonWarmup.filter(s => !s.isText && !s.isLactateHit);
     const reps = Number(workSets[0]?.reps) || 10;
     const isIso = !!(item.isIsolation);
-    const warmups = buildHypertrophyWarmupSets(item.exercise?.name || '', w, reps, isIso);
+    const warmups = buildHypertrophyWarmupSets(item.exercise?.name || '', w, reps, isIso, {
+        equipmentChoice: equipmentChoiceFromItem(item)
+    });
     const updatedWork = nonWarmup.map(s => {
         if (s.isText || s.isLactateHit || s.isDropSet) return s;
         return { ...s, weight: w };
@@ -588,37 +612,106 @@ function formatDurationSecLabel(sec) {
     return `${n}s`;
 }
 
-/** Rest countdown in the former “Superset with next” slot on lactate cards. */
+/** Rest +/- / SKIP controls for locked rest timers. */
+function restOverrideButtonsHtml(exIdx, setIdx, { include60 = false } = {}) {
+    const minus60 = include60
+        ? `<button type="button" onclick="overrideRest(${exIdx}, ${setIdx}, -60)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">−60s</button>`
+        : '';
+    const plus60 = include60
+        ? `<button type="button" onclick="overrideRest(${exIdx}, ${setIdx}, 60)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">+60s</button>`
+        : '';
+    return `<div style="display:flex; gap:6px; margin-top:8px; justify-content:center; flex-wrap:wrap;">
+        <button type="button" onclick="overrideRest(${exIdx}, ${setIdx}, -30)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">−30s</button>
+        ${minus60}
+        <button type="button" onclick="overrideRest(${exIdx}, ${setIdx}, 30)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">+30s</button>
+        ${plus60}
+        <button type="button" onclick="overrideRest(${exIdx}, ${setIdx}, -999)" style="background:rgba(255,59,48,0.1); border:1px solid #FF3B30; color:#FF3B30; font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">SKIP</button>
+    </div>`;
+}
+
+/** Rest countdown in the former "Superset with next" slot on lactate cards. */
 function lactateRestSlotHtml(item, exIdx) {
     const sets = item.sets || [];
-    const locked = sets.find(s => s.locked && s.lockTimeLeft > 0);
+    const locked = sets.find(s => s.locked && remainingRestSeconds(s) > 0);
     if (locked) {
         return `<div id="lactate-rest-slot-${exIdx}" style="width:100%; margin-top:10px; padding:10px 12px; border-radius:6px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
             <div style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px;">Rest timer</div>
-            <div style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${locked.lockTimeLeft}s</div>
-            <div style="display:flex; gap:6px; margin-top:8px; justify-content:center;">
-                <button type="button" onclick="overrideRest(${exIdx}, ${sets.indexOf(locked)}, 30)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">+30s</button>
-                <button type="button" onclick="overrideRest(${exIdx}, ${sets.indexOf(locked)}, -999)" style="background:rgba(255,59,48,0.1); border:1px solid #FF3B30; color:#FF3B30; font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">SKIP</button>
-            </div>
+            <div style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${remainingRestSeconds(locked)}s</div>
+            ${restOverrideButtonsHtml(exIdx, sets.indexOf(locked), { include60: false })}
         </div>`;
     }
     // Also show rest targeting the next lactate exercise (mixed modalities)
     const nextItem = store.activeLog.items[exIdx + 1];
     if (nextItem && isLactateHitLogItem(nextItem)) {
-        const nextLocked = (nextItem.sets || []).find(s => s.locked && s.lockTimeLeft > 0);
+        const nextLocked = (nextItem.sets || []).find(s => s.locked && remainingRestSeconds(s) > 0);
         if (nextLocked) {
             const nIdx = (nextItem.sets || []).indexOf(nextLocked);
             return `<div id="lactate-rest-slot-${exIdx}" style="width:100%; margin-top:10px; padding:10px 12px; border-radius:6px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
                 <div style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px;">Rest before next interval</div>
-                <div style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${nextLocked.lockTimeLeft}s</div>
-                <div style="display:flex; gap:6px; margin-top:8px; justify-content:center;">
-                    <button type="button" onclick="overrideRest(${exIdx + 1}, ${nIdx}, 30)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">+30s</button>
-                    <button type="button" onclick="overrideRest(${exIdx + 1}, ${nIdx}, -999)" style="background:rgba(255,59,48,0.1); border:1px solid #FF3B30; color:#FF3B30; font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">SKIP</button>
-                </div>
+                <div style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${remainingRestSeconds(nextLocked)}s</div>
+                ${restOverrideButtonsHtml(exIdx + 1, nIdx, { include60: false })}
             </div>`;
         }
     }
     return `<div id="lactate-rest-slot-${exIdx}" style="width:100%; margin-top:10px; padding:8px; border-radius:6px; border:1px dashed var(--border-subtle); color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono'; text-align:center;">Rest timer starts when you log an interval</div>`;
+}
+
+function remainingRestSeconds(setObj) {
+    if (!setObj) return 0;
+    if (setObj.lockEndsAt) return Math.max(0, Math.ceil((setObj.lockEndsAt - Date.now()) / 1000));
+    return Math.max(0, Math.round(Number(setObj.lockTimeLeft) || 0));
+}
+
+function clearRestInterval(exIdx, setIdx) {
+    const key = `${exIdx}-${setIdx}`;
+    if (store.restIntervals[key]) {
+        clearInterval(store.restIntervals[key]);
+        delete store.restIntervals[key];
+    }
+}
+
+function unlockRestSilent(setObj, exIdx, setIdx) {
+    clearRestInterval(exIdx, setIdx);
+    setObj.locked = false;
+    setObj.lockTimeLeft = 0;
+    delete setObj.lockEndsAt;
+    delete setObj.lockAlarmFired;
+}
+
+function finishRestNaturally(exIdx, setIdx) {
+    const setObj = store.activeLog?.items?.[exIdx]?.sets?.[setIdx];
+    if (!setObj) return;
+    if (setObj.lockAlarmFired) return;
+    setObj.lockAlarmFired = true;
+    unlockRestSilent(setObj, exIdx, setIdx);
+    playRestAlarm();
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+    if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) renderExerciseSets();
+    else renderWorkoutLog();
+}
+
+/** Sync wall-clock rest deadlines (critical after backgrounding). */
+export function syncRestTimersFromWallClock() {
+    const items = store.activeLog?.items || [];
+    let changed = false;
+    items.forEach((item, exIdx) => {
+        (item.sets || []).forEach((set, setIdx) => {
+            if (!set || !set.locked) return;
+            const left = remainingRestSeconds(set);
+            set.lockTimeLeft = left;
+            if (left <= 0) {
+                finishRestNaturally(exIdx, setIdx);
+                changed = true;
+            } else {
+                const btn = document.getElementById(`btn-check-${exIdx}-${setIdx}`);
+                if (btn) btn.innerText = left + 's';
+            }
+        });
+    });
+    if (changed) {
+        if (window.currentModalExIdx != null) renderExerciseSets();
+        else renderWorkoutLog();
+    }
 }
 
 function startRestOnSet(exIdx, setIdx, restSec) {
@@ -626,23 +719,29 @@ function startRestOnSet(exIdx, setIdx, restSec) {
     const target = item?.sets?.[setIdx];
     if (!target || !(restSec > 0)) return;
     target.locked = true;
-    target.lockTimeLeft = Math.round(restSec);
-    const key = `${exIdx}-${setIdx}`;
-    if (store.restIntervals[key]) clearInterval(store.restIntervals[key]);
-    store.restIntervals[key] = setInterval(() => {
-        target.lockTimeLeft--;
-        const btn = document.getElementById(`btn-check-${exIdx}-${setIdx}`);
-        if (btn && target.locked) btn.innerText = target.lockTimeLeft + 's';
-        if (window.currentModalExIdx == null) renderWorkoutLog();
-        if (target.lockTimeLeft <= 0) {
-            clearInterval(store.restIntervals[key]);
-            target.locked = false;
-            playRestAlarm();
-            if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
-            if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) renderExerciseSets();
-            else renderWorkoutLog();
+    const duration = Math.round(restSec);
+    target.lockEndsAt = Date.now() + duration * 1000;
+    target.lockTimeLeft = duration;
+    delete target.lockAlarmFired;
+    clearRestInterval(exIdx, setIdx);
+    try { ensureNotificationPermission(); } catch (e) { /* ignore */ }
+
+    const tick = () => {
+        if (!target.locked) {
+            clearRestInterval(exIdx, setIdx);
+            return;
         }
-    }, 1000);
+        const left = remainingRestSeconds(target);
+        target.lockTimeLeft = left;
+        const btn = document.getElementById(`btn-check-${exIdx}-${setIdx}`);
+        if (btn && target.locked) btn.innerText = left + 's';
+        if (window.currentModalExIdx == null) renderWorkoutLog();
+        if (left <= 0) {
+            finishRestNaturally(exIdx, setIdx);
+        }
+    };
+    store.restIntervals[`${exIdx}-${setIdx}`] = setInterval(tick, 250);
+    tick();
 }
 
 function formatCardioPace(distanceKm, timeMinutes) {
@@ -1136,13 +1235,10 @@ export function renderExerciseSets() {
             const rowMeta = (item.lactateRows && item.lactateRows[setIdx]) || null;
             const target = set.targetDisplay || rowMeta?.targetDisplay || '';
             let lockOutClass = set.locked ? 'locked disabled' : '';
-            let btnText = set.lockTimeLeft ? set.lockTimeLeft + 's' : '✓';
+            let btnText = remainingRestSeconds(set) > 0 ? remainingRestSeconds(set) + 's' : '✓';
             let overridesHtml = '';
             if (set.locked) {
-                overridesHtml = `<div style="display:flex; gap:6px; margin-top:8px; justify-content:flex-end;">
-                    <button onclick="overrideRest(${exIdx}, ${setIdx}, 30)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">+30s</button>
-                    <button onclick="overrideRest(${exIdx}, ${setIdx}, -999)" style="background:rgba(255, 59, 48, 0.1); border:1px solid #FF3B30; color:#FF3B30; font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">SKIP</button>
-                </div>`;
+                overridesHtml = restOverrideButtonsHtml(exIdx, setIdx, { include60: false });
             }
             html += `<div style="display:flex; flex-direction:column; margin-bottom:14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px;">
                 <div class="set-row" style="margin-bottom:0;">
@@ -1189,20 +1285,20 @@ export function renderExerciseSets() {
 
         const listOpen = !!item._stretchListExpanded;
         const doneCount = parts.filter(s => s.completed).length;
+        const allDone = parts.length > 0 && doneCount === parts.length;
         let html = `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:16px;">
-            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Tap Stretching to see each part. Check when done.</div>
+            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Check the whole routine, or expand to mark parts.</div>
             ${item.isCustomStretch ? '' : `<button type="button" onclick="dismissPlannedStretchFromLog(${exIdx})" style="background:none; border:none; color:var(--text-stealth); font-size:22px; cursor:pointer; line-height:1;" aria-label="Dismiss stretching">&times;</button>`}
         </div>`;
-        html += `<button type="button" onclick="toggleStretchListExpand(${exIdx})" style="width:100%; text-align:left; cursor:pointer; background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:12px; padding:14px 16px; color:inherit; margin-bottom:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-                <div>
-                    <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:4px;">Cool-down</div>
-                    <div style="font-size:15px; font-weight:800; color:var(--text-main);">Stretching</div>
-                    <div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-top:4px;">${doneCount}/${parts.length} done</div>
-                </div>
-                <span style="font-family:'Roboto Mono'; font-size:16px; color:var(--gold-accent);">${listOpen ? '−' : '+'}</span>
-            </div>
-        </button>`;
+        html += `<div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:12px; padding:14px 16px;">
+            <button type="button" onclick="toggleStretchListExpand(${exIdx})" style="flex:1; min-width:0; text-align:left; cursor:pointer; background:none; border:none; padding:0; color:inherit;">
+                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:4px;">Cool-down</div>
+                <div style="font-size:15px; font-weight:800; color:var(--text-main);">Stretching</div>
+                <div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-top:4px;">${doneCount}/${parts.length} done · tap to ${listOpen ? 'hide' : 'show'} parts</div>
+            </button>
+            <span style="font-family:'Roboto Mono'; font-size:16px; color:var(--gold-accent); cursor:pointer;" onclick="toggleStretchListExpand(${exIdx})">${listOpen ? '−' : '+'}</span>
+            <div class="check-btn ${allDone ? 'completed' : ''}" style="flex-shrink:0; width:48px; height:48px; font-size:18px;" onclick="event.stopPropagation(); toggleStretchGroupComplete(${exIdx})" title="Mark whole stretching routine">${allDone ? '✓' : ''}</div>
+        </div>`;
         if (listOpen) {
             parts.forEach((set, setIdx) => {
                 const expanded = !!set._uiExpanded;
@@ -1230,13 +1326,33 @@ export function renderExerciseSets() {
 
     const isCardio = (item.exercise.domain || '').toLowerCase() === 'cardio';
     const isSteadyCardio = isSteadyCardioLogItem(item);
-    const isBarbell = /barbell|squat|deadlift|bench press|military press|power clean/i.test(item.exercise.name);
+    const isBarbell = /barbell|squat|deadlift|bench press|military press|power clean/i.test(item.exercise.name)
+        || expandLoadChoices(catalogLoadOptions(item.exercise.name)).includes('B');
+    const loadChoices = expandLoadChoices(catalogLoadOptions(item.exercise.name));
+    const showWeight = allowsWeightInput(item.exercise.name, equipmentChoiceFromItem(item));
+    const isCableChoice = loadChoices.includes('Fca') || loadChoices.includes('Cca');
+    const currentCable = equipmentChoiceFromItem(item) === 'Cca' ? 'Cca' : 'Fca';
 
     let html = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
             <button onclick="openVideoModal('${item.exercise.name}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); padding:6px 10px; border-radius:4px; color:var(--text-silver); font-size:10px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:4px;">🎥 FORM VIDEO</button>
             ${isBarbell ? `<button onclick="document.getElementById('plate-calculator-modal').classList.remove('hidden')" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--gold-accent); font-size:10px; padding:6px 10px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer; font-weight:bold;">[PLATES]</button>` : ''}
         </div>`;
+
+    if (isCableChoice) {
+        html += `<div style="margin-bottom:14px; padding:10px 12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:8px;">Cable stack</div>
+            <div style="display:flex; gap:8px;">
+                <button type="button" onclick="switchCableEquipmentAndRefresh(${exIdx}, 'Fca')" style="flex:1; padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-family:'Roboto Mono'; border:1px solid ${currentCable === 'Fca' ? 'var(--gold-accent)' : 'var(--border-subtle)'}; background:${currentCable === 'Fca' ? 'rgba(212,175,55,0.12)' : 'transparent'}; color:${currentCable === 'Fca' ? 'var(--gold-accent)' : 'var(--text-silver)'};">Functional</button>
+                <button type="button" onclick="switchCableEquipmentAndRefresh(${exIdx}, 'Cca')" style="flex:1; padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-family:'Roboto Mono'; border:1px solid ${currentCable === 'Cca' ? 'var(--gold-accent)' : 'var(--border-subtle)'}; background:${currentCable === 'Cca' ? 'rgba(212,175,55,0.12)' : 'transparent'}; color:${currentCable === 'Cca' ? 'var(--gold-accent)' : 'var(--text-silver)'};">Crossover</button>
+            </div>
+            <div style="font-size:9px; color:var(--text-stealth); margin-top:8px; line-height:1.35;">Switching only re-rounds incomplete future sets.</div>
+        </div>`;
+    }
+
+    if (!showWeight && !isCardio && !isSteadyCardio) {
+        html += `<div style="font-size:11px; color:var(--text-muted); margin-bottom:12px; font-family:'Roboto Mono';">No added weight for this exercise.</div>`;
+    }
 
     if (isSteadyCardio) {
         html += `<div style="font-size:11px; color:var(--text-muted); margin-bottom:12px; line-height:1.4;">Enter distance, then tap <strong style="color:var(--text-main);">Confirm &amp; Close</strong>. Duration is taken from the session timer at the top.</div>`;
@@ -1253,14 +1369,10 @@ export function renderExerciseSets() {
         else if (set.distance_km < (set.prevDist || 0) && (set.prevDist || 0) > 0) borderClass = 'prog-down';
 
         let lockOutClass = set.locked ? 'locked disabled' : '';
-        let btnText = set.lockTimeLeft ? set.lockTimeLeft + 's' : '✓';
+        let btnText = remainingRestSeconds(set) > 0 ? remainingRestSeconds(set) + 's' : '✓';
         let overridesHtml = '';
         if (set.locked) {
-            overridesHtml = `<div style="display:flex; gap:6px; margin-top:8px; justify-content:flex-end;">
-                <button onclick="overrideRest(${exIdx}, ${setIdx}, 30)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">+30s</button>
-                <button onclick="overrideRest(${exIdx}, ${setIdx}, 60)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">+60s</button>
-                <button onclick="overrideRest(${exIdx}, ${setIdx}, -999)" style="background:rgba(255, 59, 48, 0.1); border:1px solid #FF3B30; color:#FF3B30; font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">SKIP</button>
-            </div>`;
+            overridesHtml = restOverrideButtonsHtml(exIdx, setIdx, { include60: true });
         }
 
         const paceText = formatCardioPace(set.distance_km, timerMins);
@@ -1289,7 +1401,7 @@ export function renderExerciseSets() {
         return;
     }
 
-    html += `<div class="set-header" style="margin-top:20px;"><div style="width:25px;">SET</div><div style="flex:1;text-align:center;">${isCardio ? 'KM' : 'KG'}</div><div style="flex:1;text-align:center;">${isCardio ? 'MINS' : 'REPS'}</div><div style="flex:1;text-align:center; color:var(--text-muted);">RIR</div><div style="width:48px;"></div></div>`;
+    html += `<div class="set-header" style="margin-top:20px;"><div style="width:25px;">SET</div><div style="flex:1;text-align:center;">${isCardio ? 'KM' : (showWeight ? 'KG' : '—')}</div><div style="flex:1;text-align:center;">${isCardio ? 'MINS' : 'REPS'}</div><div style="flex:1;text-align:center; color:var(--text-muted);">RIR</div><div style="width:48px;"></div></div>`;
     
     item.sets.forEach((set, setIdx) => {
         let borderClass = 'prog-same';
@@ -1301,29 +1413,38 @@ export function renderExerciseSets() {
             else if (set.weight < (set.prevWeight || 0) && (set.prevWeight || 0) > 0) borderClass = 'prog-down';
         }
 
-        let plateMath = (!isCardio && isBarbell && set.weight > 20) ? `<div style="width:100%; text-align:center; font-size:10px; color:var(--text-silver); margin-top:6px; font-family:'Roboto Mono', monospace; font-weight: bold; letter-spacing: 0.5px;">└ LOAD: [ ${calculatePlates(set.weight)} ] PER SIDE</div>` : '';
+        let plateMath = (!isCardio && showWeight && isBarbell && set.weight > 20) ? `<div style="width:100%; text-align:center; font-size:10px; color:var(--text-silver); margin-top:6px; font-family:'Roboto Mono', monospace; font-weight: bold; letter-spacing: 0.5px;">└ LOAD: [ ${calculatePlates(set.weight)} ] PER SIDE</div>` : '';
+
+        const weightCell = isCardio
+            ? `<input type="number" step="0.1" class="set-input ${borderClass}" value="${set.distance_km||0}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'distance_km', this.value)">`
+            : (showWeight
+                ? `<input type="number" step="0.1" class="set-input ${borderClass}" value="${set.weight||0}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'weight', this.value)">`
+                : `<div style="flex:1; text-align:center; color:var(--text-stealth); font-size:11px; font-family:'Roboto Mono'; align-self:center;">BW</div>`);
 
         let inputGroupHtml = '';
         if (set.isText) {
             inputGroupHtml = `<div style="flex:1; text-align:center; color:var(--gold-accent); font-size:12px; font-weight:bold; align-self:center;">${set.reps}</div>`;
+        } else if (set.isWarmup) {
+            // Warmups: weight + reps only (no RIR)
+            inputGroupHtml = `
+                ${weightCell}
+                <input type="number" class="set-input" value="${isCardio ? (set.time_minutes||0) : (set.reps||0)}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, '${isCardio?'time_minutes':'reps'}', this.value)">
+                <div style="flex:1; text-align:center; color:var(--text-stealth); font-size:11px; font-family:'Roboto Mono'; align-self:center;">—</div>
+            `;
         } else {
             inputGroupHtml = `
-                <input type="number" step="0.1" class="set-input ${borderClass}" value="${isCardio ? (set.distance_km||0) : (set.weight||0)}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, '${isCardio?'distance_km':'weight'}', this.value)">
+                ${weightCell}
                 <input type="number" class="set-input" value="${isCardio ? (set.time_minutes||0) : (set.reps||0)}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, '${isCardio?'time_minutes':'reps'}', this.value)">
                 <input type="number" class="set-input" style="color:var(--text-muted);" placeholder="0-5" value="${set.rpe||''}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'rpe', this.value)">
             `;
         }
 
         let lockOutClass = set.locked ? 'locked disabled' : '';
-        let btnText = set.lockTimeLeft ? set.lockTimeLeft + 's' : '✓';
+        let btnText = remainingRestSeconds(set) > 0 ? remainingRestSeconds(set) + 's' : '✓';
 
         let overridesHtml = '';
         if (set.locked) {
-            overridesHtml = `<div style="display:flex; gap:6px; margin-top:8px; justify-content:flex-end;">
-                <button onclick="overrideRest(${exIdx}, ${setIdx}, 30)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">+30s</button>
-                <button onclick="overrideRest(${exIdx}, ${setIdx}, 60)" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">+60s</button>
-                <button onclick="overrideRest(${exIdx}, ${setIdx}, -999)" style="background:rgba(255, 59, 48, 0.1); border:1px solid #FF3B30; color:#FF3B30; font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">SKIP</button>
-            </div>`;
+            overridesHtml = restOverrideButtonsHtml(exIdx, setIdx, { include60: true });
         }
 
         let workNum = 0;
@@ -1397,9 +1518,161 @@ export function renderExerciseSets() {
             <button type="button" onclick="addSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD SET</button>
         </div>`;
     }
-    
+
+    html += exerciseDiarySectionHtml(exIdx, item);
     document.getElementById('sets-modal-content').innerHTML = html;
 };
+
+export function switchCableEquipmentAndRefresh(exIdx, choice) {
+    switchCableEquipment(exIdx, choice);
+    renderExerciseSets();
+    if (window._workoutSessionConfirmed) {
+        try { saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() }); } catch (e) { /* ignore */ }
+    }
+}
+
+function exerciseDiarySectionHtml(exIdx, item) {
+    const open = !!item._exerciseDiaryOpen;
+    const notes = item.diaryNotes || '';
+    const pending = item._diaryPendingMedia || [];
+    const preview = pending.length
+        ? pending.map((m, i) => {
+            const badge = m.kind === 'video' ? 'VIDEO' : 'PHOTO';
+            const thumb = m.kind === 'video'
+                ? `<video src="${m.previewUrl}" muted style="width:100%; height:100%; object-fit:cover;"></video>`
+                : `<img src="${m.previewUrl}" alt="" style="width:100%; height:100%; object-fit:cover;">`;
+            return `<div style="position:relative; width:76px; height:76px; border-radius:8px; overflow:hidden; border:1px solid var(--border-subtle); background:#111;">
+                ${thumb}
+                <button type="button" onclick="removeExerciseDiaryMedia(${exIdx}, ${i})" style="position:absolute; top:2px; right:2px; width:22px; height:22px; border:none; border-radius:50%; background:rgba(0,0,0,0.7); color:#fff; cursor:pointer; font-size:14px; line-height:22px; padding:0;">&times;</button>
+                <div style="position:absolute; left:0; right:0; bottom:0; font-size:8px; text-align:center; background:rgba(0,0,0,0.55); color:#ccc; font-family:'Roboto Mono'; padding:2px 0;">${badge}</div>
+            </div>`;
+        }).join('')
+        : `<div style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">No media attached yet.</div>`;
+
+    let body = '';
+    if (open) {
+        body = `<div style="margin-top:12px;">
+            <label style="margin-top:0; font-size:10px;">Notes</label>
+            <textarea class="input-field" rows="3" placeholder="Cues, form notes, what felt off…"
+                style="resize:none; font-family:'Inter', sans-serif; font-size:13px; margin-bottom:12px;"
+                onchange="updateExerciseDiaryNotes(${exIdx}, this.value)"
+                oninput="updateExerciseDiaryNotes(${exIdx}, this.value)">${String(notes).replace(/</g, '&lt;')}</textarea>
+            <label style="margin-top:0; font-size:10px;">Photos / videos</label>
+            <div style="font-size:9px; color:var(--text-muted); margin-bottom:10px;">Saved on this device with the session.</div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                <label class="btn-primary" style="margin:0; padding:10px 12px; font-size:11px; flex:1; min-width:90px; text-align:center; cursor:pointer; border-color:var(--gold-accent); color:var(--gold-accent);">
+                    Photo
+                    <input type="file" accept="image/*" capture="environment" style="display:none;" onchange="onExerciseDiaryMediaSelected(${exIdx}, this)">
+                </label>
+                <label class="btn-primary" style="margin:0; padding:10px 12px; font-size:11px; flex:1; min-width:90px; text-align:center; cursor:pointer; border-color:var(--gold-accent); color:var(--gold-accent);">
+                    Video
+                    <input type="file" accept="video/*" capture="environment" style="display:none;" onchange="onExerciseDiaryMediaSelected(${exIdx}, this)">
+                </label>
+                <label class="btn-primary" style="margin:0; padding:10px 12px; font-size:11px; flex:1; min-width:90px; text-align:center; cursor:pointer; border-color:var(--text-stealth); color:var(--text-main);">
+                    Library
+                    <input type="file" accept="image/*,video/*" multiple style="display:none;" onchange="onExerciseDiaryMediaSelected(${exIdx}, this)">
+                </label>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">${preview}</div>
+        </div>`;
+    }
+
+    return `<div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-subtle);">
+        <button type="button" onclick="toggleExerciseDiary(${exIdx})"
+            style="width:100%; text-align:left; cursor:pointer; background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:12px; padding:14px 16px; color:inherit;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                <div>
+                    <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:4px;">Optional</div>
+                    <div style="font-size:14px; font-weight:800; color:var(--text-main);">Exercise diary</div>
+                    <div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-top:4px;">Notes · photos · videos</div>
+                </div>
+                <span style="font-family:'Roboto Mono'; font-size:16px; color:var(--gold-accent);">${open ? '−' : '+'}</span>
+            </div>
+        </button>
+        ${body}
+    </div>`;
+}
+
+export function toggleExerciseDiary(exIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item) return;
+    item._exerciseDiaryOpen = !item._exerciseDiaryOpen;
+    renderExerciseSets();
+}
+
+export function updateExerciseDiaryNotes(exIdx, value) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item) return;
+    item.diaryNotes = String(value || '');
+    if (window._workoutSessionConfirmed) saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+}
+
+export async function onExerciseDiaryMediaSelected(exIdx, inputEl) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item || !inputEl) return;
+    if (!item._diaryPendingMedia) item._diaryPendingMedia = [];
+    const files = Array.from(inputEl.files || []);
+    for (const file of files) {
+        if (item._diaryPendingMedia.length >= 8) {
+            try { alert('Max 8 media files per exercise diary.'); } catch (e) { /* ignore */ }
+            break;
+        }
+        const isVideo = (file.type || '').startsWith('video/');
+        const isImage = (file.type || '').startsWith('image/');
+        if (!isVideo && !isImage) continue;
+        const id = 'edm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        item._diaryPendingMedia.push({
+            id,
+            kind: isVideo ? 'video' : 'photo',
+            name: file.name || (isVideo ? 'clip.mp4' : 'photo.jpg'),
+            mime: file.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+            blob: file,
+            previewUrl: URL.createObjectURL(file)
+        });
+    }
+    inputEl.value = '';
+    item._exerciseDiaryOpen = true;
+    renderExerciseSets();
+    if (window._workoutSessionConfirmed) saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+}
+
+export function removeExerciseDiaryMedia(exIdx, mediaIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item?._diaryPendingMedia) return;
+    const [removed] = item._diaryPendingMedia.splice(mediaIdx, 1);
+    if (removed?.previewUrl) {
+        try { URL.revokeObjectURL(removed.previewUrl); } catch (e) { /* ignore */ }
+    }
+    renderExerciseSets();
+}
+
+async function persistExerciseDiaryMedia(dateKey) {
+    const items = store.activeLog?.items || [];
+    for (const item of items) {
+        const pending = item?._diaryPendingMedia || [];
+        if (!pending.length) continue;
+        const meta = Array.isArray(item.diaryMedia) ? item.diaryMedia.slice() : [];
+        for (const m of pending) {
+            if (!m?.blob) continue;
+            await idbPutJournalMedia({
+                id: m.id,
+                dateKey,
+                kind: m.kind,
+                name: m.name,
+                mime: m.mime,
+                blob: m.blob,
+                savedAt: Date.now(),
+                exerciseName: item.exercise?.name || item.name || ''
+            });
+            meta.push({ id: m.id, kind: m.kind, name: m.name, mime: m.mime });
+            if (m.previewUrl) {
+                try { URL.revokeObjectURL(m.previewUrl); } catch (e) { /* ignore */ }
+            }
+        }
+        item.diaryMedia = meta;
+        item._diaryPendingMedia = [];
+    }
+}
 
 export function updateWorkoutSet(exIdx, setIdx, field, val) { 
     // Steady duration is timer-owned — ignore manual edits
@@ -1582,20 +1855,24 @@ export function toggleSetComplete(exIdx, setIdx) {
             }
         }
     } else if (setObj.completed && !skipRest && item.sets[setIdx + 1]) {
-        let nextSet = item.sets[setIdx + 1];
-        
-        let baseRest = setObj.restTime || 120; 
-        let loggedRIR = parseFloat(setObj.rpe);
-        if (!Number.isFinite(loggedRIR)) loggedRIR = 0;
+        let baseRest = setObj.restTime || 120;
 
-        if (isHypertrophyPhase() || setObj.restTime === 90) {
-            // Hypertrophy: 90s base, +10s only at true 0 RIR
-            baseRest = hypertrophyRestSeconds(loggedRIR);
-        } else {
-            if (loggedRIR <= 1 && baseRest > 0) baseRest += 60;
-            else if (loggedRIR >= 4 && baseRest > 60) baseRest -= 30;
-        } 
-        
+        // Warmups: use prescribed rest only (no RIR)
+        if (!setObj.isWarmup) {
+            let loggedRIR = parseFloat(setObj.rpe);
+            if (!Number.isFinite(loggedRIR)) loggedRIR = 0;
+
+            if (isHypertrophyPhase() || setObj.restTime === 90) {
+                // Hypertrophy: 90s base, +10s only at true 0 RIR
+                baseRest = hypertrophyRestSeconds(loggedRIR);
+            } else {
+                // Strength: 0 RIR → +60s (5:00), 1 RIR → +30s (4:30)
+                if (loggedRIR <= 0 && baseRest > 0) baseRest += 60;
+                else if (loggedRIR === 1 && baseRest > 0) baseRest += 30;
+                else if (loggedRIR >= 4 && baseRest > 60) baseRest -= 30;
+            }
+        }
+
         startRestOnSet(exIdx, setIdx + 1, baseRest);
     } else if (!setObj.completed) {
         if (item.sets[setIdx + 1]) {
@@ -1629,17 +1906,22 @@ export function toggleSetComplete(exIdx, setIdx) {
 export function overrideRest(exIdx, setIdx, seconds) {
     let setObj = store.activeLog.items[exIdx].sets[setIdx];
     if (!setObj.locked) return;
-    
-    if (seconds === -999) setObj.lockTimeLeft = 0; 
-    else setObj.lockTimeLeft += seconds;
-    
-    if (setObj.lockTimeLeft <= 0) {
-        clearInterval(store.restIntervals[`${exIdx}-${setIdx}`]);
-        setObj.locked = false;
-        playRestAlarm();
-        if(navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+
+    // SKIP (−999) or subtracting past zero: unlock silently — alarm only on natural timeout
+    if (seconds === -999) {
+        unlockRestSilent(setObj, exIdx, setIdx);
+    } else {
+        const now = Date.now();
+        const endsAt = setObj.lockEndsAt || (now + remainingRestSeconds(setObj) * 1000);
+        const newEnds = endsAt + (Number(seconds) || 0) * 1000;
+        if (newEnds <= now) {
+            unlockRestSilent(setObj, exIdx, setIdx);
+        } else {
+            setObj.lockEndsAt = newEnds;
+            setObj.lockTimeLeft = Math.ceil((newEnds - now) / 1000);
+        }
     }
-    
+
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) renderExerciseSets();
     else renderActiveLog();
     // Keep lactate rest slot on the plan cards in sync
@@ -2726,6 +3008,25 @@ export async function commitWorkoutSession() {
     });
 
     finalizeSetsBeforeCommit();
+
+    // Persist per-exercise diary media, then strip non-serializable blobs before snapshot
+    try {
+        await persistExerciseDiaryMedia(dateIso);
+    } catch (e) {
+        console.warn('Exercise diary media save failed', e);
+    }
+    (store.activeLog.items || []).forEach(item => {
+        if (!item) return;
+        delete item._diaryPendingMedia;
+        delete item._exerciseDiaryOpen;
+        delete item.lockEndsAt;
+        (item.sets || []).forEach(s => {
+            if (!s) return;
+            delete s.lockEndsAt;
+            delete s.lockAlarmFired;
+        });
+    });
+
     // Snapshot only exercises/sets the user checked off
     const sessionItemsSnapshot = JSON.parse(JSON.stringify(store.activeLog.items || []))
         .map(item => ({

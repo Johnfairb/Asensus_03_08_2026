@@ -15,6 +15,33 @@ import {
 
 const DRAFT_KEY = 'ascensus_workout_draft_v1';
 
+/** Drop File/Blob fields that break JSON.stringify (exercise diary pending media). */
+function serializableDraftItems(items) {
+    return (items || []).map(item => {
+        if (!item || typeof item !== 'object') return item;
+        const copy = { ...item };
+        if (Array.isArray(copy._diaryPendingMedia)) {
+            copy._diaryPendingMediaMeta = copy._diaryPendingMedia.map(m => ({
+                id: m.id,
+                kind: m.kind,
+                name: m.name,
+                mime: m.mime
+            }));
+            delete copy._diaryPendingMedia;
+        }
+        if (Array.isArray(copy.sets)) {
+            copy.sets = copy.sets.map(s => {
+                if (!s || typeof s !== 'object') return s;
+                const sc = { ...s };
+                // Wall-clock deadlines are rebuilt when rest is started again
+                delete sc.lockEndsAt;
+                return sc;
+            });
+        }
+        return copy;
+    });
+}
+
 export function loadWorkoutDraft() {
     try {
         const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
@@ -46,7 +73,7 @@ export function saveWorkoutDraft(partial = {}) {
 
     const draft = {
         type: 'workout',
-        items: JSON.parse(JSON.stringify(items)),
+        items: JSON.parse(JSON.stringify(serializableDraftItems(items))),
         manualSessionKind: window.manualSessionKind || document.getElementById('today-focus')?.value || null,
         manualWorkoutMode: !!window.manualWorkoutMode,
         editingSessionId: window.editingSessionId || null,

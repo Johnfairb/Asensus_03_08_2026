@@ -11,6 +11,7 @@ import { renderWorkoutLog } from './drive.js';
 import { clearWorkoutDraft, saveWorkoutDraft } from '../domain/workout-draft.js';
 import { resetWorkoutTimer, startWorkoutTimer } from './workout-timer.js';
 import { sessionTypeIdFromFocus, confirmSessionExercises, sessionNeedsExerciseConfirm, getCyclePlan } from '../domain/workout-cycle.js';
+import { gateConfirmForEquipmentPicks } from './equipment-ui.js';
 
 // ==========================================
 // 7. TEMPLATE MANAGER & GHOST PLANNER
@@ -623,6 +624,14 @@ export function setConfirmRouteButtons(confirmed) {
 }
 
 export function acceptGhostTemplate() {
+    const proceed = () => acceptGhostTemplateAfterEquipment();
+    if (store.activeLog?.type === 'workout' || (store.currentGhostItems || []).some((it) => it?.exercise?.name && !it.isWarmupGroup)) {
+        if (!gateConfirmForEquipmentPicks(proceed)) return;
+    }
+    proceed();
+}
+
+function acceptGhostTemplateAfterEquipment() {
     store._ghostBackupForUnconfirm = JSON.parse(JSON.stringify(store.currentGhostItems || []));
     store.activeLog.items = [...store.currentGhostItems];
     // Stamp planned-session kind so Complete Log always creates a Log tab card

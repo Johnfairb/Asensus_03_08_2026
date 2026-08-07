@@ -12,6 +12,7 @@ import {
 } from '../domain/hypertrophy-engine.js';
 import {
     bwRepThreshold,
+    isBwGateExercise,
     isPressUpVariant,
     needsBwCompetencyAsk,
     recordBwCanDo,
@@ -104,6 +105,11 @@ function resolveDbExercise(name) {
 function sideNeedsBw(side) {
     if (!side) return false;
     const name = side.exercise?.name || '';
+    // Never ask BW competency for weighted swaps (e.g. French Press after Reverse Dips)
+    if (!isBwGateExercise(name)) {
+        if (side.needsBwGate) side.needsBwGate = false;
+        return false;
+    }
     return !side.bwGateResolved && (side.needsBwGate || needsBwCompetencyAsk(name));
 }
 
@@ -282,7 +288,9 @@ function openPromptForCurrentTarget(exIdx) {
     }
 
     const name = item.exercise?.name || '';
-    const needsBw = !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
+    const isBwLift = isBwGateExercise(name);
+    if (!isBwLift && item.needsBwGate) item.needsBwGate = false;
+    const needsBw = isBwLift && !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
     const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;
     if (needsBw) {
         openSheet(exIdx, renderBwCompetencyQuestion);
@@ -313,7 +321,9 @@ export function maybePromptWeightFinder(exIdx, opts = {}) {
     }
 
     const name = item.exercise?.name || '';
-    const needsBw = !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
+    const isBwLift = isBwGateExercise(name);
+    if (!isBwLift && item.needsBwGate) item.needsBwGate = false;
+    const needsBw = isBwLift && !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
     const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;
     if (!needsBw && !needsWeight) return false;
 

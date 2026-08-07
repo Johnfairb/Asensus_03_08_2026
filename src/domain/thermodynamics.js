@@ -19,6 +19,7 @@ import { clearHypertrophyDayPlanCache } from './hypertrophy-engine.js';
 import { generateWorkoutTemplate } from './workout-generator.js';
 import { updateLiveDashboard } from '../ui/journey.js';
 import { applyNetworkKillSwitch, hydrateNetworkProfileDom } from '../ui/network.js';
+import { roundUpLoad } from './load-increments.js';
 
 const DEFAULT_EVENT_RPE = 7;
 
@@ -124,7 +125,9 @@ export function applyUserConfigToDom() {
     setVal('set-meals-per-day', store.userConfig.mealsPerDay);
     setVal('set-budget', store.userConfig.budget);
     setVal('set-training-freq', store.userConfig.trainingFreq);
-    setVal('set-db-increment', store.userConfig.dumbbellIncrement != null ? store.userConfig.dumbbellIncrement : 2);
+    setVal('set-db-inc-low', store.userConfig.dbIncrements?.low ?? 1);
+    setVal('set-db-inc-mid', store.userConfig.dbIncrements?.mid ?? store.userConfig.dumbbellIncrement ?? 2);
+    setVal('set-db-inc-high', store.userConfig.dbIncrements?.high ?? store.userConfig.dumbbellIncrement ?? 2);
     try {
         const prefs = JSON.parse(localStorage.getItem('ascensus_session_prep_prefs_v1') || '{}') || {};
         setVal('set-gym-warmup', prefs.gymWarmup || 'planned');
@@ -218,7 +221,9 @@ export function saveSettings() {
     const gymWillEl = document.getElementById('set-gym-willingness');
     const gymTimeEl = document.getElementById('set-max-gym-time');
     const bandEl = document.getElementById('toggle-band-auxiliary');
-    const dbIncEl = document.getElementById('set-db-increment');
+    const dbLow = document.getElementById('set-db-inc-low');
+    const dbMid = document.getElementById('set-db-inc-mid');
+    const dbHigh = document.getElementById('set-db-inc-high');
     if (gymWillEl && gymWillEl.value !== '') {
         store.userConfig.gymWillingness = Math.min(6, Math.max(1, parseInt(gymWillEl.value, 10) || 4));
     } else if (store.userConfig.gymWillingness == null) {
@@ -227,9 +232,14 @@ export function saveSettings() {
     if (gymTimeEl && gymTimeEl.value !== '') {
         store.userConfig.maxGymTime = parseInt(gymTimeEl.value, 10) || 90;
     }
-    if (dbIncEl && dbIncEl.value !== '') {
-        store.userConfig.dumbbellIncrement = parseFloat(dbIncEl.value) || 2;
+    if (!store.userConfig.dbIncrements || typeof store.userConfig.dbIncrements !== 'object') {
+        store.userConfig.dbIncrements = { low: 1, mid: 2, high: 2 };
     }
+    if (dbLow && dbLow.value !== '') store.userConfig.dbIncrements.low = parseFloat(dbLow.value) || 1;
+    if (dbMid && dbMid.value !== '') store.userConfig.dbIncrements.mid = parseFloat(dbMid.value) || 2;
+    if (dbHigh && dbHigh.value !== '') store.userConfig.dbIncrements.high = parseFloat(dbHigh.value) || 2;
+    // Keep legacy field in sync with mid range for older readers
+    store.userConfig.dumbbellIncrement = store.userConfig.dbIncrements.mid;
     if (bandEl) store.userConfig.bandAuxiliary = !!bandEl.checked;
     const disc = document.getElementById('strength-phase-disclaimer');
     if (disc) disc.classList.toggle('hidden', store.userConfig.seasonPhase !== 'OffSeason_Strength');
@@ -512,12 +522,7 @@ export function handleFocusChange() {
 
 // --- SMART ROUNDING ENGINE ---
 export function roundToEquipment(val, type) {
-   if (type === 'pullup_dip') return Math.max(1.25, Math.round(val / 1.25) * 1.25);
-   if (type === 'dumbbell') {
-       const step = parseFloat(store.userConfig?.dumbbellIncrement) || 2;
-       return Math.max(step, Math.round(val / step) * step);
-   }
-   return Math.max(2.5, Math.round(val / 2.5) * 2.5);
+   return roundUpLoad(val, type || 'barbell');
 }
 
 function readLivePhase() {

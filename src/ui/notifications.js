@@ -1,6 +1,7 @@
 /**
  * Optional push-style toasts (Settings → Alerts).
  * Events: match day, rest timer done, missed morning workout (after 2pm).
+ * Rest-end uses Notification API when the app is backgrounded so the user still hears/sees it.
  */
 import { store } from '../state/store.js';
 import { dateToISO, getPlannedDayEvents, isGameEvent, isLiftingEvent, isPracticeEvent } from '../domain/route-planner.js';
@@ -36,7 +37,51 @@ export function showAppNotification(message, { key = null, force = false } = {})
   if (typeof window.alert === 'function') window.alert(message);
 }
 
+/** Ask for system notification permission once (needed for background rest alarms). */
+export async function ensureNotificationPermission() {
+  if (typeof Notification === 'undefined') return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  try {
+    const result = await Notification.requestPermission();
+    return result === 'granted';
+  } catch (e) {
+    return false;
+  }
+}
+
+function showSystemNotification(title, body) {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
+  try {
+    const n = new Notification(title, {
+      body,
+      tag: 'ascensus-rest-timer',
+      renotify: true,
+      silent: false,
+      requireInteraction: false
+    });
+    n.onclick = () => {
+      try { window.focus(); } catch (e) { /* ignore */ }
+      try { n.close(); } catch (e) { /* ignore */ }
+    };
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Rest finished. Always try system notification when tab is hidden;
+ * in-app alert only when Alerts are on and the app is visible.
+ */
 export function notifyRestTimerDone() {
+  const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  if (hidden) {
+    ensureNotificationPermission().then((ok) => {
+      if (ok) showSystemNotification('Rest over', 'Rest timer finished — next set.');
+    });
+    return;
+  }
   showAppNotification('Rest timer finished — next set.', { key: `rest_${Date.now()}`, force: false });
 }
 
@@ -62,10 +107,8 @@ function todayHadMorningWorkoutPlanned() {
     const events = getPlannedDayEvents(new Date()) || [];
     const hasLift = events.some(e => isLiftingEvent(e) || isPracticeEvent(e) || isGameEvent(e));
     if (!hasLift) return false;
-    // Morning window: trainingWindow Morning, or any practice/match/strength today
     const win = (store.userConfig.trainingWindow || 'Afternoon').toLowerCase();
     if (win === 'morning') return true;
-    // Also treat Practice/Match as "shouldn't be missed by 2pm"
     return events.some(e => isPracticeEvent(e) || isGameEvent(e) || isLiftingEvent(e));
   } catch (e) {
     return false;
