@@ -41,13 +41,57 @@ export async function handleAuth(action) {
     else status.innerText = "[ GRANTED ] Decrypting Telemetry...";
 }
 
-export function quickLogin(email, password) {
-    // Autofill the inputs
+/** Dev/demo override: provision missing accounts, then sign in. */
+export async function quickLogin(email, password) {
     document.getElementById('auth-email').value = email;
     document.getElementById('auth-password').value = password;
-    
-    // Automatically trigger the login function
-    handleAuth('login');
+
+    const status = document.getElementById('auth-status');
+    if (!store.supabaseClient) {
+        if (status) status.innerText = '[ REJECTED ] Auth client not ready.';
+        return;
+    }
+    if (status) status.innerText = 'AUTHENTICATING...';
+
+    const confirmHint =
+        'Confirm email is ON in Supabase. Turn it off (Auth → Providers → Email → Confirm email), then confirm or recreate theo/tyler/john.';
+
+    let result = await store.supabaseClient.auth.signInWithPassword({ email, password });
+    if (result.error) {
+        const code = String(result.error.code || '');
+        const msg = String(result.error.message || '').toLowerCase();
+        const needsProvision = code === 'invalid_credentials' || msg.includes('invalid login');
+        if (needsProvision) {
+            if (status) status.innerText = 'PROVISIONING DEMO ACCOUNT...';
+            const signUp = await store.supabaseClient.auth.signUp({ email, password });
+            if (signUp.error) {
+                const sMsg = String(signUp.error.message || '');
+                if (status) {
+                    status.innerText = /rate limit/i.test(sMsg)
+                        ? `[ REJECTED ] Email rate limit — wait a minute, then retry. (${confirmHint})`
+                        : `[ REJECTED ] ${sMsg}`;
+                }
+                return;
+            }
+            // If Confirm email is enabled, signup returns a user but no session.
+            if (!signUp.data?.session) {
+                if (status) status.innerText = `[ REJECTED ] ${confirmHint}`;
+                return;
+            }
+            if (status) status.innerText = '[ GRANTED ] Decrypting Telemetry...';
+            return;
+        }
+        if (code === 'email_not_confirmed' || msg.includes('email not confirmed')) {
+            if (status) status.innerText = `[ REJECTED ] ${confirmHint}`;
+            return;
+        }
+    }
+
+    if (result.error) {
+        if (status) status.innerText = `[ REJECTED ] ${result.error.message}`;
+    } else if (status) {
+        status.innerText = '[ GRANTED ] Decrypting Telemetry...';
+    }
 }
 
 export async function handleSignOut() {
