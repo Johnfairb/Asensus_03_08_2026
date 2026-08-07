@@ -159,10 +159,7 @@
                 <button class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(1)">← BACK</button>
                 <button class="btn-primary" style="flex:2; border-color: var(--silver-accent); color: var(--silver-accent);" onclick="nextObStep(3)">NEXT PARAMETERS →</button>
             </div>
-            <div style="display:flex; gap:10px; margin-top: 15px;">
-                <button class="btn-primary" style="flex:1; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">ABORT</button>
-                <button class="btn-primary" style="flex:2; border-color: var(--silver-accent); color: var(--silver-accent); margin-top:0;" onclick="nextObStep(2)">NEXT PARAMETERS →</button>
-            </div>
+            <button class="btn-primary" style="margin-top: 12px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">ABORT / SIGN OUT</button>
         </div>
 
         <!-- STEP 3: The Engine (Diet & Sport) -->
@@ -225,11 +222,14 @@
                 </label>
             </div>
 
-            <div style="display:flex; gap:10px;">
-                <button class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(2)">← BACK</button>
-                <button class="btn-primary" style="flex:2; background: var(--gold-glow); border-color: var(--gold-accent); color: var(--gold-accent);" onclick="triggerBootSequence()">LOCK & BOOT GPS</button>
+            <div style="position: sticky; bottom: 0; padding: 12px 0 4px; background: linear-gradient(180deg, transparent 0%, var(--bg-void) 28%); z-index: 2;">
+                <div style="display:flex; gap:10px;">
+                    <button class="btn-primary" style="flex:1; border-color: #333; color: var(--text-stealth);" onclick="nextObStep(2)">← BACK</button>
+                    <button class="btn-primary" style="flex:2; background: var(--gold-glow); border-color: var(--gold-accent); color: var(--gold-accent);" onclick="triggerBootSequence()">LOCK &amp; BOOT GPS</button>
+                </div>
+                <p style="font-size:10px; color:var(--text-muted); text-align:center; margin:8px 0 0; font-family:'Roboto Mono';">Tick both boxes above, then press LOCK &amp; BOOT GPS</p>
+                <button class="btn-primary" style="margin-top: 10px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">SIGN OUT / SWITCH ACCOUNT</button>
             </div>
-            <button class="btn-primary" style="margin-top: 12px; border-color: #FF3B30; color: #FF3B30;" onclick="handleSignOut()">SIGN OUT / SWITCH ACCOUNT</button>
         </div>
         
         <!-- STEP 4: Terminal Boot Sequence -->
@@ -237,6 +237,7 @@
             <img src="assets/logo-mark.svg" alt="Ascensus" class="boot-logo boot-logo-sm" style="margin-bottom: 20px;">
             <h2 style="color:var(--text-main); font-family:'Roboto Mono'; font-size:14px; margin-bottom:8px;">CALIBRATING ARCHITECTURE</h2>
             <p id="ob-boot-log" style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono'; text-transform:uppercase;">Calculating Baseline TDEE...</p>
+            <button id="ob-boot-retry" type="button" class="btn-primary hidden" style="margin-top:20px; border-color:var(--gold-accent); color:var(--gold-accent);" onclick="nextObStep(3)">← BACK TO PHASE 3</button>
         </div>
     </div>
 </div>

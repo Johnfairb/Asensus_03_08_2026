@@ -60,6 +60,7 @@ export function triggerBootSequence() {
     // Hide all steps, show the spinning terminal
     document.querySelectorAll('.ob-step').forEach(step => step.classList.add('hidden'));
     document.getElementById('ob-step-boot').classList.remove('hidden');
+    document.getElementById('ob-boot-retry')?.classList.add('hidden');
     document.getElementById('ob-phase-title').innerText = "SYSTEM SECURED";
     document.getElementById('ob-main-title').innerHTML = '<img src="assets/logo-mark.svg" alt="Ascensus" class="boot-logo boot-logo-sm" style="margin: 0 auto 8px auto;">';
     document.getElementById('ob-progress').style.width = "100%";
@@ -123,6 +124,9 @@ export async function completeOnboarding() {
             // If it fails, revert the UI so they aren't stuck on the spinner
             document.getElementById('ob-step-boot').classList.add('hidden');
             document.getElementById('ob-step-3').classList.remove('hidden');
+            document.getElementById('ob-boot-retry')?.classList.add('hidden');
+            document.getElementById('ob-phase-title').innerText = 'PHASE 3 / 3';
+            document.getElementById('ob-main-title').innerText = 'SYSTEM LOGIC';
             return;
         }
 
@@ -134,7 +138,10 @@ export async function completeOnboarding() {
 
     } catch (err) {
         console.error("Onboarding Error:", err);
-        alert("Javascript crashed during onboarding. Press F12 to check the console.");
+        const log = document.getElementById('ob-boot-log');
+        if (log) log.innerText = `BOOT FAILED: ${err?.message || 'unknown error'}`;
+        document.getElementById('ob-boot-retry')?.classList.remove('hidden');
+        alert("Onboarding failed. Use BACK TO PHASE 3 and try again, or check the console (F12).");
     }
 }
 
