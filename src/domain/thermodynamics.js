@@ -579,17 +579,17 @@ export function getGymTimeOptionsForContext(phase, gymDays) {
         };
     }
 
-    // Strength + hybrid — document timing ladder (45 / 60 / 75 / 90)
+    // Strength + hybrid — timing ladder (60 / 75 / 90 / 105)
     if (p === 'OffSeason_Strength' || p === 'OffSeason_Hybrid') {
         return {
             hint: p === 'OffSeason_Hybrid'
                 ? 'Applies to strength days. Hypertrophy days use the same clock for their own templates.'
-                : '45 min drops unilateral + core. Stick to rest times so the clock matches.',
+                : '1 hour drops unilateral + core. Stick to rest times so the clock matches.',
             options: [
-                { value: 45, label: '45 min' },
                 { value: 60, label: '1 hour' },
                 { value: 75, label: '1 hour 15' },
-                { value: 90, label: '1 hour 30' }
+                { value: 90, label: '1 hour 30' },
+                { value: 105, label: '1 hour 45' }
             ]
         };
     }

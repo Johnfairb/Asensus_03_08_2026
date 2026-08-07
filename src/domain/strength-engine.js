@@ -179,20 +179,21 @@ export function getCoreCatalogNames() {
 
 export function getStrengthTimeTier(maxTime) {
     const t = parseInt(maxTime, 10) || 90;
-    if (t <= 45) return 45;
     if (t <= 60) return 60;
     if (t <= 75) return 75;
-    return 90;
+    if (t <= 90) return 90;
+    return 105;
 }
 
 export function strengthSetsForTier(tier, kind) {
     // kind: 'compound' | 'isolation' | 'core'
-    if (tier <= 60) {
-        if (kind === 'core') return tier <= 45 ? 0 : 2;
+    // Shortest (60) = abbreviated; each step up matches the old ladder shifted +15
+    if (tier <= 75) {
+        if (kind === 'core') return tier <= 60 ? 0 : 2;
         return 2;
     }
-    if (tier <= 75) return 3;
-    // 90
+    if (tier <= 90) return 3;
+    // 105
     if (kind === 'compound') return 4;
     if (kind === 'isolation') return 3;
     return 3; // core — never 4
@@ -509,8 +510,8 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
     } catch (e) { /* generated path */ }
 
     const plan = loadStrengthMonthPlan(sportData);
-    const includeUnilateral = tier > 45;
-    const includeCore = tier > 45;
+    const includeUnilateral = tier > 60;
+    const includeCore = tier > 60;
 
     let slotIds = resolveSessionCompoundSlots(plan, session, includeUnilateral);
 
@@ -583,7 +584,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
     };
 }
 
-/** Resolve A/B compound slot lists; at 45 min drop unilateral and force 3+3. */
+/** Resolve A/B compound slot lists; at 60 min drop unilateral and force 3+3. */
 function resolveSessionCompoundSlots(plan, session, includeUnilateral) {
     let a = [...(plan.sessionA || [])];
     let b = [...(plan.sessionB || [])];
@@ -609,9 +610,9 @@ function getStrengthTimeTierFromPrefs(prefs, maxTime, setBudget) {
     if (prefs && prefs.timeTier) return prefs.timeTier;
     // Legacy setBudget mapping if someone still passes 10/12/14
     if (setBudget != null && !prefs) {
-        if (setBudget <= 10) return 60;
-        if (setBudget <= 12) return 75;
-        return 90;
+        if (setBudget <= 10) return 75;
+        if (setBudget <= 12) return 90;
+        return 105;
     }
     return getStrengthTimeTier(maxTime);
 }
@@ -736,8 +737,8 @@ export function getGymPlanPrefs() {
     }
 
     let setBudget = 10;
-    if (timeTier >= 90) setBudget = 14;
-    else if (timeTier >= 75) setBudget = 12;
+    if (timeTier >= 105) setBudget = 14;
+    else if (timeTier >= 90) setBudget = 12;
     else setBudget = 10;
 
     const preferAttach = false;
