@@ -1,4 +1,4 @@
-/** Wall-clock workout timer — starts on Confirm workout, stops on Complete log. */
+/** Wall-clock workout timer — armed on Confirm workout, starts on first exercise Log tap. */
 
 let _timerInterval = null;
 let _startedAt = null;
@@ -36,6 +36,20 @@ function renderTimerUi() {
   el.classList.toggle('is-running', _running);
 }
 
+/** Show 00:00 without counting — used after Confirm / session setup. */
+export function armWorkoutTimer() {
+  if (_running) return;
+  _elapsedMs = 0;
+  _startedAt = null;
+  if (_timerInterval) {
+    clearInterval(_timerInterval);
+    _timerInterval = null;
+  }
+  const wrap = document.getElementById('workout-timer-wrap');
+  if (wrap) wrap.classList.remove('hidden');
+  renderTimerUi();
+}
+
 export function startWorkoutTimer() {
   if (_running) return;
   _startedAt = Date.now();
@@ -45,6 +59,13 @@ export function startWorkoutTimer() {
   const wrap = document.getElementById('workout-timer-wrap');
   if (wrap) wrap.classList.remove('hidden');
   renderTimerUi();
+}
+
+/** Start the clock the first time the user opens an exercise to log (no-op if already running). */
+export function ensureWorkoutTimerStarted() {
+  if (_running) return false;
+  startWorkoutTimer();
+  return true;
 }
 
 /** Stop timer; returns elapsed minutes (min 1 if any time ran). */

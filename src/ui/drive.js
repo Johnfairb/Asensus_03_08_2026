@@ -49,7 +49,10 @@ import {
     setWorkoutElapsedMs,
     startWorkoutTimer,
     stopWorkoutTimer,
-    stopWorkoutTimerDetailed
+    stopWorkoutTimerDetailed,
+    armWorkoutTimer,
+    ensureWorkoutTimerStarted,
+    isWorkoutTimerRunning
 } from './workout-timer.js';
 
 /** Read editable duration field (edit-workout mode) into frozen session duration. */
@@ -444,6 +447,21 @@ export function toggleStretchGroupComplete(exIdx) {
 
 /** Ask for work weight (first time on this exercise) before opening the sets log. */
 export function beginExerciseLog(exIdx) {
+    // Session clock starts on the first exercise Log tap (not while editing a past session)
+    if (
+        store.activeLog?.type === 'workout'
+        && !window.editingSessionId
+        && !window._editingPreservedDuration
+        && (window._workoutSessionConfirmed || window.manualWorkoutMode)
+    ) {
+        if (ensureWorkoutTimerStarted() && window._workoutSessionConfirmed) {
+            saveWorkoutDraft({
+                elapsedMs: getWorkoutElapsedMs(),
+                timerRunning: true,
+                timerAnchorAt: Date.now()
+            });
+        }
+    }
     if (maybePromptWeightFinder(exIdx, { openLogAfter: true })) return;
     openExerciseSetsModal(exIdx);
 }
@@ -1974,6 +1992,18 @@ function setManualAddBtnSymbol(open) {
 }
 
 export function toggleToolsMenu() {
+    // Workouts: + opens the add-exercises modal directly (Load/Save are already on the bar)
+    if (store.activeLog?.type === 'workout') {
+        const menu = document.getElementById('tools-menu');
+        if (menu && !menu.classList.contains('hidden')) {
+            menu.classList.add('hidden');
+            setManualAddBtnSymbol(false);
+            return;
+        }
+        openAddExercisesModal();
+        return;
+    }
+
     const menu = document.getElementById('tools-menu');
     if (!menu) return;
     menu.classList.toggle('hidden');
@@ -1988,20 +2018,9 @@ export function toggleToolsMenu() {
         if (addExBtn) addExBtn.style.display = 'none';
         return;
     }
-    refreshTemplateSelector();
-    if (store.activeLog.type === 'workout') {
-        if (foodSel) foodSel.style.display = 'none';
-        if (exSel) exSel.style.display = 'none';
-        if (addExBtn) addExBtn.style.display = 'block';
-    } else if (['breakfast', 'lunch', 'dinner', 'snack'].includes(store.activeLog.type)) {
-        if (foodSel) foodSel.style.display = 'block';
-        if (exSel) exSel.style.display = 'none';
-        if (addExBtn) addExBtn.style.display = 'none';
-    } else {
-        if (foodSel) foodSel.style.display = 'none';
-        if (exSel) exSel.style.display = 'none';
-        if (addExBtn) addExBtn.style.display = 'none';
-    }
+    if (foodSel) foodSel.style.display = ['breakfast', 'lunch', 'dinner', 'snack'].includes(store.activeLog.type) ? 'block' : 'none';
+    if (exSel) exSel.style.display = 'none';
+    if (addExBtn) addExBtn.style.display = 'none';
 }
 
 export function manualAdd() {
@@ -2098,12 +2117,11 @@ export function beginManualWorkoutSession(kind, opts = {}) {
     window._loggedSessionDurationLabel = '';
     window._lastSessionDurationMin = 0;
     resetWorkoutTimer();
-    // Manual empty sessions have no Confirm step — start clock now.
-    // GPS Steady/Lactate templates start the timer on Confirm workout.
+    // Manual empty sessions have no Confirm step — arm clock; starts on first exercise Log tap.
     if (window.manualWorkoutMode) {
-        startWorkoutTimer();
+        armWorkoutTimer();
         window._workoutSessionConfirmed = true;
-        saveWorkoutDraft({ elapsedMs: 0 });
+        saveWorkoutDraft({ elapsedMs: 0, timerRunning: false });
     }
 }
 
@@ -2480,7 +2498,7 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
     // Full-screen focus fade-in
     zone.classList.remove('hidden');
     setTimeout(() => zone.classList.add('show'), 10);
-    // Workout timer starts on Confirm workout (acceptGhostTemplate), not during preview
+    // Workout timer starts on first exercise Log tap (after Confirm / session setup)
     resetWorkoutTimer();
 }
 
@@ -2506,21 +2524,22 @@ function hideExecutionZoneShell() {
 export function parkInProgressWorkout() {
     const items = store.activeLog?.type === 'workout' ? (store.activeLog.items || []) : [];
     const elapsed = getWorkoutElapsedMs();
+    const timerWasRunning = isWorkoutTimerRunning() || elapsed > 0;
     const anchorAt = Date.now() - elapsed;
     // Only write when we still have live items — never overwrite a parked draft with an empty log
     if (store.activeLog?.type === 'workout' && items.length) {
         saveWorkoutDraft({
             elapsedMs: elapsed,
-            timerRunning: true,
-            timerAnchorAt: anchorAt
+            timerRunning: timerWasRunning,
+            timerAnchorAt: timerWasRunning ? anchorAt : null
         });
     } else if (store.activeLog?.type === 'workout'
         && window._workoutSessionConfirmed
         && !hasWorkoutDraft()) {
         saveWorkoutDraft({
             elapsedMs: elapsed,
-            timerRunning: true,
-            timerAnchorAt: anchorAt
+            timerRunning: timerWasRunning,
+            timerAnchorAt: timerWasRunning ? anchorAt : null
         });
     }
     resetWorkoutTimer();
@@ -2593,15 +2612,23 @@ export function resumeInProgressWorkout() {
     if (tLabel) tLabel.textContent = 'Timer';
 
     resetWorkoutTimer();
-    // Continue from wall-clock anchor so time away still counts
+    // Continue from wall-clock anchor so time away still counts — only if the clock had started
     const elapsed = getDraftRunningElapsedMs(draft);
     if (elapsed > 0) setWorkoutElapsedMs(elapsed);
-    startWorkoutTimer();
-    saveWorkoutDraft({
-        elapsedMs: getWorkoutElapsedMs(),
-        timerRunning: true,
-        timerAnchorAt: Date.now() - getWorkoutElapsedMs()
-    });
+    if (elapsed > 0 || draft.timerRunning) {
+        startWorkoutTimer();
+        saveWorkoutDraft({
+            elapsedMs: getWorkoutElapsedMs(),
+            timerRunning: true,
+            timerAnchorAt: Date.now() - getWorkoutElapsedMs()
+        });
+    } else {
+        armWorkoutTimer();
+        saveWorkoutDraft({
+            elapsedMs: 0,
+            timerRunning: false
+        });
+    }
 
     const zone = document.getElementById('execution-zone');
     if (zone) {

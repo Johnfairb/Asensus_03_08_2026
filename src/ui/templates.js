@@ -9,7 +9,7 @@ import { smartRoundMass } from '../domain/thermodynamics.js';
 import { generateWorkoutTemplate } from '../domain/workout-generator.js';
 import { renderWorkoutLog } from './drive.js';
 import { clearWorkoutDraft, saveWorkoutDraft } from '../domain/workout-draft.js';
-import { resetWorkoutTimer, startWorkoutTimer } from './workout-timer.js';
+import { resetWorkoutTimer, armWorkoutTimer } from './workout-timer.js';
 import { sessionTypeIdFromFocus, confirmSessionExercises, sessionNeedsExerciseConfirm, getCyclePlan } from '../domain/workout-cycle.js';
 import { gateConfirmForEquipmentPicks } from './equipment-ui.js';
 
@@ -279,9 +279,9 @@ export function loadSavedTemplate(id) {
         document.body.classList.add('workout-focus-mode');
         window.journalMode = 'workout';
         resetWorkoutTimer();
-        startWorkoutTimer();
+        armWorkoutTimer();
         window._workoutSessionConfirmed = true;
-        saveWorkoutDraft({ elapsedMs: 0 });
+        saveWorkoutDraft({ elapsedMs: 0, timerRunning: false });
     } else {
         document.body.classList.remove('workout-focus-mode');
     }
@@ -659,7 +659,7 @@ function acceptGhostTemplateAfterEquipment() {
     store.ghostOverrides = {};
     renderActiveLog();
     setConfirmRouteButtons(true);
-    // Workout clock starts when the plan is confirmed (not during preview)
+    // Workout clock starts on first exercise Log tap (not on Confirm)
     if (store.activeLog.type === 'workout') {
         window._loggedSessionDurationMs = 0;
         window._loggedSessionDurationLabel = '';
@@ -674,9 +674,9 @@ function acceptGhostTemplateAfterEquipment() {
         const tLabel = document.querySelector('#workout-timer-wrap .workout-timer-label');
         if (tLabel) tLabel.textContent = 'Timer';
         resetWorkoutTimer();
-        startWorkoutTimer();
+        armWorkoutTimer();
         window._workoutSessionConfirmed = true;
-        saveWorkoutDraft({ elapsedMs: 0 });
+        saveWorkoutDraft({ elapsedMs: 0, timerRunning: false });
     }
 }
 

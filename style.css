@@ -1548,6 +1548,15 @@ div[id$="-modal"] .modal-content {
     animation: slideUpModal 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* Add exercises (+): solid sheet — global modal rule forces transparent overlay */
+#add-exercises-modal {
+    z-index: 21100 !important;
+    background: rgba(0, 0, 0, 0.55) !important;
+}
+#add-exercises-modal .modal-content {
+    background: var(--bg-surface, #0a0a0a) !important;
+}
+
 /* Fixed Schedule: centre in the viewport above the nav (not clipped under the dock) */
 #schedule-modal {
     top: 0 !important;

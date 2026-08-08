@@ -1,6 +1,7 @@
 /**
  * In-progress workout draft — survives leaving the execution zone / switching tabs
  * after Confirm workout, until Complete log or Back to plan.
+ * Timer starts on the first exercise Log tap (not on Confirm).
  */
 import { store } from '../state/store.js';
 import { isHypertrophyEvent } from './hypertrophy-engine.js';
