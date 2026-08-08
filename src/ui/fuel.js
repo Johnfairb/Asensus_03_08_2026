@@ -42,6 +42,9 @@ import {
 } from '../domain/food-catalog.js';
 import { defaultWaterPer100gForCategory } from '../lib/food-parse.js';
 import { updateExerciseDropdowns, updateFoodDropdowns } from './templates.js';
+import { startLibraryWeightFinder } from './weight-finder-ui.js';
+import { persistUserConfigToCloud } from '../domain/thermodynamics.js';
+import { roundHypertrophyWorkWeight } from '../domain/hypertrophy-engine.js';
 
 function foodHasPrice(food) {
     return (Number(food?.price_per_100g) > 0) || (Number(food?._packPrice) > 0);
@@ -544,6 +547,12 @@ export function openExerciseDetail(id) {
     const sessionLabel = getExerciseSessionLabel(displayName);
     const primary = formatMuscleList(catalog?.primary);
     const secondary = formatMuscleList(catalog?.secondary);
+    const isCardio = String(ex.domain || '').toLowerCase() === 'cardio';
+    const savedMap = store.userConfig?.exerciseWorkingWeights || {};
+    const savedRaw = savedMap[displayName] ?? savedMap[ex.name];
+    const savedWeight = savedRaw != null && Number.isFinite(Number(savedRaw)) && Number(savedRaw) >= 0
+        ? Number(savedRaw)
+        : '';
 
     document.getElementById('library-detail-title').textContent = displayName || 'Exercise';
     document.getElementById('library-detail-subtitle').textContent = sessionLabel
@@ -566,6 +575,19 @@ export function openExerciseDetail(id) {
     `).join('');
 
     const bodyParts = [];
+    if (!isCardio) {
+        const safeName = String(displayName || '').replace(/'/g, "\\'");
+        bodyParts.push(`
+            <div class="detail-metric-row">
+                <div class="hud-label" style="margin:0 0 8px 0;">Working weight</div>
+                <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Saved for future sessions. Normal progression still applies after you log.</div>
+                <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">WEIGHT (KG)</label>
+                <input type="number" inputmode="decimal" min="0" step="0.5" class="input-field" id="library-ex-weight-input" value="${savedWeight === '' ? '' : savedWeight}" placeholder="e.g. 60" style="margin-bottom:8px;" oninput="syncLibraryWeightDontKnowBtn()">
+                <div id="library-ex-weight-error" style="display:none; font-size:12px; color:#ff6b6b; margin-bottom:8px;"></div>
+                <button type="button" class="btn-primary is-primary" style="margin:0 0 8px; width:100%;" onclick="saveExerciseWorkingWeightFromDetail()">Save weight</button>
+                <button type="button" id="library-ex-dont-know-btn" class="btn-primary is-secondary ${savedWeight === '' ? '' : 'hidden'}" style="margin:0; width:100%;" onclick="openLibraryDontKnowWeight('${safeName}')">I don't know my weight</button>
+            </div>`);
+    }
     if (catalog) {
         bodyParts.push(`
             <div class="detail-metric-row">
@@ -620,9 +642,62 @@ export function openExerciseDetail(id) {
 
     document.getElementById('library-detail-body').innerHTML = bodyParts.join('');
     syncLibraryBanButton();
+    syncLibraryWeightDontKnowBtn();
     const editBtn = document.getElementById('library-detail-edit-btn');
     if (editBtn) editBtn.classList.add('hidden');
     document.getElementById('library-detail-sheet')?.classList.remove('hidden');
+}
+
+export function syncLibraryWeightDontKnowBtn() {
+    const input = document.getElementById('library-ex-weight-input');
+    const btn = document.getElementById('library-ex-dont-know-btn');
+    if (!btn) return;
+    const raw = String(input?.value ?? '').trim();
+    const empty = raw === '';
+    btn.classList.toggle('hidden', !empty);
+}
+
+function persistExerciseWorkingWeight(exName, kg) {
+    if (!store.userConfig.exerciseWorkingWeights || typeof store.userConfig.exerciseWorkingWeights !== 'object') {
+        store.userConfig.exerciseWorkingWeights = {};
+    }
+    const rounded = kg === 0 ? 0 : roundHypertrophyWorkWeight(kg, exName);
+    store.userConfig.exerciseWorkingWeights[exName] = rounded;
+    try { localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig)); } catch (e) { /* ignore */ }
+    try { persistUserConfigToCloud(); } catch (e) { /* ignore */ }
+    return rounded;
+}
+
+export function saveExerciseWorkingWeightFromDetail() {
+    const input = document.getElementById('library-ex-weight-input');
+    const err = document.getElementById('library-ex-weight-error');
+    const ex = store.globalExerciseDB.find(e => String(e.id) === String(_libraryDetailId));
+    if (!ex) return;
+    const catalog = getExerciseMeta(ex.name);
+    const displayName = catalog?.name || resolveCatalogName(ex.name) || ex.name;
+    const kg = parseFloat(input?.value);
+    if (!Number.isFinite(kg) || kg < 0) {
+        if (err) {
+            err.style.display = 'block';
+            err.textContent = 'Enter a weight of 0 or more.';
+        }
+        return;
+    }
+    if (err) err.style.display = 'none';
+    const applied = persistExerciseWorkingWeight(displayName, kg);
+    if (input) input.value = String(applied);
+    syncLibraryWeightDontKnowBtn();
+}
+
+export function openLibraryDontKnowWeight(exName) {
+    const input = document.getElementById('library-ex-weight-input');
+    if (String(input?.value ?? '').trim() !== '') return;
+    startLibraryWeightFinder(exName || 'Exercise', (workKg) => {
+        const applied = persistExerciseWorkingWeight(exName, workKg);
+        if (input) input.value = String(applied);
+        syncLibraryWeightDontKnowBtn();
+        if (_libraryDetailId) openExerciseDetail(_libraryDetailId);
+    });
 }
 
 export function saveExerciseIncrementsFromDetail(exName) {

@@ -117,6 +117,7 @@ export function getLactateSlotForDate(dateIso) {
 
 const LOGGED_SESSIONS_KEY = 'ascensus_logged_sessions';
 const WORKOUT_SESSION_SNAPSHOTS_KEY = 'ascensus_workout_session_snapshots';
+const COMPLETED_PLAN_SLOTS_KEY = 'ascensus_completed_plan_slots';
 
 /** Canonical kinds that count toward the weekly plan. */
 export const WORKOUT_TYPE_OPTIONS = [
@@ -179,10 +180,76 @@ export function countLoggedWorkoutCredits(weekStartISO) {
     return out;
 }
 
+export function loadCompletedPlanSlots() {
+    try {
+        return JSON.parse(localStorage.getItem(COMPLETED_PLAN_SLOTS_KEY) || '{}') || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+export function saveCompletedPlanSlots(map) {
+    localStorage.setItem(COMPLETED_PLAN_SLOTS_KEY, JSON.stringify(map || {}));
+}
+
+export function planSlotKey(dateIso, event, eventIndex = 0) {
+    return `${dateIso}|${event}|${Number(eventIndex) || 0}`;
+}
+
+export function isPlanSlotCompleted(slotKey) {
+    if (!slotKey) return false;
+    return !!loadCompletedPlanSlots()[slotKey];
+}
+
+/** Mark a GPS plan slot done (idempotent). Returns true if newly marked. */
+export function markPlanSlotCompleted(slotKey, { sessionId = null, weekStart = null } = {}) {
+    if (!slotKey) return false;
+    const map = loadCompletedPlanSlots();
+    if (map[slotKey]) return false;
+    map[slotKey] = {
+        completedAt: new Date().toISOString(),
+        sessionId: sessionId || null,
+        weekStart: weekStart || null
+    };
+    saveCompletedPlanSlots(map);
+    return true;
+}
+
+/**
+ * List this week's GPS-planned sessions (full intended week, including already-done).
+ * Done slots remain listed so they can still be loaded without earning another credit.
+ */
+export function listWeekGpsPlanSessions(refDate = new Date()) {
+    const weekStart = getMondayISO(refDate);
+    const plan = buildWeeklyTrainingPlan(weekStart, { ignoreLoggedCredits: true });
+    const completed = loadCompletedPlanSlots();
+    const out = [];
+    (plan || []).forEach(day => {
+        const events = (day.events || []).filter(e => e && !isRestEvent(e));
+        events.forEach((event, eventIndex) => {
+            const slotKey = planSlotKey(day.dateStr, event, eventIndex);
+            const creditKind = normalizeLoggedSessionKind(event);
+            out.push({
+                slotKey,
+                dateIso: day.dateStr,
+                event,
+                eventIndex,
+                weekStart,
+                label: prettyWorkoutTypeLabel(event),
+                creditKind,
+                completed: !!completed[slotKey],
+                countsTowardQuota: !!(creditKind && !completed[slotKey])
+            });
+        });
+    });
+    return out;
+}
+
 /**
  * Record (or replace) a logged session for week-plan credit + Log tab editing.
  * Pass the same sessionId when re-saving an edited session to avoid double-counting.
  * Always writes a Log snapshot — even for Auxiliary / generic planned sessions.
+ * Optional planSlotKey: marks that GPS slot done; skipCredit avoids double-counting repeats.
  */
 export function recordLoggedWorkoutSession({
     dateIso,
@@ -197,24 +264,52 @@ export function recordLoggedWorkoutSession({
     hitTypes = null,
     lactateSlot = null,
     isHitClass = null,
-    lactateSummary = null
+    lactateSummary = null,
+    planSlotKey: slotKey = null,
+    skipCredit = false
 } = {}) {
     if (!dateIso || !sessionId) return null;
     const creditKind = normalizeLoggedSessionKind(kind);
     // Keep the original session label for Log/display; only credits are collapsed
     const displayKind = kind || creditKind || 'Workout';
 
+    // If loaded from GPS picker we have a slot; otherwise (new logs only) match first open week slot
+    let resolvedSlotKey = slotKey || null;
+    const existingSnap = loadWorkoutSessionSnapshots()[sessionId];
+    if (!resolvedSlotKey && creditKind && !skipCredit && !existingSnap) {
+        try {
+            const weekSessions = listWeekGpsPlanSessions(new Date(dateIso + 'T12:00:00'));
+            const open = (weekSessions || []).filter(s => s.creditKind === creditKind && !s.completed);
+            const sameDay = open.find(s => s.dateIso === dateIso);
+            resolvedSlotKey = (sameDay || open[0])?.slotKey || null;
+        } catch (e) { /* ignore */ }
+    }
+
+    const alreadyDone = resolvedSlotKey ? isPlanSlotCompleted(resolvedSlotKey) : false;
+    // New log of an already-done GPS slot: keep snapshot, skip quota. Re-saves still refresh the credit row.
+    const isRepeatOfCompletedSlot = !existingSnap && alreadyDone;
+    const shouldCredit = !!creditKind && !skipCredit && !isRepeatOfCompletedSlot;
+
     // Week-plan credit only for Steady / Lactate / Gym
-    if (creditKind) {
+    if (shouldCredit) {
         const map = loadLoggedSessionsMap();
         const dayList = Array.isArray(map[dateIso]) ? map[dateIso].filter(e => e && e.sessionId !== sessionId) : [];
-        dayList.push({ kind: creditKind, sessionId, logIds: logIds.filter(Boolean) });
+        dayList.push({ kind: creditKind, sessionId, logIds: logIds.filter(Boolean), planSlotKey: resolvedSlotKey || null });
         map[dateIso] = dayList;
         saveLoggedSessionsMap(map);
     }
 
+    if (resolvedSlotKey && !alreadyDone) {
+        try {
+            markPlanSlotCompleted(resolvedSlotKey, {
+                sessionId,
+                weekStart: getMondayISO(dateIso + 'T12:00:00')
+            });
+        } catch (e) { /* ignore */ }
+    }
+
     const snaps = loadWorkoutSessionSnapshots();
-    const prev = snaps[sessionId] || {};
+    const prev = snaps[sessionId] || existingSnap || {};
     const mins = Number(durationMinutes);
     const ms = Number(durationMs);
     snaps[sessionId] = {
@@ -946,12 +1041,15 @@ export function ensureSteadySessions(days, quota = 2) {
     return countEventType(days, isSteadyCardio);
 }
 
-export function buildWeeklyTrainingPlan(weekStartISO) {
+export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
+    const ignoreLoggedCredits = !!opts.ignoreLoggedCredits;
     const prefs = getGymPlanPrefs();
     const hypPrefs = getHypertrophyPlanPrefs();
     const hypertrophyMode = isHypertrophyPhase();
     const hybridMode = !!(prefs.hybrid);
-    const loggedCredits = countLoggedWorkoutCredits(weekStartISO);
+    const loggedCredits = ignoreLoggedCredits
+        ? { steady: 0, lactate: 0, strength: 0 }
+        : countLoggedWorkoutCredits(weekStartISO);
     const lactateQuota = Math.max(0, 2 - countPracticeLactateCredits(weekStartISO) - (loggedCredits.lactate || 0));
     const steadyQuota = Math.max(0, 2 - (loggedCredits.steady || 0));
     const strengthTarget = hybridMode
@@ -965,6 +1063,7 @@ export function buildWeeklyTrainingPlan(weekStartISO) {
     const cacheKey = [
         'v7-strength-hybrid',
         weekStartISO,
+        ignoreLoggedCredits ? 'full' : 'net',
         hypertrophyMode ? 1 : 0,
         hybridMode ? 1 : 0,
         hypPrefs.split,

@@ -1435,7 +1435,7 @@ export function renderExerciseSets() {
             inputGroupHtml = `
                 ${weightCell}
                 <input type="number" class="set-input" value="${isCardio ? (set.time_minutes||0) : (set.reps||0)}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, '${isCardio?'time_minutes':'reps'}', this.value)">
-                <input type="number" class="set-input" style="color:var(--text-muted);" placeholder="0-5" value="${set.rpe||''}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'rpe', this.value)">
+                <input type="number" class="set-input" style="color:var(--text-muted);" placeholder="0-5" value="${set.rpe != null && set.rpe !== '' ? set.rpe : 2}" onfocus="this.value='';" onblur="if(String(this.value).trim()===''){this.value='2';} updateWorkoutSet(${exIdx}, ${setIdx}, 'rpe', this.value)" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'rpe', this.value)">
             `;
         }
 
@@ -1682,7 +1682,14 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
         if (window._workoutSessionConfirmed) saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
         return;
     }
-    let num = parseFloat(val) || 0;
+    let num;
+    if (field === 'rpe') {
+        const raw = String(val ?? '').trim();
+        num = raw === '' ? 2 : parseFloat(raw);
+        if (!Number.isFinite(num)) num = 2;
+    } else {
+        num = parseFloat(val) || 0;
+    }
     if (field === 'duration_sec') {
         // Lactate intervals: multiples of 5s, minimum 20s
         num = Math.max(20, Math.round(num / 5) * 5);
@@ -2611,6 +2618,8 @@ export function discardInProgressWorkout() {
     window._workoutSessionConfirmed = false;
     window.manualWorkoutMode = false;
     window.manualSessionKind = null;
+    window.plannedGpsSlot = null;
+    window._forceGpsTemplateLoad = false;
     window.editingSessionId = null;
     window._lactateHitSelection = null;
     window._hitClassDiaryOnly = false;
@@ -3273,8 +3282,11 @@ export async function commitWorkoutSession() {
                 isHitClass: window._lactateHitSelection
                     ? !!window._lactateHitSelection.isHitClass
                     : (previousSnap?.isHitClass || null),
-                lactateSummary: window._lactateHitSelection?.summary || previousSnap?.lactateSummary || null
+                lactateSummary: window._lactateHitSelection?.summary || previousSnap?.lactateSummary || null,
+                planSlotKey: window.plannedGpsSlot?.slotKey || null,
+                skipCredit: !!(window.plannedGpsSlot?.completed)
             });
+            window.plannedGpsSlot = null;
             invalidateWeekPlanCache();
             try { generateFutureTimeline(); } catch (e) { /* ignore */ }
             try { getTodayFocus(); } catch (e) { /* ignore */ }
@@ -3367,6 +3379,8 @@ export async function commitWorkoutSession() {
     window.journalPending = false;
     window.editingSessionId = null;
     window.manualSessionKind = null;
+    window.plannedGpsSlot = null;
+    window._forceGpsTemplateLoad = false;
     window._lactateHitSelection = null;
     window._hitClassDiaryOnly = false;
     window._workoutSessionConfirmed = false;

@@ -1465,6 +1465,30 @@ export function syncTrackerPillUI() {
     const anyOff = !!(g.food || g.workout || g.timetabling);
     const toggle = document.getElementById('toggle-tracker-mode');
     if (toggle) toggle.checked = anyOff;
+    syncGuidancePlanTabs();
+}
+
+/** Hide Food/Exercise Plan tabs when the matching guidance channel is off. */
+export function syncGuidancePlanTabs() {
+    const foodOff = isGuidanceOff('food');
+    const workoutOff = isGuidanceOff('workout');
+    const foodPlanBtn = document.querySelector('#fuel-sub-nav .catalogue-sub-btn[data-fuel="meals"]');
+    const drivePlanBtn = document.querySelector('#drive-sub-nav .catalogue-sub-btn[data-drive="workout"]');
+    if (foodPlanBtn) foodPlanBtn.classList.toggle('hidden', foodOff);
+    if (drivePlanBtn) drivePlanBtn.classList.toggle('hidden', workoutOff);
+
+    if (foodOff) {
+        const mealsPanel = document.getElementById('fuel-panel-meals');
+        if (mealsPanel && !mealsPanel.classList.contains('hidden')) {
+            if (typeof window.switchFuelSubTab === 'function') window.switchFuelSubTab('log');
+        }
+    }
+    if (workoutOff) {
+        const workoutPanel = document.getElementById('drive-panel-workout');
+        if (workoutPanel && !workoutPanel.classList.contains('hidden')) {
+            if (typeof window.switchDriveSubTab === 'function') window.switchDriveSubTab('log');
+        }
+    }
 }
 
 export function openTrackerGuidanceModal() {

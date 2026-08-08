@@ -27,6 +27,11 @@ let _finderExIdx = null;
 /** @type {null|'A'|'B'} */
 let _finderSide = null;
 let _openLogAfterFinder = false;
+/** Library detail sheet mode — no active workout item. */
+let _libraryMode = false;
+let _libraryExName = '';
+/** @type {null|((kg:number)=>void)} */
+let _libraryOnDone = null;
 
 function finderForStrength() {
     return isStrengthPhase() && !isHypertrophyPhase();
@@ -62,6 +67,7 @@ function activeSideMeta(item = exerciseItem(_finderExIdx)) {
 }
 
 function exerciseNameForIdx(exIdx) {
+    if (_libraryMode) return _libraryExName || 'this exercise';
     const item = exerciseItem(exIdx);
     if (!item) return 'this exercise';
     if (item.isSuperset && _finderSide) {
@@ -209,6 +215,9 @@ function renderFinderEntry(exIdx) {
     const body = document.getElementById('weight-finder-body');
     if (!body) return;
     const name = exerciseNameForIdx(exIdx);
+    const submitFn = _libraryMode ? 'submitLibraryFinderWorkWeight()' : 'submitFinderWorkWeight()';
+    const knowFn = _libraryMode ? 'dismissWeightFinder()' : 'confirmWeightFinderKnowsYes()';
+    const knowLabel = _libraryMode ? 'Cancel' : 'I know the work weight';
     body.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <div>
@@ -227,8 +236,8 @@ function renderFinderEntry(exIdx) {
         <div id="weight-finder-preview" style="font-size:12px; color:var(--gold-accent); font-family:'Roboto Mono',monospace; margin-bottom:8px; min-height:16px;"></div>
         <div id="weight-finder-error" style="display:none; font-size:12px; color:#ff6b6b; margin-bottom:10px;"></div>
         <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
-            <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="submitFinderWorkWeight()">Set work weight (+10%)</button>
-            <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="confirmWeightFinderKnowsYes()">I know the work weight</button>
+            <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="${submitFn}">Set work weight (+10%)</button>
+            <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="${knowFn}">${knowLabel}</button>
         </div>`;
     const input = document.getElementById('weight-finder-input');
     if (input) {
@@ -471,6 +480,10 @@ export function submitKnownWorkWeight() {
 }
 
 export function submitFinderWorkWeight() {
+    if (_libraryMode) {
+        submitLibraryFinderWorkWeight();
+        return;
+    }
     const input = document.getElementById('weight-finder-input');
     const finder = parseFloat(input?.value);
     if (!Number.isFinite(finder) || finder < 0) {
@@ -498,6 +511,33 @@ export function submitFinderWorkWeight() {
         item.finderWeightKg = finder;
     }
     finishWeightFinderAndMaybeOpenLog();
+}
+
+/** Open the 10@5 RIR finder from My Exercises (library detail). */
+export function startLibraryWeightFinder(exName, onDone) {
+    _libraryMode = true;
+    _libraryExName = exName || 'Exercise';
+    _libraryOnDone = typeof onDone === 'function' ? onDone : null;
+    _finderExIdx = null;
+    _finderSide = null;
+    _openLogAfterFinder = false;
+    const sheet = ensureWeightFinderSheet();
+    renderFinderEntry(null);
+    sheet.classList.remove('hidden');
+    _finderOpen = true;
+}
+
+export function submitLibraryFinderWorkWeight() {
+    const input = document.getElementById('weight-finder-input');
+    const finder = parseFloat(input?.value);
+    if (!Number.isFinite(finder) || finder < 0) {
+        showError('Enter the finder weight (0 or more).');
+        return;
+    }
+    const work = finder === 0 ? 0 : workWeightFromFinder(finder, _libraryExName, { forStrength: finderForStrength() });
+    const cb = _libraryOnDone;
+    dismissWeightFinder();
+    if (cb) cb(work);
 }
 
 function finishWeightFinderAndMaybeOpenLog() {
@@ -530,4 +570,7 @@ export function dismissWeightFinder() {
     _finderExIdx = null;
     _finderSide = null;
     _openLogAfterFinder = false;
+    _libraryMode = false;
+    _libraryExName = '';
+    _libraryOnDone = null;
 }

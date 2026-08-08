@@ -1646,6 +1646,10 @@
                 <button type="button" onclick="closeLoadWorkoutPicker()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
             </div>
             <p id="load-workout-modal-subtitle" style="font-size:11px; color:var(--text-muted); margin:0 0 12px 0; line-height:1.4;">Choose a saved workout from My Workouts.</p>
+            <div style="display:flex; gap:8px; margin-bottom:12px; overflow-x:auto; padding-bottom:2px;">
+                <button type="button" id="load-workout-tab-saved" class="btn-primary catalogue-sub-btn is-primary active" data-load-tab="saved" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLoadWorkoutTab('saved')">My saved workouts</button>
+                <button type="button" id="load-workout-tab-gps" class="btn-primary catalogue-sub-btn is-secondary" data-load-tab="gps" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLoadWorkoutTab('gps')">GPS planned sessions</button>
+            </div>
             <button type="button" onclick="closeLoadWorkoutPicker(); openWorkoutTypePicker('load')" style="align-self:flex-start; background:none; border:none; color:var(--gold-accent); font-size:11px; font-family:'Roboto Mono'; cursor:pointer; padding:0; margin:0 0 12px 0;">← Change type</button>
             <div id="load-workout-list" style="overflow-y:auto; flex:1; min-height:120px;"></div>
         </div>

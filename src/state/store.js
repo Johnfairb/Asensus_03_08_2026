@@ -13,6 +13,8 @@ export const store = {
     gymWillingness: 4, maxGymTime: 90, bandAuxiliary: false, dumbbellIncrement: 2,
     dbIncrements: { low: 1, mid: 2, high: 2 },
     exerciseIncrements: {},
+    /** Seed working weights by exercise name (kg). Used until real logs drive progression. */
+    exerciseWorkingWeights: {},
     hybridStrengthDays: 3, hybridHypertrophyDays: 1,
     baselineTargets: { cals: 0, pro: 0, carb: 0, fat: 0 },
     targets: { cals: 0, pro: 0, carb: 0, fat: 0 },

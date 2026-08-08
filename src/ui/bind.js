@@ -1,6 +1,6 @@
 import { toggleTheme } from './theme.js';
 import { acceptGhostTemplate, addFoodToActiveLog, applyUserTemplate, deleteSavedTemplate, filterSavedLibrary, loadGhostTemplate, loadSavedTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderMyRecipes, renderMyWorkouts, saveCurrentAsTemplate, switchExercisesSubTab, switchFoodsSubTab, switchLogisticsSubTab, unconfirmGhostTemplate, updateActiveLogMass, updateGhostOverride } from './templates.js';
-import { closeLoadRecipePicker, closeLoadWorkoutPicker, closeCalendarEventModal, closeLongTermCalendar, closeWorkoutTypePicker, openCalendarEventModal, openLoadRecipePicker, openLoadWorkoutPicker, openLongTermCalendar, openWorkoutTypePicker, renderLongTermCalendar, saveCalendarEvent, selectLoadedRecipe, selectLoadedWorkout, selectWorkoutType, beginManualWorkoutAfterType } from './route.js';
+import { closeLoadRecipePicker, closeLoadWorkoutPicker, closeCalendarEventModal, closeLongTermCalendar, closeWorkoutTypePicker, openCalendarEventModal, openLoadRecipePicker, openLoadWorkoutPicker, openLongTermCalendar, openWorkoutTypePicker, renderLongTermCalendar, saveCalendarEvent, selectLoadedRecipe, selectLoadedWorkout, selectLoadedGpsSession, selectWorkoutType, beginManualWorkoutAfterType, switchLoadWorkoutTab } from './route.js';
 import { openMyExercises, openMyFoods, switchDriveSubTab, switchEngineSubTab, switchFuelSubTab, switchJourneySubTab, switchLibrarySubTab, switchNetworkTab, switchPlanSubTab, switchTab } from './navigation.js';
 import { closeGroceryDetail, executeCheckout, onShopCartToggle, openGroceryDetail, openShoppingCostBreakdown, updateShoppingSelection, wireShoppingSelectionUpdates } from './logistics.js';
 import {
@@ -23,7 +23,7 @@ import {
   toggleLactateFullWorkout
 } from './journey.js';
 import { showShopStyleInfo, toggleFoodHeading } from '../domain/food-catalog.js';
-import { cancelExEdit, cancelFoodEdit, closeLibraryDetail, deleteItem, editExercise, editFood, editFromLibraryDetail, filterBoot, loadExercises, loadInventory, openExerciseDetail, openFoodDetail, saveExerciseIncrementsFromDetail, saveExerciseToCloud, saveFoodToCloud, syncPackSizeFieldMode, toggleBanFromLibraryDetail, toggleExForm, togglePantryForm } from './fuel.js';
+import { cancelExEdit, cancelFoodEdit, closeLibraryDetail, deleteItem, editExercise, editFood, editFromLibraryDetail, filterBoot, loadExercises, loadInventory, openExerciseDetail, openFoodDetail, openLibraryDontKnowWeight, saveExerciseIncrementsFromDetail, saveExerciseToCloud, saveExerciseWorkingWeightFromDetail, saveFoodToCloud, syncLibraryWeightDontKnowBtn, syncPackSizeFieldMode, toggleBanFromLibraryDetail, toggleExForm, togglePantryForm } from './fuel.js';
 import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, drawModalExerciseChart, redrawModalExerciseChart, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, beginExerciseLog, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, resumeInProgressWorkout, selectCardioTypeInLog, setWorkoutLogFilter, showConstraintInfo, startExecution, startManualWorkout, stopInProgressWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, switchCableEquipmentAndRefresh, toggleConstraint, togglePrepChildExpand, togglePrepPartExpand, toggleStretchListExpand, toggleStretchGroupComplete, toggleExerciseDiary, updateExerciseDiaryNotes, onExerciseDiaryMediaSelected, removeExerciseDiaryMedia, toggleSetComplete, toggleToolsMenu, updateWorkoutSet, workoutCardDragLeave, workoutCardDragOver, workoutCardDragStart, workoutCardDrop, workoutCardTouchEnd, workoutCardTouchStart, openManualGymRestModal, closeManualGymRestModal, toggleManualRestCustomFields, confirmManualGymRestPrefs } from './drive.js';
 import { confirmEquipmentPicks } from './equipment-ui.js';
 import { dismissPlannedWarmupFromLog, dismissPlannedStretchFromLog, saveSessionPrepSettings } from '../domain/session-prep.js';
@@ -64,6 +64,7 @@ import {
   confirmBwGateNo,
   submitKnownWorkWeight,
   submitFinderWorkWeight,
+  submitLibraryFinderWorkWeight,
   dismissWeightFinder
 } from './weight-finder-ui.js';
 import { renderRpeGuidancePanel, toggleRpeGuidanceSection, toggleGuidanceSection } from '../domain/rpe-guidance.js';
@@ -127,6 +128,9 @@ export function bindUi() {
   window.toggleBanFromLibraryDetail = toggleBanFromLibraryDetail;
   window.openExerciseDetail = openExerciseDetail;
   window.openFoodDetail = openFoodDetail;
+  window.saveExerciseWorkingWeightFromDetail = saveExerciseWorkingWeightFromDetail;
+  window.syncLibraryWeightDontKnowBtn = syncLibraryWeightDontKnowBtn;
+  window.openLibraryDontKnowWeight = openLibraryDontKnowWeight;
   window.openHistoryWorkoutDetail = openHistoryWorkoutDetail;
   window.openLoggedMealDetail = openLoggedMealDetail;
   window.openBodyFatModal = openBodyFatModal;
@@ -255,6 +259,8 @@ export function bindUi() {
   window.selectAuthTheme = selectAuthTheme;
   window.selectLoadedRecipe = selectLoadedRecipe;
   window.selectLoadedWorkout = selectLoadedWorkout;
+  window.selectLoadedGpsSession = selectLoadedGpsSession;
+  window.switchLoadWorkoutTab = switchLoadWorkoutTab;
   window.selectObCard = selectObCard;
   window.shiftAdherenceMonth = shiftAdherenceMonth;
   window.showBreakdown = showBreakdown;
@@ -321,6 +327,7 @@ export function bindUi() {
   window.confirmBwGateNo = confirmBwGateNo;
   window.submitKnownWorkWeight = submitKnownWorkWeight;
   window.submitFinderWorkWeight = submitFinderWorkWeight;
+  window.submitLibraryFinderWorkWeight = submitLibraryFinderWorkWeight;
   window.dismissWeightFinder = dismissWeightFinder;
   window.renderMonthlySummaryBanner = renderMonthlySummaryBanner;
   window.toggleMonthlySummaryDropdown = toggleMonthlySummaryDropdown;

@@ -650,7 +650,7 @@ export async function generateWorkoutTemplate() {
     let focus = document.getElementById('today-focus').value;
     store.currentGhostItems = [];
 
-    if (isGuidanceOff('workout')) {
+    if (isGuidanceOff('workout') && !window._forceGpsTemplateLoad) {
         // Manual Steady / Lactate still gets the planned-style template when the user picks that type
         const forced = window.manualSessionKind || '';
         const allowForced = isSteadyCardio(forced) || isLactateEvent(forced);
@@ -1046,7 +1046,29 @@ export async function generateWorkoutTemplate() {
         // First time THIS exact exercise name is logged — ask for work weight / 10@5 RIR finder
         // History at 0 kg (pure BW) still counts so we don't re-ask every session.
         // Strength with no hyp history also uses the hypertrophy finder, then +15%.
+        // Library-seeded working weights count as known (skip finder; still subject to progression once logged).
         let needsWeightFind = false;
+        const savedWorkKg = (() => {
+            try {
+                const map = store.userConfig?.exerciseWorkingWeights || {};
+                const direct = map[exObj.name];
+                if (direct != null && Number.isFinite(Number(direct)) && Number(direct) >= 0) return Number(direct);
+                const lower = String(exObj.name || '').toLowerCase();
+                for (const [k, v] of Object.entries(map)) {
+                    if (String(k).toLowerCase() === lower && Number.isFinite(Number(v)) && Number(v) >= 0) return Number(v);
+                }
+            } catch (e) { /* ignore */ }
+            return null;
+        })();
+        if (!item.isText && !isCardioEx && savedWorkKg != null) {
+            if (inStrengthPhase) {
+                const hasPhaseHist = latestPhaseWeight(hist, exObj.name, 'strength') != null
+                    || latestPhaseWeight(hist, exObj.name, 'hypertrophy') != null;
+                if (!hasPhaseHist && tWeight <= 0) tWeight = savedWorkKg;
+            } else if (!latestLog) {
+                tWeight = savedWorkKg;
+            }
+        }
         if (!item.isText && !isCardioEx && (useHypertrophy || isBwGateExercise(exObj.name) || inStrengthPhase)) {
             const exName = String(exObj.name || '').toLowerCase();
             const nameMatch = (n) => String(n || '').toLowerCase() === exName;
@@ -1066,15 +1088,16 @@ export async function generateWorkoutTemplate() {
                 latestPhaseWeight(hist, exObj.name, 'strength') != null
                 || latestPhaseWeight(hist, exObj.name, 'hypertrophy') != null
             );
+            const hasSavedSeed = savedWorkKg != null;
             if (isPressUpVariant(exObj.name) && !needsBwGate) {
                 tWeight = 0;
-            } else if (!needsBwGate && !hasStrengthOrHyp && !hasHist && !hasLocal && !latestLog) {
+            } else if (!needsBwGate && !hasStrengthOrHyp && !hasHist && !hasLocal && !latestLog && !hasSavedSeed) {
                 needsWeightFind = true;
                 itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '')
                     + (inStrengthPhase
                         ? 'First time on this exercise in strength: find 10 reps @ 5 RIR (hypertrophy protocol), then we set strength at +15%.'
                         : 'First time on this exercise: we will ask for your work weight (or help you find 10 reps @ 5 RIR).');
-            } else if (inStrengthPhase && !hasStrengthOrHyp && tWeight <= 0 && !needsBwGate) {
+            } else if (inStrengthPhase && !hasStrengthOrHyp && tWeight <= 0 && !needsBwGate && !hasSavedSeed) {
                 // No 1RM fallback — must find via hypertrophy protocol
                 needsWeightFind = true;
                 itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '')

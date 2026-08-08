@@ -66,7 +66,8 @@ export function captureSyncedLocalState() {
         strengthAB: localStorage.getItem('ascensus_strength_ab'),
         theme: localStorage.getItem('ascensus_theme'),
         strengthPlanTail: localStorage.getItem('ascensus_strength_plan_tail'),
-        strengthPlanTailWeek: localStorage.getItem('ascensus_strength_plan_tail_week')
+        strengthPlanTailWeek: localStorage.getItem('ascensus_strength_plan_tail_week'),
+        completedPlanSlots: readJson('ascensus_completed_plan_slots', {})
     };
 }
 
@@ -81,6 +82,7 @@ export function restoreSyncedLocalState(sync) {
     writeJson('ascensus_route_overrides', sync.routeOverrides);
     writeJson('ascensus_strength_month_picks', sync.strengthMonthPicks);
     writeJson('ascensus_metric_targets', sync.metricTargets);
+    writeJson('ascensus_completed_plan_slots', sync.completedPlanSlots);
     if (sync.gpsIndex != null) localStorage.setItem('ascensus_gps_index', String(sync.gpsIndex));
     if (sync.strengthAB != null) localStorage.setItem('ascensus_strength_ab', String(sync.strengthAB));
     if (sync.theme) localStorage.setItem('ascensus_theme', sync.theme);
@@ -104,6 +106,9 @@ export function applyUserConfigToDom() {
     };
     if (!store.userConfig.guidanceOff || typeof store.userConfig.guidanceOff !== 'object') {
         store.userConfig.guidanceOff = { food: false, workout: false, timetabling: false };
+    }
+    if (!store.userConfig.exerciseWorkingWeights || typeof store.userConfig.exerciseWorkingWeights !== 'object') {
+        store.userConfig.exerciseWorkingWeights = {};
     }
     setVal('set-weight', store.userConfig.weight);
     setVal('set-target-weight', store.userConfig.targetWeight);

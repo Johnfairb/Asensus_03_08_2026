@@ -1,9 +1,10 @@
 import { store } from '../state/store.js';
 import { getTodayFocus } from '../domain/fitness-hud.js';
-import { generateFutureTimeline, invalidateWeekPlanCache, prettyWorkoutTypeLabel } from '../domain/route-planner.js';
+import { generateFutureTimeline, invalidateWeekPlanCache, listWeekGpsPlanSessions, prettyWorkoutTypeLabel, isLactateEvent } from '../domain/route-planner.js';
 import { persistUserConfigToCloud } from '../domain/thermodynamics.js';
 import { specificEventName } from '../lib/food-parse.js';
-import { loadSavedTemplate, parseTemplateDetails, parseTemplateMeta, renderActiveLog, switchLogType, updateExecutionAuxBlocks, updateSaveTemplateButtonLabel } from './templates.js';
+import { acceptGhostTemplate, loadSavedTemplate, parseTemplateDetails, parseTemplateMeta, renderActiveLog, switchLogType, updateExecutionAuxBlocks, updateSaveTemplateButtonLabel } from './templates.js';
+import { generateWorkoutTemplate } from '../domain/workout-generator.js';
 
 // ==========================================
 // 14.8. LONG TERM CALENDAR ENGINE
@@ -177,15 +178,49 @@ function applySessionKindToFocus(kind) {
     if (el && kind) el.value = kind;
 }
 
-export function openLoadWorkoutList() {
+export function openLoadWorkoutList(tab = null) {
     const list = document.getElementById('load-workout-list');
     const modal = document.getElementById('load-workout-modal');
     if (!list || !modal) return;
+    if (tab === 'saved' || tab === 'gps') window._loadWorkoutTab = tab;
+    if (!window._loadWorkoutTab) window._loadWorkoutTab = 'saved';
+    syncLoadWorkoutTabs();
+
     const typeLabel = prettyWorkoutTypeLabel(window.manualSessionKind || 'Full Body / Strength');
     const subtitle = document.getElementById('load-workout-modal-subtitle');
-    if (subtitle) {
-        subtitle.innerHTML = `Type: <strong style="color:var(--gold-accent);">${typeLabel}</strong> — choose a saved workout from My Workouts.`;
+    if (window._loadWorkoutTab === 'gps') {
+        if (subtitle) {
+            subtitle.innerHTML = `This week’s GPS plan — load any session. Already-done sessions stay available but won’t count again toward the weekly quota.`;
+        }
+        renderGpsPlanLoadList(list);
+    } else {
+        if (subtitle) {
+            subtitle.innerHTML = `Type: <strong style="color:var(--gold-accent);">${typeLabel}</strong> — choose a saved workout from My Workouts.`;
+        }
+        renderSavedWorkoutLoadList(list, typeLabel);
     }
+    modal.classList.remove('hidden');
+}
+
+function syncLoadWorkoutTabs() {
+    const savedBtn = document.getElementById('load-workout-tab-saved');
+    const gpsBtn = document.getElementById('load-workout-tab-gps');
+    const active = window._loadWorkoutTab || 'saved';
+    [savedBtn, gpsBtn].forEach(btn => {
+        if (!btn) return;
+        const on = btn.getAttribute('data-load-tab') === active;
+        btn.classList.toggle('active', on);
+        btn.classList.toggle('is-primary', on);
+        btn.classList.toggle('is-secondary', !on);
+    });
+}
+
+export function switchLoadWorkoutTab(tab) {
+    window._loadWorkoutTab = tab === 'gps' ? 'gps' : 'saved';
+    openLoadWorkoutList(window._loadWorkoutTab);
+}
+
+function renderSavedWorkoutLoadList(list, typeLabel) {
     const wantedKind = window.manualSessionKind || '';
     let workouts = (store.globalTemplates || []).filter(t => t.type === 'workout');
     // Prefer templates stamped with the chosen session kind
@@ -214,16 +249,116 @@ export function openLoadWorkoutList() {
             </button>`;
         }).join('');
     }
-    modal.classList.remove('hidden');
+}
+
+function renderGpsPlanLoadList(list) {
+    let sessions = [];
+    try {
+        sessions = listWeekGpsPlanSessions(new Date()) || [];
+    } catch (e) {
+        console.warn(e);
+    }
+    if (!sessions.length) {
+        list.innerHTML = `<div style="text-align:center; padding:24px 8px; color:var(--text-muted); font-size:12px; line-height:1.5;">No GPS sessions planned for this week.</div>`;
+        return;
+    }
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    list.innerHTML = sessions.map(s => {
+        const d = new Date(s.dateIso + 'T12:00:00');
+        const dayLabel = `${dayNames[d.getDay()]} ${s.dateIso.slice(5)}`;
+        const safeKey = String(s.slotKey).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const status = s.completed
+            ? `<span style="color:var(--text-stealth);">Done · won’t count again</span>`
+            : (s.countsTowardQuota
+                ? `<span style="color:var(--gold-accent);">Counts toward week</span>`
+                : `<span style="color:var(--text-muted);">Available</span>`);
+        return `<button type="button" onclick="selectLoadedGpsSession('${safeKey}')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:10px; padding:14px; margin-bottom:8px; cursor:pointer; opacity:${s.completed ? '0.85' : '1'};">
+            <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
+                <div style="min-width:0;">
+                    <div style="font-size:14px; color:var(--text-main); font-weight:700; margin-bottom:4px;">${String(s.label || s.event).replace(/</g, '&lt;')}</div>
+                    <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase;">${dayLabel}</div>
+                </div>
+                <div style="font-size:10px; font-family:'Roboto Mono'; text-align:right; flex-shrink:0; line-height:1.35;">${status}</div>
+            </div>
+        </button>`;
+    }).join('');
 }
 
 export function selectLoadedWorkout(id) {
+    window.plannedGpsSlot = null;
     closeLoadWorkoutPicker();
     applySessionKindToFocus(window.manualSessionKind);
     loadSavedTemplate(id);
     const kindLabel = prettyWorkoutTypeLabel(window.manualSessionKind || 'Full Body / Strength');
     const title = document.getElementById('current-route-title');
     if (title) title.innerText = kindLabel.toUpperCase();
+}
+
+export async function selectLoadedGpsSession(slotKey) {
+    let sessions = [];
+    try {
+        sessions = listWeekGpsPlanSessions(new Date()) || [];
+    } catch (e) {
+        console.warn(e);
+    }
+    const session = sessions.find(s => s.slotKey === slotKey);
+    if (!session) {
+        alert('That planned session could not be found.');
+        return;
+    }
+    closeLoadWorkoutPicker();
+    window.plannedGpsSlot = {
+        slotKey: session.slotKey,
+        dateIso: session.dateIso,
+        event: session.event,
+        weekStart: session.weekStart,
+        completed: !!session.completed
+    };
+    window.manualSessionKind = session.event;
+    window.manualWorkoutMode = false;
+    window._forceGpsTemplateLoad = true;
+    applySessionKindToFocus(session.event);
+
+    const focusEl = document.getElementById('today-focus');
+    if (focusEl) focusEl.value = session.event;
+
+    // Ensure we are in a workout execution session
+    const zone = document.getElementById('execution-zone');
+    const inSession = zone && !zone.classList.contains('hidden') && store.activeLog?.type === 'workout';
+    if (!inSession) {
+        document.getElementById('log-type-selector').value = 'workout';
+        switchLogType();
+        if (zone) {
+            zone.classList.remove('hidden');
+            setTimeout(() => zone.classList.add('show'), 10);
+        }
+        document.body.classList.add('workout-focus-mode');
+        const fuelToggles = document.getElementById('fuel-toggles');
+        if (fuelToggles) fuelToggles.style.display = 'none';
+    }
+
+    const title = document.getElementById('current-route-title');
+    if (title) title.innerText = prettyWorkoutTypeLabel(session.event).toUpperCase();
+
+    const finishLoad = async () => {
+        try {
+            await generateWorkoutTemplate();
+            if ((store.currentGhostItems || []).length) {
+                acceptGhostTemplate();
+            }
+        } catch (e) {
+            console.warn(e);
+            alert('Could not load that planned workout.');
+        } finally {
+            window._forceGpsTemplateLoad = false;
+        }
+    };
+
+    if (isLactateEvent(session.event) && typeof window.openLactateHitPicker === 'function') {
+        window.openLactateHitPicker(() => { finishLoad(); });
+        return;
+    }
+    await finishLoad();
 }
 
 export function beginManualWorkoutAfterType(kind) {
