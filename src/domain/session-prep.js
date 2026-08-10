@@ -29,6 +29,13 @@ export const COOLDOWN_STRETCHES = [
     'Hip flexor', 'Core', 'Lats', 'Rotator cuff', 'Biceps', 'Pecs', 'Triceps'
 ];
 
+/** Planned cool-down muscles that get separate Left → Right timer steps. */
+export const UNILATERAL_COOLDOWN_STRETCHES = [
+    'Pecs', 'Triceps', 'Hip flexor', 'Glute medius', 'QL', 'Wrists'
+];
+
+const UNILATERAL_SET = new Set(UNILATERAL_COOLDOWN_STRETCHES.map(s => s.toLowerCase()));
+
 /** @typedef {'planned'|'custom'|'none'} PrepMode */
 
 function defaultPrefs() {
@@ -36,17 +43,66 @@ function defaultPrefs() {
         gymWarmup: 'planned',
         gymStretch: 'planned',
         practiceWarmup: 'planned',
-        practiceStretch: 'planned'
+        practiceStretch: 'planned',
+        stretchHoldSeconds: 30,
+        stretchGapSeconds: 5,
+        stretchAdductorHoldSeconds: 45,
+        bannedStretches: []
     };
+}
+
+function clampPositiveInt(value, fallback) {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 export function loadSessionPrepPrefs() {
     try {
         const raw = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null');
-        return { ...defaultPrefs(), ...(raw && typeof raw === 'object' ? raw : {}) };
+        const merged = { ...defaultPrefs(), ...(raw && typeof raw === 'object' ? raw : {}) };
+        merged.stretchHoldSeconds = clampPositiveInt(merged.stretchHoldSeconds, 30) || 30;
+        merged.stretchGapSeconds = clampPositiveInt(merged.stretchGapSeconds, 5);
+        merged.stretchAdductorHoldSeconds = clampPositiveInt(merged.stretchAdductorHoldSeconds, 45) || 45;
+        merged.bannedStretches = Array.isArray(merged.bannedStretches)
+            ? merged.bannedStretches.map(s => String(s || '').trim()).filter(Boolean)
+            : [];
+        return merged;
     } catch (e) {
         return defaultPrefs();
     }
+}
+
+export function isUnilateralCooldownStretch(name) {
+    return UNILATERAL_SET.has(String(name || '').toLowerCase());
+}
+
+export function getStretchHoldSeconds(muscleName) {
+    const p = loadSessionPrepPrefs();
+    if (/^adductors$/i.test(String(muscleName || ''))) {
+        return Math.max(1, clampPositiveInt(p.stretchAdductorHoldSeconds, 45) || 45);
+    }
+    return Math.max(1, clampPositiveInt(p.stretchHoldSeconds, 30) || 30);
+}
+
+export function getStretchGapSeconds() {
+    return clampPositiveInt(loadSessionPrepPrefs().stretchGapSeconds, 5);
+}
+
+export function isStretchBanned(name) {
+    const key = String(name || '').trim().toLowerCase();
+    if (!key) return false;
+    return (loadSessionPrepPrefs().bannedStretches || [])
+        .some(b => String(b).trim().toLowerCase() === key);
+}
+
+export function setStretchBanned(name, banned) {
+    const label = String(name || '').trim();
+    if (!label) return loadSessionPrepPrefs();
+    const prefs = loadSessionPrepPrefs();
+    const others = (prefs.bannedStretches || [])
+        .filter(b => String(b).trim().toLowerCase() !== label.toLowerCase());
+    if (banned) others.push(label);
+    return saveSessionPrepPrefs({ bannedStretches: others });
 }
 
 export function saveSessionPrepPrefs(partial) {
@@ -86,8 +142,8 @@ export function setStretchMode(context, mode) {
     return saveSessionPrepPrefs({ [key]: mode });
 }
 
-function part(name, reps, notes, children = null) {
-    return { name, reps, notes, children };
+function part(name, reps, notes, children = null, extra = null) {
+    return { name, reps, notes, children, ...(extra && typeof extra === 'object' ? extra : {}) };
 }
 
 /** Structured warmup parts for gym (hypertrophy/strength) or practice/match. */
@@ -130,9 +186,32 @@ export function buildStructuredWarmupParts(context = 'gym') {
 }
 
 export function buildStructuredStretchParts() {
-    return COOLDOWN_STRETCHES.map(s =>
-        part(s, 'Hold ~30s', 'Teaching point video placeholder')
-    );
+    const parts = [];
+    for (const s of COOLDOWN_STRETCHES) {
+        if (isStretchBanned(s)) continue;
+        const hold = getStretchHoldSeconds(s);
+        const holdLabel = `Hold ${hold}s`;
+        if (isUnilateralCooldownStretch(s)) {
+            parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
+                side: 'Left', baseName: s, holdSec: hold, unilateral: true
+            }));
+            parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
+                side: 'Right', baseName: s, holdSec: hold, unilateral: true
+            }));
+        } else {
+            parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
+                baseName: s, holdSec: hold, unilateral: false
+            }));
+        }
+    }
+    return parts;
+}
+
+export function stretchPartDisplayLabel(partOrSet) {
+    if (!partOrSet) return 'Stretch';
+    const name = partOrSet.partName || partOrSet.name || 'Stretch';
+    const side = partOrSet.side;
+    return side ? `${name} · ${side}` : name;
 }
 
 /**
@@ -224,12 +303,55 @@ export function buildSportSessionBlock(kind = 'practice') {
 }
 
 export function saveSessionPrepSettings() {
-    saveSessionPrepPrefs({
+    const partial = {
         gymWarmup: document.getElementById('set-gym-warmup')?.value || 'planned',
         gymStretch: document.getElementById('set-gym-stretch')?.value || 'planned',
         practiceWarmup: document.getElementById('set-practice-warmup')?.value || 'planned',
         practiceStretch: document.getElementById('set-practice-stretch')?.value || 'planned'
-    });
+    };
+    const holdEl = document.getElementById('set-stretch-hold-sec');
+    const gapEl = document.getElementById('set-stretch-gap-sec');
+    const addEl = document.getElementById('set-stretch-adductor-hold-sec');
+    if (holdEl) partial.stretchHoldSeconds = clampPositiveInt(holdEl.value, 30) || 30;
+    if (gapEl) partial.stretchGapSeconds = clampPositiveInt(gapEl.value, 5);
+    if (addEl) partial.stretchAdductorHoldSeconds = clampPositiveInt(addEl.value, 45) || 45;
+
+    const banInputs = document.querySelectorAll('[data-stretch-ban]');
+    if (banInputs.length) {
+        const banned = [];
+        banInputs.forEach(el => {
+            if (el instanceof HTMLInputElement && !el.checked) {
+                const name = el.getAttribute('data-stretch-ban');
+                if (name) banned.push(name);
+            }
+        });
+        partial.bannedStretches = banned;
+    }
+    saveSessionPrepPrefs(partial);
+}
+
+/** Hydrate stretch timer + ban controls in Settings → Algorithms. */
+export function hydrateStretchSettingsDom() {
+    const prefs = loadSessionPrepPrefs();
+    const setNum = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.value = String(val);
+    };
+    setNum('set-stretch-hold-sec', prefs.stretchHoldSeconds);
+    setNum('set-stretch-gap-sec', prefs.stretchGapSeconds);
+    setNum('set-stretch-adductor-hold-sec', prefs.stretchAdductorHoldSeconds);
+
+    const host = document.getElementById('stretch-ban-list');
+    if (!host) return;
+    const banned = new Set((prefs.bannedStretches || []).map(s => String(s).toLowerCase()));
+    host.innerHTML = COOLDOWN_STRETCHES.map(name => {
+        const checked = banned.has(name.toLowerCase()) ? '' : ' checked';
+        const sideNote = isUnilateralCooldownStretch(name) ? ' <span style="color:var(--text-stealth);">(L/R)</span>' : '';
+        return `<label style="display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-silver); margin:0; font-weight:500; cursor:pointer;">
+            <input type="checkbox" data-stretch-ban="${name.replace(/"/g, '&quot;')}"${checked} onchange="saveSessionPrepSettings()" style="accent-color:var(--gold-accent);">
+            <span>${name}${sideNote}</span>
+        </label>`;
+    }).join('');
 }
 
 function refreshPrepLogUi(exIdx, { closeModal = false, reRenderSets = false } = {}) {

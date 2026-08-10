@@ -918,6 +918,18 @@
                     <option value="custom">No — I do my own stretching</option>
                     <option value="none">No — I don’t stretch</option>
                 </select>
+
+                <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border-subtle);">
+                    <div class="hud-label" style="margin:0 0 10px 0;">Stretch timers</div>
+                    <label>Default hold (seconds)</label>
+                    <input type="number" id="set-stretch-hold-sec" class="input-field" min="1" step="1" value="30" onchange="saveSessionPrepSettings()">
+                    <label>Adductors hold (seconds)</label>
+                    <input type="number" id="set-stretch-adductor-hold-sec" class="input-field" min="1" step="1" value="45" onchange="saveSessionPrepSettings()">
+                    <label>Between stretches (seconds)</label>
+                    <input type="number" id="set-stretch-gap-sec" class="input-field" min="0" step="1" value="5" onchange="saveSessionPrepSettings()">
+                    <div style="font-size:10px; color:var(--text-muted); margin:10px 0 8px; font-family:'Roboto Mono';">Cool-down muscles — uncheck to ban until re-enabled</div>
+                    <div id="stretch-ban-list" style="display:grid; grid-template-columns:1fr 1fr; gap:8px 10px;"></div>
+                </div>
             </div>
         </div>
 

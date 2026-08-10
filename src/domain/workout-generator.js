@@ -929,6 +929,10 @@ export async function generateWorkoutTemplate() {
                     completed: false,
                     isText: true,
                     partName: part.name,
+                    baseName: part.baseName || part.name,
+                    side: part.side || null,
+                    holdSec: part.holdSec || null,
+                    unilateral: !!part.unilateral,
                     notes: part.notes
                 }))
                 : [{

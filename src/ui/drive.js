@@ -32,6 +32,19 @@ import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry, idbPutJournalMedia } from './journey.js';
 import { calculateTDEE } from '../domain/thermodynamics.js';
 import { notifyRestTimerDone, ensureNotificationPermission } from './notifications.js';
+import {
+    currentStretchStep,
+    ensurePlannedStretchSetsShape,
+    getStretchTimerState,
+    isPlannedTimedStretchItem,
+    remainingStretchStepSeconds,
+    startStretchTimer,
+    stretchSetBaseName,
+    stretchSetLabel,
+    stretchTimerStatusSubtitle,
+    syncStretchTimersFromWallClock,
+    toggleSessionStretchExclude
+} from './stretch-timer.js';
 import { addFoodToActiveLog, loadGhostTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderActiveLog, setConfirmRouteButtons, switchLogType, updateExecutionAuxBlocks, updateExerciseDropdowns, updateSaveTemplateButtonLabel } from './templates.js';
 import { openAddExercisesModal } from './add-exercises-modal.js';
 import {
@@ -242,7 +255,11 @@ export function renderWorkoutLog() {
 
         let subtitle = `${completedSets} / ${totalSets} ${unitLabel} Logged`;
         if (item.isStretchGroup || isStaticStretchingLogItem(item)) {
-            subtitle = isAllCompleted ? 'Done' : 'Tap Log when finished';
+            if (item.isCustomStretch) {
+                subtitle = isAllCompleted ? 'Done' : 'Tap Log when finished';
+            } else {
+                subtitle = stretchTimerStatusSubtitle(item);
+            }
         } else if (item.isWarmupGroup) {
             subtitle = `${completedSets} / ${totalSets} parts`;
         } else if (item.isCoreBlock) {
@@ -324,7 +341,7 @@ export function renderWorkoutLog() {
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
                     <div class="workout-title" style="color:var(--text-main); margin-bottom:4px; font-size: 15px;">${displayName}${checkIcon}</div>
-                    <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${subtitle}</div>
+                    <div ${(item.isStretchGroup || isStaticStretchingLogItem(item)) && !item.isCustomStretch ? `id="stretch-card-sub-${exIdx}"` : ''} style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${subtitle}</div>
                 </div>
                 <button class="btn-primary is-primary" style="width:auto; margin:0; padding:10px 20px; font-size:12px;" onclick="window.beginExerciseLog(${exIdx})">${isAllCompleted ? 'Edit' : 'Log'}</button>
             </div>
@@ -348,7 +365,9 @@ export function renderWorkoutLog() {
 
 function isWorkoutItemFullyLogged(item) {
     if (!item || !Array.isArray(item.sets) || !item.sets.length) return false;
-    return item.sets.every(s => s.completed);
+    const relevant = item.sets.filter(s => s && !s._sessionSkipped);
+    if (!relevant.length) return true;
+    return relevant.every(s => s.completed);
 }
 
 export function setWorkoutLogFilter(filter) {
@@ -466,10 +485,29 @@ export function toggleStretchListExpand(exIdx) {
 export function toggleStretchGroupComplete(exIdx) {
     const item = store.activeLog?.items?.[exIdx];
     if (!item || !isStaticStretchingLogItem(item)) return;
-    const parts = item.sets || [];
+    if (getStretchTimerState(item)?.running) return;
+    const parts = (item.sets || []).filter(s => s && !s._sessionSkipped);
     if (!parts.length) return;
-    const allDone = parts.every(s => s && s.completed);
-    parts.forEach(s => { if (s) s.completed = !allDone; });
+    const allDone = parts.every(s => s.completed);
+    parts.forEach(s => { s.completed = !allDone; });
+    if (navigator.vibrate) navigator.vibrate([50]);
+    renderExerciseSets();
+    if (window._workoutSessionConfirmed) saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
+    calculateLiveFitnessScores();
+}
+
+export { startStretchTimer, toggleSessionStretchExclude, syncStretchTimersFromWallClock };
+
+/** Toggle all Left/Right parts for one muscle in the current cool-down. */
+export function toggleStretchMuscleGroupComplete(exIdx, baseName) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item || !isStaticStretchingLogItem(item)) return;
+    if (getStretchTimerState(item)?.running) return;
+    const key = String(baseName || '').toLowerCase();
+    const matches = (item.sets || []).filter(s => stretchSetBaseName(s).toLowerCase() === key && !s._sessionSkipped);
+    if (!matches.length) return;
+    const allDone = matches.every(s => s.completed);
+    matches.forEach(s => { s.completed = !allDone; });
     if (navigator.vibrate) navigator.vibrate([50]);
     renderExerciseSets();
     if (window._workoutSessionConfirmed) saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
@@ -551,6 +589,9 @@ export function openExerciseSetsModal(exIdx) {
     }
     maybeFixStaleWarmupLoads(item);
     if (item.isSuperset) repairSupersetWarmups(item);
+    if (isStaticStretchingLogItem(item)) {
+        try { syncStretchTimersFromWallClock(); } catch (e) { /* ignore */ }
+    }
     const title = item.isSuperset
         ? (supersetTitleFromItem(item) || item.exercise.name)
         : item.exercise.name;
@@ -653,15 +694,13 @@ export function closeExerciseSetsModal() {
                 });
             }
         } else if (isStaticStretchingLogItem(item)) {
-            (item.sets || []).forEach(set => {
-                if (set.isText) {
-                    set.completed = true;
-                    return;
-                }
-                if ((Number(set.distance_km) > 0) || (Number(set.time_minutes) > 0) || isStaticStretchingLogItem(item)) {
-                    set.completed = true;
-                }
-            });
+            // Planned timed stretch: leave completion to the timer / manual checks.
+            // Custom stretch: closing still counts as logged.
+            if (item.isCustomStretch) {
+                (item.sets || []).forEach(set => {
+                    if (set) set.completed = true;
+                });
+            }
         }
     }
     document.getElementById('exercise-sets-modal').classList.add('hidden');
@@ -1407,6 +1446,7 @@ export function renderExerciseSets() {
 
     // Stretching: collapsed by default; tap header to reveal individual parts
     if (isStaticStretchingLogItem(item)) {
+        ensurePlannedStretchSetsShape(item);
         const parts = (item.sets || []).filter(s => s && (s.partName || s.isText));
         const useAccordion = item.isStretchGroup || parts.length > 1;
         if (!useAccordion) {
@@ -1430,39 +1470,108 @@ export function renderExerciseSets() {
             return;
         }
 
+        const plannedTimed = isPlannedTimedStretchItem(item);
+        const timerState = getStretchTimerState(item);
+        const timerRunning = !!timerState?.running;
+        const timerFinished = !!timerState?.finished;
+        const activeParts = parts.filter(s => !s._sessionSkipped);
+        const doneCount = activeParts.filter(s => s.completed).length;
+        const allDone = activeParts.length > 0 && doneCount === activeParts.length;
+        if (item._stretchListExpanded == null && plannedTimed) item._stretchListExpanded = true;
         const listOpen = !!item._stretchListExpanded;
-        const doneCount = parts.filter(s => s.completed).length;
-        const allDone = parts.length > 0 && doneCount === parts.length;
-        let html = `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:16px;">
-            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Check the whole routine, or expand to mark parts.</div>
+
+        // Group unilateral L/R under one base for session exclude controls
+        const groups = [];
+        const seen = new Set();
+        parts.forEach((set, setIdx) => {
+            const base = stretchSetBaseName(set) || `Stretch ${setIdx + 1}`;
+            const key = base.toLowerCase();
+            if (seen.has(key)) {
+                const g = groups.find(x => x.key === key);
+                if (g) g.indices.push(setIdx);
+                return;
+            }
+            seen.add(key);
+            groups.push({ key, base, indices: [setIdx] });
+        });
+
+        let html = `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:12px;">
+            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${plannedTimed ? 'Start the timer when ready. Remove muscles for this workout if needed.' : 'Check the whole routine, or expand to mark parts.'}</div>
             ${item.isCustomStretch ? '' : `<button type="button" onclick="dismissPlannedStretchFromLog(${exIdx})" style="background:none; border:none; color:var(--text-stealth); font-size:22px; cursor:pointer; line-height:1;" aria-label="Dismiss stretching">&times;</button>`}
         </div>`;
+
+        if (plannedTimed) {
+            const step = currentStretchStep(item);
+            const left = remainingStretchStepSeconds(item);
+            if (timerRunning && step) {
+                html += `<div style="margin-bottom:14px; padding:16px; border-radius:12px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
+                    <div id="stretch-timer-label-${exIdx}" style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">${step.kind === 'gap' ? 'Rest · next up' : `Hold · ${String(step.label).replace(/</g, '&lt;')}`}</div>
+                    <div id="stretch-timer-countdown-${exIdx}" style="font-size:36px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono'; line-height:1;">${left}s</div>
+                    <div style="font-size:10px; color:var(--text-stealth); margin-top:8px; font-family:'Roboto Mono';">Runs in background if you leave this screen</div>
+                </div>`;
+            } else if (timerFinished || allDone) {
+                html += `<div style="margin-bottom:14px; padding:14px 16px; border-radius:12px; border:1px solid var(--border-subtle); background:var(--bg-surface-elevated); text-align:center; font-size:13px; font-weight:700; color:var(--text-main);">Stretching complete</div>`;
+            } else if (!activeParts.length) {
+                html += `<div style="margin-bottom:14px; padding:14px 16px; border-radius:12px; border:1px dashed var(--border-subtle); text-align:center; font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Restore at least one muscle to start</div>`;
+            } else {
+                html += `<button type="button" onclick="startStretchTimer(${exIdx})" class="btn-primary" style="width:100%; margin:0 0 14px 0; padding:14px 16px; font-size:13px; font-weight:800; letter-spacing:0.3px;">Start stretching</button>`;
+            }
+        }
+
         html += `<div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:12px; padding:14px 16px;">
             <button type="button" onclick="toggleStretchListExpand(${exIdx})" style="flex:1; min-width:0; text-align:left; cursor:pointer; background:none; border:none; padding:0; color:inherit;">
                 <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:4px;">Cool-down</div>
                 <div style="font-size:15px; font-weight:800; color:var(--text-main);">Stretching</div>
-                <div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-top:4px;">${doneCount}/${parts.length} done · tap to ${listOpen ? 'hide' : 'show'} parts</div>
+                <div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-top:4px;">${doneCount}/${activeParts.length} done · tap to ${listOpen ? 'hide' : 'show'} parts</div>
             </button>
             <span style="font-family:'Roboto Mono'; font-size:16px; color:var(--gold-accent); cursor:pointer;" onclick="toggleStretchListExpand(${exIdx})">${listOpen ? '−' : '+'}</span>
-            <div class="check-btn ${allDone ? 'completed' : ''}" style="flex-shrink:0; width:48px; height:48px; font-size:18px;" onclick="event.stopPropagation(); toggleStretchGroupComplete(${exIdx})" title="Mark whole stretching routine">${allDone ? '✓' : ''}</div>
+            <div class="check-btn ${allDone ? 'completed' : ''}" style="flex-shrink:0; width:48px; height:48px; font-size:18px; ${timerRunning ? 'opacity:0.45; pointer-events:none;' : ''}" onclick="event.stopPropagation(); toggleStretchGroupComplete(${exIdx})" title="Mark whole stretching routine">${allDone ? '✓' : ''}</div>
         </div>`;
+
         if (listOpen) {
-            parts.forEach((set, setIdx) => {
-                const expanded = !!set._uiExpanded;
-                const label = set.partName || set.reps || `Stretch ${setIdx + 1}`;
-                html += `<div style="display:flex; flex-direction:column; margin-bottom:12px; border-bottom:1px solid var(--border-subtle); padding-bottom:10px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+            groups.forEach(group => {
+                const groupSets = group.indices.map(i => parts[i]).filter(Boolean);
+                const skipped = groupSets.every(s => s._sessionSkipped);
+                const groupDone = !skipped && groupSets.every(s => s.completed);
+                html += `<div style="margin-bottom:12px; border-bottom:1px solid var(--border-subtle); padding-bottom:10px; ${skipped ? 'opacity:0.45;' : ''}">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px;">
+                        <div style="font-size:13px; font-weight:800; color:var(--text-main);">${String(group.base).replace(/</g, '&lt;')}${skipped ? ' <span style="font-size:10px; color:var(--text-stealth); font-weight:600;">(removed)</span>' : ''}</div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            ${plannedTimed ? `<button type="button" onclick="toggleSessionStretchExclude(${exIdx}, '${String(group.base).replace(/'/g, "\\'")}')" style="background:none; border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">${skipped ? 'Restore' : 'Remove'}</button>` : ''}
+                            ${groupSets.length === 1
+                                ? `<div class="check-btn ${groupDone ? 'completed' : ''}" style="flex-shrink:0; ${timerRunning || skipped ? 'opacity:0.45; pointer-events:none;' : ''}" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${group.indices[0]})">${groupDone ? '✓' : ''}</div>`
+                                : `<div class="check-btn ${groupDone ? 'completed' : ''}" style="flex-shrink:0; ${timerRunning || skipped ? 'opacity:0.45; pointer-events:none;' : ''}" onclick="event.stopPropagation(); toggleStretchMuscleGroupComplete(${exIdx}, '${String(group.base).replace(/'/g, "\\'")}')">${groupDone ? '✓' : ''}</div>`}
+                        </div>
+                    </div>`;
+                group.indices.forEach(setIdx => {
+                    const set = parts[setIdx];
+                    if (!set || !set.side) return;
+                    const expanded = !!set._uiExpanded;
+                    const label = stretchSetLabel(set);
+                    html += `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:6px 0 6px 8px;">
                         <button type="button" onclick="togglePrepPartExpand(${exIdx}, ${setIdx})"
                             style="flex:1; min-width:0; text-align:left; background:none; border:none; padding:0; cursor:pointer; color:inherit;">
                             <div style="display:flex; align-items:center; gap:8px;">
-                                <div style="font-size:13px; font-weight:800; color:var(--text-main);">${String(label).replace(/</g, '&lt;')}</div>
-                                <span style="font-family:'Roboto Mono'; font-size:14px; color:var(--gold-accent);">${expanded ? '−' : '+'}</span>
+                                <div style="font-size:12px; font-weight:700; color:var(--text-silver);">${String(label).replace(/</g, '&lt;')}</div>
+                                <span style="font-family:'Roboto Mono'; font-size:13px; color:var(--gold-accent);">${expanded ? '−' : '+'}</span>
                             </div>
                         </button>
-                        <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0;" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
+                        <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0; ${timerRunning || set._sessionSkipped ? 'opacity:0.45; pointer-events:none;' : ''}" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
                     </div>`;
-                if (expanded) {
-                    html += `<div style="margin-top:10px; border:1px dashed var(--border-highlight); border-radius:8px; min-height:72px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono';">Teaching point video placeholder</div>`;
+                    if (expanded) {
+                        html += `<div style="margin:4px 0 8px 8px; border:1px dashed var(--border-highlight); border-radius:8px; min-height:64px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono';">Teaching point video placeholder</div>`;
+                    }
+                });
+                // Bilateral / single-side expand
+                if (group.indices.length === 1 && !parts[group.indices[0]]?.side) {
+                    const setIdx = group.indices[0];
+                    const set = parts[setIdx];
+                    const expanded = !!set._uiExpanded;
+                    html += `<button type="button" onclick="togglePrepPartExpand(${exIdx}, ${setIdx})"
+                        style="margin-top:2px; background:none; border:none; padding:0; cursor:pointer; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:12px;">${expanded ? 'Hide notes −' : 'Notes +'}</button>`;
+                    if (expanded) {
+                        html += `<div style="margin-top:8px; border:1px dashed var(--border-highlight); border-radius:8px; min-height:72px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono';">Teaching point video placeholder</div>`;
+                    }
                 }
                 html += `</div>`;
             });
@@ -1968,7 +2077,10 @@ export function playRestAlarm() {
 
 export function toggleSetComplete(exIdx, setIdx) { 
     let setObj = store.activeLog.items[exIdx].sets[setIdx];
-    if (setObj.locked) return; 
+    if (setObj.locked) return;
+    const itemGate = store.activeLog.items[exIdx];
+    if (isStaticStretchingLogItem(itemGate) && getStretchTimerState(itemGate)?.running) return;
+    if (setObj._sessionSkipped) return; 
     
     setObj.completed = !setObj.completed; 
     if (setObj.completed && navigator.vibrate) navigator.vibrate([50]); 

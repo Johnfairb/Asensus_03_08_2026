@@ -20,6 +20,7 @@ import { generateWorkoutTemplate } from './workout-generator.js';
 import { updateLiveDashboard } from '../ui/journey.js';
 import { applyNetworkKillSwitch, hydrateNetworkProfileDom } from '../ui/network.js';
 import { roundUpLoad } from './load-increments.js';
+import { hydrateStretchSettingsDom } from './session-prep.js';
 
 const DEFAULT_EVENT_RPE = 7;
 
@@ -141,6 +142,7 @@ export function applyUserConfigToDom() {
         setVal('set-practice-warmup', prefs.practiceWarmup || 'planned');
         setVal('set-practice-stretch', prefs.practiceStretch || 'planned');
     } catch (e) { /* ignore */ }
+    try { hydrateStretchSettingsDom(); } catch (e) { /* ignore */ }
     const disc = document.getElementById('strength-phase-disclaimer');
     if (disc) disc.classList.toggle('hidden', (store.userConfig.seasonPhase || '') !== 'OffSeason_Strength');
     const hybridDisc = document.getElementById('hybrid-phase-disclaimer');

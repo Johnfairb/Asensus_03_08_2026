@@ -1,6 +1,7 @@
 import { store } from '../state/store.js';
 import { getTodayFocus } from '../domain/fitness-hud.js';
 import { generateFutureTimeline } from '../domain/route-planner.js';
+import { hydrateStretchSettingsDom } from '../domain/session-prep.js';
 import { drawExerciseChart, drawMacroChart, drawUnifiedChart } from './charts.js';
 import { closeExecutionZone } from './drive.js';
 import { renderAdherenceCalendar } from './journey.js';
@@ -224,6 +225,9 @@ export function switchEngineSubTab(panel, btn) {
     });
     setCatalogueSubBtnActive('#tab-engine', btn);
     document.getElementById('app-container')?.scrollTo(0, 0);
+    if (panel === 'algorithms') {
+        try { hydrateStretchSettingsDom(); } catch (e) { /* ignore */ }
+    }
 }
 
 export function switchNetworkTab(sectionId, element) {
