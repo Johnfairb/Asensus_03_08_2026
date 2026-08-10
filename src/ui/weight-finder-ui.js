@@ -170,7 +170,7 @@ function renderKnowWeightQuestion(exIdx) {
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <div>
                 ${supersetEyebrow()}
-                <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">First time on this exercise</div>
+                <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">new exercise</div>
                 <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">Do you know what weight to use for ${escapeHtml(name)}?</div>
             </div>
             <button type="button" onclick="dismissWeightFinder()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
@@ -316,9 +316,10 @@ function openPromptForCurrentTarget(exIdx) {
 export function maybePromptWeightFinder(exIdx, opts = {}) {
     const item = exerciseItem(exIdx);
     if (!item) return false;
-    if (item.isWarmupGroup || item.isLactateHit) return false;
+    if (item.isWarmupGroup || item.isLactateHit || item.isSteadyCardio) return false;
     const domain = (item.exercise?.domain || '').toLowerCase();
     if (!item.isSuperset && (domain === 'cardio' || domain === 'warmup')) return false;
+    if (/steady\s*state\s*cardio/i.test(item.exercise?.name || '')) return false;
     if (_finderOpen) return true;
 
     if (item.isSuperset) {

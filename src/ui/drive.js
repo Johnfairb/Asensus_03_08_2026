@@ -200,14 +200,15 @@ export function renderWorkoutLog() {
         if (filter === 'todo' && isAllCompleted) return;
         if (filter === 'logged' && !isAllCompleted) return;
 
-        const isCardio = (item.exercise.domain || '').toLowerCase() === 'cardio';
+        const isCardio = (item.exercise.domain || '').toLowerCase() === 'cardio' || isSteadyCardioLogItem(item);
         // Never collapse Lactate/HIT interval stacks (e.g. Cycling) into one steady set
-        if (!isLactateHitLogItem(item) && isSteadyCardioLogItem(item) && Array.isArray(item.sets) && item.sets.length > 1) {
-            item.sets = [item.sets[0]];
+        if (!isLactateHitLogItem(item) && isSteadyCardioLogItem(item)) {
+            sanitizeSteadyCardioItem(item);
         }
         let domainTag = item.isWarmupGroup ? 'WARMUP'
             : (item.isCoreBlock ? 'CORE'
-                : (item.exercise.domain ? item.exercise.domain.toUpperCase() : 'CUSTOM'));
+                : (isSteadyCardioLogItem(item) ? 'CARDIO'
+                    : (item.exercise.domain ? item.exercise.domain.toUpperCase() : 'CUSTOM')));
         let domainColor = (item.isWarmupGroup || item.isCoreBlock) ? 'var(--gold-accent)' : (isCardio ? 'var(--text-stealth)' : 'var(--gold-accent)');
         if (item.isSuperset || item.supersetId) domainTag = 'SUPERSET';
         if (item.isStretchGroup || isStaticStretchingLogItem(item)) {
@@ -248,13 +249,30 @@ export function renderWorkoutLog() {
             subtitle = `${completedSets} / ${totalSets} circuits`;
         } else if (item.isSuperset) {
             subtitle = `${completedSets}/${totalSets} rounds`;
+        } else if (!isLactateHit && isSteadyCardioLogItem(item)) {
+            const set = (item.sets || []).find(s => s && !s.isText) || (item.sets || [])[0];
+            if (!item.cardioTypeChosen) {
+                subtitle = 'Choose cardio type to start';
+            } else if (set && (Number(set.distance_km) > 0 || Number(set.time_minutes) > 0)) {
+                const bits = [];
+                if (Number(set.distance_km) > 0) bits.push(`${set.distance_km}km`);
+                if (Number(set.time_minutes) > 0) bits.push(`${set.time_minutes} min`);
+                const pace = formatCardioPaceMsOnly(set.distance_km, set.time_minutes);
+                if (pace) bits.push(pace);
+                subtitle = bits.join(' · ') || 'In progress';
+            } else {
+                subtitle = isAllCompleted ? 'Done' : 'Timer running · enter distance';
+            }
         } else if (!isLactateHit && !isCardio && !item.isSportSessionBlock) {
             const lifting = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText);
             if (lifting.length) {
                 const sample = lifting[0];
                 const n = typeof item.plannedSets === 'number' ? item.plannedSets : lifting.length;
                 const reps = sample.reps || 10;
-                const load = Number(sample.weight) > 0 ? `${sample.weight}kg` : 'BW';
+                const isNew = !!item.needsWeightFind && !item.weightFinderResolved;
+                const load = isNew
+                    ? `<span style="color:var(--gold-accent); font-weight:800;">new exercise</span>`
+                    : (Number(sample.weight) > 0 ? `${sample.weight}kg` : 'BW');
                 subtitle = `${load} · ${n}×${reps}`;
                 if (completedSets > 0) subtitle += ` · ${completedSets}/${n}`;
             }
@@ -262,7 +280,8 @@ export function renderWorkoutLog() {
             subtitle = isAllCompleted ? 'Done' : 'Tap Log when finished';
         }
         const nextItem = store.activeLog.items[exIdx + 1];
-        const canSuperset = !item.isSuperset && !isLactateHit && !item.isWarmupGroup && !item.isCoreBlock && !isStaticStretchingLogItem(item)
+        const canSuperset = !item.isSuperset && !isLactateHit && !item.isWarmupGroup && !item.isCoreBlock
+            && !isStaticStretchingLogItem(item) && !isSteadyCardioLogItem(item)
             && nextItem && canSupersetPair(item, nextItem);
         const restSlot = isLactateHit
             ? lactateRestSlotHtml(item, exIdx)
@@ -459,6 +478,16 @@ export function toggleStretchGroupComplete(exIdx) {
 
 /** Ask for work weight (first time on this exercise) before opening the sets log. */
 export function beginExerciseLog(exIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    const isSteady = isSteadyCardioLogItem(item);
+
+    // Steady State: choose cardio type first — do not start the session timer until then
+    if (isSteady) {
+        sanitizeSteadyCardioItem(item);
+        openExerciseSetsModal(exIdx);
+        return;
+    }
+
     // Session clock starts on the first exercise Log tap (not while editing a past session)
     if (
         store.activeLog?.type === 'workout'
@@ -478,12 +507,47 @@ export function beginExerciseLog(exIdx) {
     openExerciseSetsModal(exIdx);
 }
 
+/** Collapse broken strength-style drafts into a single steady cardio set. */
+function sanitizeSteadyCardioItem(item) {
+    if (!item || !isSteadyCardioLogItem(item)) return;
+    item.isSteadyCardio = true;
+    if (item.exercise) item.exercise = { ...item.exercise, domain: 'cardio' };
+    item.needsWeightFind = false;
+    item.needsBwGate = false;
+    item.weightFinderResolved = true;
+    item.bwGateResolved = true;
+    const name = item.exercise?.name || '';
+    if (item.cardioTypeChosen == null) {
+        // Already picked a real modality, or resuming a logged set
+        const hasWork = (item.sets || []).some(s =>
+            s && (Number(s.distance_km) > 0 || Number(s.time_minutes) > 0 || s.completed)
+        );
+        item.cardioTypeChosen = hasWork || (!!name && !/^steady\s*state\s*cardio$/i.test(name));
+    }
+    const sets = Array.isArray(item.sets) ? item.sets : [];
+    const keep = sets.find(s => s && !s.isWarmup && !s.isText && !s.isLactateHit)
+        || sets.find(s => s && (Number(s.distance_km) > 0 || Number(s.time_minutes) > 0))
+        || sets[0]
+        || {};
+    item.sets = [{
+        weight: 0,
+        reps: 0,
+        distance_km: Number(keep.distance_km) || 0,
+        time_minutes: Number(keep.time_minutes) || 0,
+        rpe: '',
+        completed: !!keep.completed,
+        prevDist: Number(keep.prevDist) || 0,
+        locked: false
+    }];
+    item.plannedSets = 1;
+}
+
 export function openExerciseSetsModal(exIdx) {
     window.currentModalExIdx = exIdx;
     const item = store.activeLog.items[exIdx];
     // Steady cardio is always a single distance/duration entry
-    if (!isLactateHitLogItem(item) && isSteadyCardioLogItem(item) && Array.isArray(item.sets) && item.sets.length > 1) {
-        item.sets = [item.sets[0]];
+    if (!isLactateHitLogItem(item) && isSteadyCardioLogItem(item)) {
+        sanitizeSteadyCardioItem(item);
     }
     maybeFixStaleWarmupLoads(item);
     if (item.isSuperset) repairSupersetWarmups(item);
@@ -575,15 +639,19 @@ export function closeExerciseSetsModal() {
         const item = store.activeLog.items[exIdx];
         if (isSteadyCardioLogItem(item)) {
             applyTimerDurationToSteadyItem(item);
-            (item.sets || []).forEach(set => {
-                if (set.isText) {
-                    set.completed = true;
-                    return;
-                }
-                if ((Number(set.distance_km) > 0) || (Number(set.time_minutes) > 0)) {
-                    set.completed = true;
-                }
-            });
+            if (!item.cardioTypeChosen) {
+                // Don't mark complete until a type was chosen and work was logged
+            } else {
+                (item.sets || []).forEach(set => {
+                    if (set.isText) {
+                        set.completed = true;
+                        return;
+                    }
+                    if ((Number(set.distance_km) > 0) || (Number(set.time_minutes) > 0)) {
+                        set.completed = true;
+                    }
+                });
+            }
         } else if (isStaticStretchingLogItem(item)) {
             (item.sets || []).forEach(set => {
                 if (set.isText) {
@@ -614,8 +682,10 @@ export function isSteadyCardioLogItem(item) {
     // Lactate/HIT modalities (cycling, rower, elliptical, etc.) are cardio-domain
     // but must keep all interval sets — never collapse to a single steady entry.
     if (item.isLactateHit || (item.sets || []).some(s => s && s.isLactateHit)) return false;
+    if (item.isSteadyCardio) return true;
     const domain = (item.exercise.domain || '').toLowerCase();
     const name = item.exercise.name || '';
+    if (/steady\s*state\s*cardio/i.test(name)) return true;
     if (domain !== 'cardio') return false;
     if (/sprint|lactate|interval|30s\s*on|hit\s*class|attack\s*bike|skierg|rower|battle\s*rope|elliptical|cycling/i.test(name)) return false;
     return true;
@@ -775,19 +845,18 @@ function startRestOnSet(exIdx, setIdx, restSec) {
 }
 
 function formatCardioPace(distanceKm, timeMinutes) {
+    const msOnly = formatCardioPaceMsOnly(distanceKm, timeMinutes);
+    return msOnly || '—';
+}
+
+/** Pace as m/s only; null when distance or time is missing (omit from summaries). */
+export function formatCardioPaceMsOnly(distanceKm, timeMinutes) {
     const dist = Number(distanceKm) || 0;
     const mins = Number(timeMinutes) || 0;
-    if (!(dist > 0) || !(mins > 0)) return '—';
+    if (!(dist > 0) || !(mins > 0)) return null;
     // distance (km) ÷ duration (hours) → km/h, then → m/s
     const ms = (dist / (mins / 60)) / 3.6;
-    const minPerKm = mins / dist;
-    const paceClock = (() => {
-        const totalSec = Math.round(minPerKm * 60);
-        const m = Math.floor(totalSec / 60);
-        const s = totalSec % 60;
-        return `${m}:${String(s).padStart(2, '0')}`;
-    })();
-    return `${ms.toFixed(2)} m/s · ${paceClock} /km`;
+    return `${ms.toFixed(2)} m/s`;
 }
 
 export function updateCardioPaceReadout(exIdx, setIdx) {
@@ -1072,10 +1141,10 @@ export function populateCardioTypePicker(exIdx) {
     if (search) search.value = '';
 
     window._cardioTypeOptions = getSteadyCardioTypeOptions();
-    renderCardioTypeSelectOptions(item.exercise);
+    renderCardioTypeSelectOptions(item.exercise, '', { requireChoice: !item.cardioTypeChosen });
 }
 
-function renderCardioTypeSelectOptions(currentEx, filterText = '') {
+function renderCardioTypeSelectOptions(currentEx, filterText = '', { requireChoice = false } = {}) {
     const select = document.getElementById('sets-modal-cardio-type-select');
     if (!select) return;
     const q = String(filterText || '').trim().toLowerCase();
@@ -1091,8 +1160,13 @@ function renderCardioTypeSelectOptions(currentEx, filterText = '') {
         return;
     }
 
-    select.innerHTML = options.map(e => {
-        const selected = (currentId && String(e.id) === currentId) || e.name === currentName ? ' selected' : '';
+    const placeholder = requireChoice
+        ? `<option value="" selected disabled>Select cardio type…</option>`
+        : '';
+    select.innerHTML = placeholder + options.map(e => {
+        const selected = !requireChoice && ((currentId && String(e.id) === currentId) || e.name === currentName)
+            ? ' selected'
+            : '';
         return `<option value="${e.id}"${selected}>${e.name}</option>`;
     }).join('');
 }
@@ -1101,7 +1175,9 @@ export function filterCardioTypeList() {
     const search = document.getElementById('sets-modal-cardio-search');
     const exIdx = window.currentModalExIdx;
     const item = store.activeLog.items?.[exIdx];
-    renderCardioTypeSelectOptions(item?.exercise, search?.value || '');
+    renderCardioTypeSelectOptions(item?.exercise, search?.value || '', {
+        requireChoice: !!(item && isSteadyCardioLogItem(item) && !item.cardioTypeChosen)
+    });
 }
 
 export function selectCardioTypeInLog(newId) {
@@ -1113,24 +1189,52 @@ export function selectCardioTypeInLog(newId) {
     }
     if (!newEx) return;
 
-    const oldSets = store.activeLog.items[exIdx].sets || [];
-    store.activeLog.items[exIdx].exercise = { ...newEx, domain: 'cardio' };
+    const item = store.activeLog.items[exIdx];
+    const oldSets = item.sets || [];
+    item.exercise = { ...newEx, domain: 'cardio' };
+    item.isSteadyCardio = true;
+    item.cardioTypeChosen = true;
+    item.needsWeightFind = false;
+    item.needsBwGate = false;
+    item.weightFinderResolved = true;
     // Keep distance / duration; clear completion so values can be confirmed
-    store.activeLog.items[exIdx].sets = oldSets.map(s => ({
+    item.sets = oldSets.map(s => ({
         ...s,
         completed: false,
         locked: false,
         isText: false,
+        isWarmup: false,
         weight: 0,
         reps: 0,
         distance_km: s.distance_km || 0,
         time_minutes: s.time_minutes || 0,
         rpe: ''
     }));
+    if (!item.sets.length) {
+        item.sets = [{ weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: '', completed: false, prevDist: 0 }];
+    }
+    item.plannedSets = 1;
+
+    // Start session timer only after type is chosen
+    if (
+        store.activeLog?.type === 'workout'
+        && !window.editingSessionId
+        && !window._editingPreservedDuration
+        && (window._workoutSessionConfirmed || window.manualWorkoutMode)
+    ) {
+        if (ensureWorkoutTimerStarted() && window._workoutSessionConfirmed) {
+            saveWorkoutDraft({
+                elapsedMs: getWorkoutElapsedMs(),
+                timerRunning: true,
+                timerAnchorAt: Date.now()
+            });
+        }
+    }
+
     document.getElementById('sets-modal-title').innerText = newEx.name;
     renderExerciseSets();
     populateCardioTypePicker(exIdx);
-    drawModalExerciseChart(newEx.name, false);
+    drawModalExerciseChart(newEx.name, true);
     if (navigator.vibrate) navigator.vibrate(40);
 }
 
@@ -1404,7 +1508,15 @@ export function renderExerciseSets() {
     }
 
     if (isSteadyCardio) {
-        html += `<div style="font-size:11px; color:var(--text-muted); margin-bottom:12px; line-height:1.4;">Enter distance, then tap <strong style="color:var(--text-main);">Confirm &amp; Close</strong>. Duration is taken from the session timer at the top.</div>`;
+        sanitizeSteadyCardioItem(item);
+        if (!item.cardioTypeChosen) {
+            html += `<div style="font-size:12px; color:var(--text-muted); margin-bottom:12px; line-height:1.45;">
+                Choose what kind of steady-state cardio you want to do above. The session timer starts once you pick a type.
+            </div>`;
+            document.getElementById('sets-modal-content').innerHTML = html;
+            return;
+        }
+        html += `<div style="font-size:11px; color:var(--text-muted); margin-bottom:12px; line-height:1.4;">Timer is running. Enter distance when finished, then tap <strong style="color:var(--text-main);">Confirm &amp; Close</strong>.</div>`;
         // Always a single session — keep only the first set if extras exist
         if (item.sets.length > 1) item.sets = [item.sets[0]];
         applyTimerDurationToSteadyItem(item);
@@ -1441,7 +1553,7 @@ export function renderExerciseSets() {
                 <div id="cardio-timer-duration-${exIdx}-${setIdx}" style="padding:14px 16px; border-radius:10px; border:1px solid var(--border-subtle); background:var(--bg-surface-elevated); font-family:'Roboto Mono'; font-size:13px; font-weight:700; color:var(--gold-accent);">${timerLabel}${timerMins > 0 ? ` · ${timerMins} min` : ''}</div>
             </div>
             <div>
-                <label style="margin-top:0; font-size:10px;">Pace <span style="color:var(--text-stealth); font-weight:500;">(distance ÷ timer)</span></label>
+                <label style="margin-top:0; font-size:10px;">Pace <span style="color:var(--text-stealth); font-weight:500;">(m/s)</span></label>
                 <div id="cardio-pace-${exIdx}-${setIdx}" style="padding:14px 16px; border-radius:10px; border:1px solid var(--border-subtle); background:var(--bg-surface-elevated); font-family:'Roboto Mono'; font-size:13px; font-weight:700; color:var(--gold-accent);">${paceText}</div>
             </div>
             ${overridesHtml}

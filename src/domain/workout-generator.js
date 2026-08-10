@@ -183,11 +183,16 @@ export function renderGhostWorkoutFromItems() {
                 </select>`;
         }
         const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
-        if (workSets.length) {
+        if (item.isSteadyCardio || (item.exercise?.domain || '').toLowerCase() === 'cardio') {
+            html += `<div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:4px;">Choose type · timer + distance</div>`;
+        } else if (workSets.length) {
             const sample = workSets[0];
             const nSets = typeof item.plannedSets === 'number' ? item.plannedSets : workSets.length;
             const reps = sample.reps || 10;
-            const load = Number(sample.weight) > 0 ? `${sample.weight}kg` : 'BW';
+            const isNew = !!item.needsWeightFind && !item.weightFinderResolved;
+            const load = isNew
+                ? `<span style="color:var(--gold-accent); font-weight:800;">new exercise</span>`
+                : (Number(sample.weight) > 0 ? `${sample.weight}kg` : 'BW');
             html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;">
                 <span>${load}</span>
                 <span style="color:#D4AF37; font-weight:bold; font-family:'Roboto Mono';">${nSets}×${reps}</span>
@@ -869,15 +874,20 @@ export async function generateWorkoutTemplate() {
             summary: plan.summary
         };
     }
-    else if (isSteadyCardio(focus) || focus === 'Cardio') { 
-        mainRoutine.push({ name: "Steady State Cardio", notes: "Aerobic base. Zone 2. Duration tracked by the session timer." }); 
+    else if (isSteadyCardio(focus) || focus === 'Cardio') {
+        mainRoutine.push({
+            name: 'Steady State Cardio',
+            notes: 'Choose a cardio type, then start. Duration is tracked by the session timer.',
+            isSteadyCardio: true,
+            sets: 1
+        });
     }
     else if (isPracticeFocus || isMatchFocus) {
         mainRoutine.push(buildSportSessionBlock(isMatchFocus ? 'match' : 'practice'));
     }
 
-    // 2. COOL-DOWN STRETCH (honours prefs; skipped for steady)
-    if (!isSteadyFocus) {
+    // 2. COOL-DOWN STRETCH (honours prefs — including after Steady State)
+    {
         const stretch = resolveStretchBlock({ context: prepCtx });
         if (stretch) mainRoutine.push(stretch);
     }
@@ -955,6 +965,41 @@ export async function generateWorkoutTemplate() {
                 }],
                 isSportSessionBlock: true,
                 plannedSets: 1
+            });
+            return;
+        }
+
+        // Steady State — always cardio domain, one distance/time set, no warmups / weight find
+        if (item.isSteadyCardio || /steady\s*state\s*cardio/i.test(item.name || '')) {
+            const latestCardio = hist.find(l =>
+                l && (l.exercise === item.name || /steady|easy\s*run|jog|bike|swim|elliptical|incline\s*walk|ski\s*erg|cross\s*trainer|rowing/i.test(String(l.exercise || '')))
+                && (Number(l.distance_km) > 0 || Number(l.time_minutes) > 0)
+            ) || null;
+            const tDist = latestCardio ? (Number(latestCardio.distance_km) || 0) : 0;
+            store.currentGhostItems.push({
+                exercise: {
+                    id: 'STEADY_CARDIO',
+                    name: item.name || 'Steady State Cardio',
+                    domain: 'cardio',
+                    muscle_group: 'full'
+                },
+                note: item.notes || 'Aerobic base. Zone 2. Choose a type to start the timer.',
+                sets: [{
+                    weight: 0,
+                    reps: 0,
+                    distance_km: 0,
+                    time_minutes: 0,
+                    rpe: '',
+                    completed: false,
+                    prevDist: tDist
+                }],
+                plannedSets: 1,
+                isSteadyCardio: true,
+                cardioTypeChosen: false,
+                needsWeightFind: false,
+                needsBwGate: false,
+                weightFinderResolved: true,
+                bwGateResolved: true
             });
             return;
         }

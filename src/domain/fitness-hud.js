@@ -1004,9 +1004,10 @@ export function getWorkoutExerciseRows(focus) {
         return {
             sessionType: 'Cardio',
             sessionName: isSteadyCardio(focus) ? 'Steady Cardio' : 'Cardio',
-            exercises: sportData.cardio === 'anaerobic'
-                ? [{ name: 'Sprints (30s on/off)' }]
-                : [{ name: '45–60 min Zone 2' }]
+            exercises: [
+                { name: 'Steady State Cardio (choose type · timer + distance)' },
+                { name: 'Stretching (per settings)' }
+            ]
         };
     }
     if (focus === 'Practice') {

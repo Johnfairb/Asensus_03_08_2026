@@ -9,6 +9,7 @@ import {
     getDayMacroTargets,
     getWorkoutSessionSnapshot,
     isLactateEvent,
+    isSteadyCardio,
     listWorkoutSessionsForDate,
     loadWorkoutSessionSnapshots,
     prettyWorkoutTypeLabel
@@ -658,6 +659,14 @@ function renderGymDiaryBlockHtml(journal) {
     </div>`;
 }
 
+function formatAdherenceCardioPace(distanceKm, timeMinutes) {
+    const dist = Number(distanceKm) || 0;
+    const mins = Number(timeMinutes) || 0;
+    if (!(dist > 0) || !(mins > 0)) return null;
+    const ms = (dist / (mins / 60)) / 3.6;
+    return `${ms.toFixed(2)} m/s`;
+}
+
 function summarizeAdherenceSnapshotSets(sets, { lactate = false } = {}) {
     const rows = (sets || []).filter(s => s && s.completed !== false);
     if (!rows.length) return 'No sets';
@@ -674,6 +683,8 @@ function summarizeAdherenceSnapshotSets(sets, { lactate = false } = {}) {
         const bits = [];
         if (dist > 0) bits.push(`${dist}km`);
         if (dur > 0) bits.push(`${dur} min`);
+        const pace = formatAdherenceCardioPace(dist, dur);
+        if (pace) bits.push(pace);
         return bits.length ? bits.join(' · ') : `${rows.length} sets`;
     }
     const repsList = rows.map(s => Number(s.reps) || 0).filter(n => n > 0);
@@ -744,19 +755,65 @@ export function openAdherenceSessionDetail(sessionId, dateStr) {
     if (subEl) subEl.textContent = dateStr || snap.dateIso || '';
     const durLabel = snap.durationLabel
         || (snap.durationMs > 0 ? formatDurationMs(snap.durationMs) : (snap.durationMinutes > 0 ? `${snap.durationMinutes} min` : '—'));
-    if (macrosEl) {
-        macrosEl.innerHTML = `
-            <div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
-                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Duration</div>
-                <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(durLabel)}</div>
-            </div>
-            ${snap.rpe != null ? `<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
-                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">RPE</div>
-                <div style="font-size:20px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono';">${snap.rpe}</div>
-            </div>` : ''}`;
+    const isLactate = isLactateEvent(snap.kind) || snap.kind === 'Lactate';
+    const isSteady = isSteadyCardio(snap.kind) || /steady|cardio\s*\(steady\)/i.test(String(snap.kind || ''));
+    let cardioMeta = null;
+    const cardioItem = (snap.items || []).find(item => {
+        if (item?.isSteadyCardio) return true;
+        if (!isSteady) return false;
+        const domain = (item?.exercise?.domain || '').toLowerCase();
+        const sets = item?.sets || [];
+        return domain === 'cardio'
+            || /steady\s*state/i.test(item?.exercise?.name || item?.name || '')
+            || sets.some(s => Number(s?.distance_km) > 0 || (Number(s?.time_minutes) > 0 && !(Number(s?.weight) > 0) && !(Number(s?.reps) > 0)));
+    });
+    if (cardioItem) {
+        const rows = (cardioItem.sets || []).filter(s => s && s.completed !== false);
+        const dist = rows.map(s => Number(s.distance_km) || 0).find(n => n > 0) || 0;
+        const setDur = rows.map(s => Number(s.time_minutes) || 0).find(n => n > 0) || 0;
+        const durMin = setDur || Number(snap.durationMinutes) || 0;
+        cardioMeta = {
+            distance: dist,
+            durationMin: durMin,
+            durationLabel: setDur > 0
+                ? `${setDur} min`
+                : (snap.durationLabel || (durMin > 0 ? `${durMin} min` : '—')),
+            pace: formatAdherenceCardioPace(dist, durMin)
+        };
     }
 
-    const isLactate = isLactateEvent(snap.kind) || snap.kind === 'Lactate';
+    if (macrosEl) {
+        const cards = [];
+        if (cardioMeta) {
+            cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Time</div>
+                <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(cardioMeta.durationLabel)}</div>
+            </div>`);
+            cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Distance</div>
+                <div style="font-size:20px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono';">${cardioMeta.distance > 0 ? `${cardioMeta.distance} km` : '—'}</div>
+            </div>`);
+            if (cardioMeta.pace) {
+                cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+                    <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Pace</div>
+                    <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(cardioMeta.pace)}</div>
+                </div>`);
+            }
+        } else {
+            cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Duration</div>
+                <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(durLabel)}</div>
+            </div>`);
+        }
+        if (snap.rpe != null) {
+            cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">RPE</div>
+                <div style="font-size:20px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono';">${snap.rpe}</div>
+            </div>`);
+        }
+        macrosEl.innerHTML = cards.join('');
+    }
+
     let body = '';
     (snap.items || []).forEach(item => {
         const name = item.exercise?.name || item.name || 'Exercise';
