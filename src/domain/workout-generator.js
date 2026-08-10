@@ -28,6 +28,9 @@ import {
     resolveWarmupBlock,
     buildSportSessionBlock
 } from './session-prep.js';
+import { formatCoreRepLabel } from './exercise-catalog.js';
+import { hasCoreStrengthRating } from './core-programming.js';
+
 import { renderActiveLog } from '../ui/templates.js';
 import { ensureCycleStarted, ensureCyclePlansForProgramme, sessionTypeIdFromFocus, sessionNeedsExerciseConfirm, confirmSessionExercises } from './workout-cycle.js';
 import { getEquivalentExercises, resolveItemSlotLabel } from './exercise-slots.js';
@@ -763,6 +766,18 @@ export async function generateWorkoutTemplate() {
             ensureCyclePlansForProgramme();
         } catch (e) { /* ignore */ }
     }
+
+    // First time core is programmed: ask the user to rate core strength
+    if (!useHypertrophy && isStrengthFocus(focus) && !isHypertrophyFocus(focus) && !hasCoreStrengthRating()) {
+        const { promptCoreStrengthRating } = await import('../ui/core-strength-ui.js');
+        const rated = await promptCoreStrengthRating();
+        if (!rated) {
+            content.innerHTML = "<div style='text-align:center;'><p style='font-size:13px; color:var(--text-muted); font-weight:bold;'>Core strength rating needed</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Rate your core strength to build the strength session core circuit.</p></div>";
+            container.classList.remove('hidden');
+            return;
+        }
+    }
+
     if (useHypertrophy) {
         // Stable day plan — same exercises until date / prefs / session kind change
         const built = getHypertrophySessionRoutine(focus);
@@ -944,7 +959,7 @@ export async function generateWorkoutTemplate() {
             return;
         }
 
-        // Strength core circuit — Set 1 / Set 2 expand to 5×20 exercises
+        // Strength core circuit — Set 1 / Set 2 expand to 5 exercises with advised reps
         if (item.isCoreBlock) {
             const coreEx = Array.isArray(item.coreExercises) ? item.coreExercises : [];
             const circuitCount = typeof item.sets === 'number' ? item.sets
@@ -953,7 +968,7 @@ export async function generateWorkoutTemplate() {
             for (let i = 0; i < circuitCount; i++) {
                 setsArray.push({
                     partName: `Set ${i + 1}`,
-                    reps: '5 exercises × 20 reps',
+                    reps: '5 exercises · advised reps',
                     weight: 0,
                     rpe: 0,
                     completed: false,
@@ -962,7 +977,8 @@ export async function generateWorkoutTemplate() {
                     restTime: i < circuitCount - 1 ? 60 : 0,
                     children: coreEx.map(n => ({
                         name: n,
-                        reps: '20 reps',
+                        reps: formatCoreRepLabel(n),
+                        weight: 0,
                         _uiExpanded: false
                     }))
                 });

@@ -29,7 +29,9 @@ export const BW_GATE_EXERCISES = new Set([
     'Press-up',
     'Close Grip Press-up',
     'Incline Press-up',
-    'Pistol Squat'
+    'Pistol Squat',
+    'Single Leg Deadlift',
+    'Turkish Get-up'
 ]);
 
 const FIXED_SWAPS = {
@@ -40,7 +42,9 @@ const FIXED_SWAPS = {
     'Press-up': 'Bench Press',
     'Close Grip Press-up': 'Close Grip Bench Press',
     'Incline Press-up': 'Incline Bench Press',
-    'Pistol Squat': 'Split Squat'
+    'Pistol Squat': 'Split Squat',
+    'Single Leg Deadlift': 'Romanian Deadlift',
+    'Turkish Get-up': 'Suitcase Carry'
 };
 
 function monthKey(d = new Date()) {

@@ -122,6 +122,7 @@ export function applyUserConfigToDom() {
     setVal('set-bf', store.userConfig.bodyFat);
     setVal('set-injury', store.userConfig.injury || 'None');
     setVal('set-bw-test', store.userConfig.canDoPullups);
+    setVal('set-core-strength', store.userConfig.coreStrength || '');
     if (store.userConfig.seasonPhase === 'InSeason_Maintenance') {
         store.userConfig.seasonPhase = 'OffSeason_Hypertrophy';
     }
@@ -212,6 +213,8 @@ export function saveSettings() {
     store.userConfig.sport = document.getElementById('set-sport').value;
     store.userConfig.bodyFat = parseFloat(document.getElementById('set-bf').value) || 0;
     store.userConfig.canDoPullups = document.getElementById('set-bw-test').value || 'Yes';
+    const coreStrEl = document.getElementById('set-core-strength');
+    if (coreStrEl && coreStrEl.value) store.userConfig.coreStrength = coreStrEl.value;
     store.userConfig.dependentAthlete = document.getElementById('toggle-dependent-athlete').checked;
     const notifEl = document.getElementById('toggle-notifications');
     if (notifEl) store.userConfig.notificationsEnabled = !!notifEl.checked;

@@ -19,7 +19,9 @@ import {
     allowsWeightInput,
     catalogLoadOptions,
     equipmentChoiceFromItem,
-    expandLoadChoices
+    expandLoadChoices,
+    resolveLoadProfile,
+    roundUpLoad
 } from '../domain/load-increments.js';
 import { switchCableEquipment } from './equipment-ui.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
@@ -243,7 +245,7 @@ export function renderWorkoutLog() {
         } else if (item.isWarmupGroup) {
             subtitle = `${completedSets} / ${totalSets} parts`;
         } else if (item.isCoreBlock) {
-            subtitle = `${completedSets} / ${totalSets} circuits · 5×20`;
+            subtitle = `${completedSets} / ${totalSets} circuits`;
         } else if (item.isSuperset) {
             subtitle = `${completedSets}/${totalSets} rounds`;
         } else if (!isLactateHit && !isCardio && !item.isSportSessionBlock) {
@@ -421,6 +423,16 @@ export function togglePrepChildExpand(exIdx, setIdx, childIdx) {
     if (!child) return;
     child._uiExpanded = !child._uiExpanded;
     renderExerciseSets();
+}
+
+/** Optional load for a core-circuit child exercise (no auto-progression). */
+export function updateCoreChildWeight(exIdx, setIdx, childIdx, value) {
+    const item = store.activeLog?.items?.[exIdx];
+    const set = item?.sets?.[setIdx];
+    const child = set?.children?.[childIdx];
+    if (!child) return;
+    const n = parseFloat(value);
+    child.weight = Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 /** Show/hide the list of individual stretch parts (collapsed by default). */
@@ -1131,7 +1143,7 @@ export function renderExerciseSets() {
     // Strength core circuit: Set 1 / Set 2 → expand to 5 exercises with form videos
     if (item.isCoreBlock) {
         let html = `<div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:16px; line-height:1.45;">
-            5 exercises × 20 reps. No rest between exercises. 1 minute rest between sets.
+            5 exercises with advised reps. No rest between exercises. 1 minute rest between sets.
         </div>`;
         item.sets.forEach((set, setIdx) => {
             const kids = Array.isArray(set.children) ? set.children : [];
@@ -1145,7 +1157,7 @@ export function renderExerciseSets() {
                             <div style="font-size:13px; font-weight:800; color:var(--text-main);">${set.partName || ('Set ' + (setIdx + 1))}</div>
                             <span style="font-family:'Roboto Mono'; font-size:14px; color:var(--gold-accent);">${chevron}</span>
                         </div>
-                        <div style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:4px;">${set.reps || '5 × 20'}</div>
+                        <div style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:4px;">${set.reps || '5 exercises · advised reps'}</div>
                     </button>
                     <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0;" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
                 </div>`;
@@ -1154,20 +1166,33 @@ export function renderExerciseSets() {
                 kids.forEach((child, cIdx) => {
                     const safe = String(child.name || '').replace(/</g, '&lt;').replace(/'/g, "\\'");
                     const childOpen = !!child._uiExpanded;
-                    html += `<button type="button" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:8px; padding:10px; color:inherit;" onclick="togglePrepChildExpand(${exIdx}, ${setIdx}, ${cIdx})">
-                        <div style="display:flex; justify-content:space-between; gap:8px;">
-                            <span style="font-size:12px; font-weight:600;">${String(child.name || '').replace(/</g, '&lt;')}</span>
-                            <span style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">${child.reps || '20'} · ${childOpen ? '−' : '+'} Form</span>
-                        </div>
-                    </button>`;
+                    const canLoad = allowsWeightInput(child.name);
+                    const wVal = Number(child.weight) > 0 ? child.weight : '';
+                    html += `<div style="border:1px solid var(--border-subtle); border-radius:8px; padding:10px; background:transparent;">
+                        <button type="button" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:none; padding:0; color:inherit;" onclick="togglePrepChildExpand(${exIdx}, ${setIdx}, ${cIdx})">
+                            <div style="display:flex; justify-content:space-between; gap:8px;">
+                                <span style="font-size:12px; font-weight:600;">${String(child.name || '').replace(/</g, '&lt;')}</span>
+                                <span style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">${child.reps || ''} · ${childOpen ? '−' : '+'} Form</span>
+                            </div>
+                        </button>`;
+                    if (canLoad) {
+                        html += `<div style="display:flex; align-items:center; gap:8px; margin-top:8px;" onclick="event.stopPropagation()">
+                            <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; margin:0;">Load (optional)</label>
+                            <input type="number" inputmode="decimal" step="0.5" min="0" value="${wVal}"
+                                onchange="updateCoreChildWeight(${exIdx}, ${setIdx}, ${cIdx}, this.value)"
+                                style="width:72px; padding:6px 8px; border-radius:6px; border:1px solid var(--border-subtle); background:var(--bg-surface-elevated); color:var(--text-main); font-family:'Roboto Mono'; font-size:12px;">
+                            <span style="font-size:10px; color:var(--text-muted);">kg</span>
+                        </div>`;
+                    }
                     if (childOpen) {
-                        html += `<div style="border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.2);">
+                        html += `<div style="margin-top:8px; border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.2);">
                             <button type="button" onclick="openVideoModal('${safe}', 'https://www.youtube.com/embed/placeholder')"
                                 style="width:100%; padding:14px; background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:11px; cursor:pointer;">
                                 🎥 FORM VIDEO — ${String(child.name || '').replace(/</g, '&lt;')}
                             </button>
                         </div>`;
                     }
+                    html += `</div>`;
                 });
                 html += `</div>`;
             }
@@ -1348,6 +1373,12 @@ export function renderExerciseSets() {
         || expandLoadChoices(catalogLoadOptions(item.exercise.name)).includes('B');
     const loadChoices = expandLoadChoices(catalogLoadOptions(item.exercise.name));
     const showWeight = allowsWeightInput(item.exercise.name, equipmentChoiceFromItem(item));
+    const loadProfile = showWeight
+        ? resolveLoadProfile(item.exercise.name, equipmentChoiceFromItem(item))
+        : null;
+    const weightMaxAttr = loadProfile?.max != null && Number.isFinite(Number(loadProfile.max))
+        ? ` max="${Number(loadProfile.max)}"`
+        : '';
     const isCableChoice = loadChoices.includes('Fca') || loadChoices.includes('Cca');
     const currentCable = equipmentChoiceFromItem(item) === 'Cca' ? 'Cca' : 'Fca';
 
@@ -1436,7 +1467,7 @@ export function renderExerciseSets() {
         const weightCell = isCardio
             ? `<input type="number" step="0.1" class="set-input ${borderClass}" value="${set.distance_km||0}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'distance_km', this.value)">`
             : (showWeight
-                ? `<input type="number" step="0.1" class="set-input ${borderClass}" value="${set.weight||0}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'weight', this.value)">`
+                ? `<input type="number" step="0.1" min="0"${weightMaxAttr} class="set-input ${borderClass}" value="${set.weight||0}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'weight', this.value)">`
                 : `<div style="flex:1; text-align:center; color:var(--text-stealth); font-size:11px; font-family:'Roboto Mono'; align-self:center;">BW</div>`);
 
         let inputGroupHtml = '';
@@ -1713,6 +1744,16 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
         num = Math.max(20, Math.round(num / 5) * 5);
     }
     const item = store.activeLog.items[exIdx];
+    if (field === 'weight' && item) {
+        const exName = item.isSuperset
+            ? ((item.sides || []).find(s => s.key === item.sets?.[setIdx]?.side)?.exercise?.name
+                || item.exercise?.name || item.name || '')
+            : (item.exercise?.name || item.name || '');
+        if (exName) {
+            const profile = resolveLoadProfile(exName, equipmentChoiceFromItem(item), { weight: num });
+            if (num > 0) num = roundUpLoad(num, profile);
+        }
+    }
     const setObj = item.sets[setIdx];
     setObj[field] = num;
     if (field === 'weight' && setObj && !setObj.isWarmup && !setObj.isText) {

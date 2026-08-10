@@ -2,8 +2,9 @@
  * Canonical lifting + core exercise catalog (filming template 25/07/2026).
  * Region headings (PECS/LATS/…) are PDF-only and never used for logic or labels.
  * Movement-specific fields (laterality, dumbbell, grip) drive programming only.
- * Core entries and machine leg presses/hack squat are listed for the library
- * but excluded from session programming (hypertrophy + strength).
+ * Machine leg presses/hack squat are library-only (inProgramming: false).
+ * Core entries stay out of hypertrophy pools but are programmed in the
+ * strength core circuit via coreLevel / coreTarget.
  */
 
 function ex(partial) {
@@ -21,8 +22,10 @@ function ex(partial) {
         ppl: 'Push',
         inProgramming: true,
         bodyweight: false,
-        /** Load codes from PDF: B D Ca Fca Cca M C P free, or multi e.g. ['B','D']. Empty = no weight. */
+        /** Load codes from PDF: B D Ca Fca Cca M C H P free, or multi e.g. ['B','D']. Empty = no weight. */
         loadOptions: ['B'],
+        /** Optional hard cap (kg); used by Halo. */
+        loadMax: null,
         cableDefault: 'Fca',
         ...partial
     };
@@ -60,9 +63,9 @@ export const EXERCISE_CATALOG = {
         secondary: ['Calves', 'Traps', 'Grip', 'Quads']
     }),
     'Single Leg Deadlift': ex({
-        loadOptions: ['B'],
-        domain: 'strength', movement: 'hinge', laterality: 'Unilateral', dumbbell: false, role: 'compound',
-        muscle_group: 'hamstrings', ppl: 'Legs',
+        loadOptions: ['D'],
+        domain: 'strength', movement: 'hinge', laterality: 'Unilateral', dumbbell: true, role: 'compound',
+        muscle_group: 'hamstrings', ppl: 'Legs', bodyweight: true,
         primary: ['Glute max', 'Lower back', 'Quads', 'Hamstrings', 'Glute medius'],
         secondary: ['Calves', 'Traps', 'Grip', 'Adductors']
     }),
@@ -207,6 +210,7 @@ export const EXERCISE_CATALOG = {
         loadOptions: ['P', 'D'],
         domain: 'lifting', movement: 'lower back isolation', role: 'isolation',
         muscle_group: 'core', ppl: 'Legs',
+        coreLevel: 'B', coreTarget: '20',
         primary: ['Glute max', 'Hamstrings', 'Lower back'], secondary: ['Calves']
     }),
 
@@ -226,7 +230,7 @@ export const EXERCISE_CATALOG = {
         secondary: ['Lats', 'Rotator cuff', 'Front delts']
     }),
     'Decline Bench Press': ex({
-        loadOptions: ['B'],
+        loadOptions: ['B', 'D'],
         domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
         muscle_group: 'lower_chest', ppl: 'Push',
         primary: ['Pecs', 'Front delts', 'Triceps'],
@@ -604,55 +608,55 @@ export const EXERCISE_CATALOG = {
         primary: ['Triceps', 'Front delt'], secondary: ['Lower traps']
     }),
 
-    // —— Core (library only — not used in programming) ——
+    // —— Core (strength circuit via coreLevel; excluded from hypertrophy pools) ——
     'Crunch': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Knees on Bench Crunch': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Feet Up Crunch': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Cable Crunch': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
     'Reverse Crunch': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Plank': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'A', coreTarget: '30 seconds', coreTimed: true, primary: ['Core'], secondary: [] }),
     'Side Plank': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '30 seconds', coreTimed: true, primary: ['Core'], secondary: [] }),
     'Dead Bug': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '10 each side', primary: ['Core'], secondary: [] }),
     'Toe Touch': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Side-sit on Hyperextension Bench': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'ql', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'ql', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '20 each side', primary: ['Core'], secondary: [] }),
     'Pallof Press': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20 each side', primary: ['Core'], secondary: [] }),
     'Wood-chop': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '15 each side', primary: ['Core'], secondary: [] }),
     'Knee Raise Machine': ex({
-        loadOptions: ['M'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['M'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
     'Knee Raise Machine Leg Raise': ex({
-        loadOptions: ['M'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['M'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
     'Hanging Knee Raise': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '20', primary: ['Core'], secondary: [] }),
     'Hanging Leg Raise': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'A', coreTarget: '10', primary: ['Core'], secondary: [] }),
     'Suitcase Carry': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['D'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, dumbbell: true, coreLevel: 'B', coreTarget: '20 metres in each hand', primary: ['Core'], secondary: [] }),
     'Turkish Get-up': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['D'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, dumbbell: true, bodyweight: true, coreLevel: 'A', coreTarget: '10 each way', primary: ['Core'], secondary: [] }),
     'Russian Twist': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['D'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, dumbbell: true, coreLevel: 'I', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Standing Side Bend': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['D'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, dumbbell: true, coreLevel: 'B', coreTarget: '20 each hand', primary: ['Core'], secondary: [] }),
     'Halo': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['H'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, loadMax: 25, coreLevel: 'I', coreTarget: '15 each way', primary: ['Core'], secondary: [] }),
     'Bulgarian Bag Circles': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '15', primary: ['Core'], secondary: [] }),
     'Standing Cable Rotation': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] }),
+        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
     'Seated Cable Rotation': ex({
-        loadOptions: ['free'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, primary: ['Core'], secondary: [] })
+        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] })
 };
 
 /** Strength core slot still uses these (logic unchanged); mapped to catalog names. */
@@ -660,6 +664,31 @@ export const STRENGTH_CORE_NAMES = {
     sidesit: 'Side-sit on Hyperextension Bench',
     hyperextension: 'Hyperextension'
 };
+
+/** Exercises eligible for the strength core circuit (have coreLevel). */
+export function getCoreProgrammingEntries() {
+    return Object.entries(EXERCISE_CATALOG || {})
+        .filter(([, meta]) => meta && (meta.coreLevel === 'B' || meta.coreLevel === 'I' || meta.coreLevel === 'A'))
+        .map(([name, meta]) => ({
+            name,
+            level: meta.coreLevel,
+            target: meta.coreTarget || '20',
+            timed: !!meta.coreTimed
+        }));
+}
+
+export function getCoreCatalogNames() {
+    return getCoreProgrammingEntries().map((e) => e.name);
+}
+
+/** Display label for advised core volume (reps / time / distance). */
+export function formatCoreRepLabel(name) {
+    const meta = getExerciseMeta(name);
+    const t = String(meta?.coreTarget || '20').trim();
+    if (!t) return '20 reps';
+    if (/second|metre|meter|each|way|hand/i.test(t)) return t;
+    return `${t} reps`;
+}
 
 export function normalizeExerciseName(name) {
     return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');

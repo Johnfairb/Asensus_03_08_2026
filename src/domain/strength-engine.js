@@ -4,6 +4,7 @@ import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, SPORT_MATRIX } from '.
 import { HYPERTROPHY_POOLS, isHypertrophyPhase } from './hypertrophy-engine.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
 import { buildStrengthMetaMap, EXERCISE_CATALOG } from './exercise-catalog.js';
+import { pickCoreExercisesForLevel } from './core-programming.js';
 import { skipsWeightProgression } from './load-increments.js';
 import { loadExercises } from '../ui/fuel.js';
 import { getBillingMonthKey } from './billing-month.js';
@@ -95,7 +96,7 @@ export const STRENGTH_SESSION_SLOTS = {
     ]
 };
 
-const MONTH_PLAN_KEY = 'ascensus_strength_month_plan_v8';
+const MONTH_PLAN_KEY = 'ascensus_strength_month_plan_v9';
 const ALL_COMPOUND_IDS = Object.keys(STRENGTH_COMPOUND_SLOTS);
 
 const FALLBACK_ISO_MUSCLES = ['bicep', 'tricep', 'calf', 'side_delt'];
@@ -173,8 +174,33 @@ function pickRandomFromList(list, exclude = []) {
 
 export function getCoreCatalogNames() {
     return Object.entries(EXERCISE_CATALOG || {})
-        .filter(([, meta]) => meta && meta.movement === 'core')
+        .filter(([, meta]) => meta && (meta.coreLevel === 'B' || meta.coreLevel === 'I' || meta.coreLevel === 'A'))
         .map(([name]) => name);
+}
+
+/** Re-roll the monthly 5-exercise core block from the user's core strength rating. */
+export function refreshCoreExercisesInMonthPlan(sportData) {
+    const plan = loadStrengthMonthPlan(sportData);
+    plan.coreExercises = pickCoreExercisesForLevel();
+    plan.coreStrength = store.userConfig?.coreStrength || null;
+    saveStrengthMonthPlan(plan);
+    // Keep unconfirmed cycle snapshots in sync with the new core picks
+    try {
+        const raw = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}') || {};
+        let changed = false;
+        for (const key of Object.keys(raw)) {
+            const snap = raw[key];
+            if (!snap || snap.family !== 'strength') continue;
+            if (snap.exercisesConfirmed || snap.source === 'custom' || snap.source === 'kept') continue;
+            if (snap.coreSession && Array.isArray(snap.coreExercises)) {
+                snap.coreExercises = plan.coreExercises.slice();
+                snap.strengthPlan = plan;
+                changed = true;
+            }
+        }
+        if (changed) localStorage.setItem('ascensus_cycle_session_plans_v1', JSON.stringify(raw));
+    } catch (e) { /* ignore */ }
+    return plan;
 }
 
 export function getStrengthTimeTier(maxTime) {
@@ -287,15 +313,7 @@ function buildFreshMonthPlan(sportData) {
     isolations[isoOrder[2]].session = 'B';
     isolations[isoOrder[3]].session = 'B';
 
-    const corePool = getCoreCatalogNames();
-    const coreExercises = [];
-    const coreUsed = [];
-    for (let i = 0; i < 5; i++) {
-        const pick = pickRandomFromList(corePool.length ? corePool : ['Crunch', 'Plank', 'Dead Bug', 'Pallof Press', 'Russian Twist'], coreUsed);
-        // Allow catalog repeats across months; within month prefer unique when pool allows
-        if (corePool.length >= 5) coreUsed.push(pick);
-        coreExercises.push(pick);
-    }
+    const coreExercises = pickCoreExercisesForLevel();
 
     return {
         month: getStrengthMonthKey(),
@@ -304,7 +322,8 @@ function buildFreshMonthPlan(sportData) {
         coreSession,
         compoundPicks,
         isolations,
-        coreExercises
+        coreExercises,
+        coreStrength: store.userConfig?.coreStrength || null
     };
 }
 
@@ -381,15 +400,8 @@ export function rebuildStrengthSessionInPlan(plan, session, sportData) {
     next.isolations = [...keepIsos, ...newIsos];
 
     if (next.coreSession === session) {
-        const corePool = getCoreCatalogNames();
-        const coreExercises = [];
-        const coreUsed = [];
-        for (let i = 0; i < 5; i++) {
-            const pick = pickRandomFromList(corePool.length ? corePool : ['Crunch', 'Plank', 'Dead Bug', 'Pallof Press', 'Russian Twist'], coreUsed);
-            if (corePool.length >= 5) coreUsed.push(pick);
-            coreExercises.push(pick);
-        }
-        next.coreExercises = coreExercises;
+        next.coreExercises = pickCoreExercisesForLevel();
+        next.coreStrength = store.userConfig?.coreStrength || null;
     }
 
     next.month = getStrengthMonthKey();
@@ -565,7 +577,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
         items.push({
             name: 'Core Circuit',
             slotLabel: 'Core',
-            notes: `Session ${session} · Core · ${coreSets} set(s) · 5 exercises × 20 reps · no rest between exercises · 1 min between sets`,
+            notes: `Session ${session} · Core · ${coreSets} set(s) · 5 exercises · advised reps · no rest between exercises · 1 min between sets`,
             sets: coreSets,
             setsOverride: coreSets,
             isCoreBlock: true,

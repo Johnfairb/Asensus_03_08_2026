@@ -12,6 +12,7 @@ export const DEFAULT_PROFILES = {
     Cca: { code: 'Cca', label: 'Crossover cable', min: 2.3, step: 2.3 },
     M: { code: 'M', label: 'Machine', min: 5, step: 7 },
     C: { code: 'C', label: 'Custom', min: 5, step: 5 },
+    H: { code: 'H', label: 'Halo', min: 5, step: 5, max: 25 },
     P: { code: 'P', label: 'Plate-loaded', min: 0, step: 1.25 },
     free: { code: 'free', label: 'Free weight', min: 0, step: 0 },
     none: { code: 'none', label: 'No weight', min: 0, step: 0 }
@@ -31,6 +32,7 @@ const OPTION_LABELS = {
     Cca: 'Crossover cable',
     M: 'Machine',
     C: 'Custom',
+    H: 'Halo',
     P: 'Plate-loaded',
     free: 'Free weight'
 };
@@ -182,6 +184,13 @@ export function resolveLoadProfile(exName, choice = null, opts = {}) {
     if (override?.min != null) base.min = override.min;
     if (override?.step != null) base.step = override.step;
 
+    // Catalog hard max (e.g. Halo 25 kg) — not user-overridable
+    const catalogMax = meta?.loadMax != null ? Number(meta.loadMax) : (base.max != null ? Number(base.max) : null);
+    if (Number.isFinite(catalogMax) && catalogMax > 0) {
+        base.max = catalogMax;
+        if (base.min != null && base.min > base.max) base.min = base.max;
+    }
+
     if (code === 'D') {
         const w = opts.weight != null ? Number(opts.weight) : base.min;
         base.step = getDumbbellStepForWeight(w);
@@ -223,7 +232,11 @@ export function roundUpLoad(val, equipmentOrProfile = 'barbell', choiceOrOpts = 
 
     if (!profile || profile.code === 'none') return 0;
     if (profile.code === 'free' || !profile.step || profile.step <= 0) {
-        return Math.round(v * 100) / 100;
+        let loose = Math.round(v * 100) / 100;
+        if (profile.max != null && Number.isFinite(Number(profile.max)) && loose > Number(profile.max)) {
+            loose = Number(profile.max);
+        }
+        return loose;
     }
 
     const step = profile.step;
@@ -232,6 +245,9 @@ export function roundUpLoad(val, equipmentOrProfile = 'barbell', choiceOrOpts = 
     rounded = Math.round(rounded * 1000) / 1000;
     if (profile.min != null && rounded > 0 && rounded < profile.min) {
         rounded = profile.min;
+    }
+    if (profile.max != null && Number.isFinite(Number(profile.max)) && rounded > Number(profile.max)) {
+        rounded = Number(profile.max);
     }
     return rounded;
 }
@@ -269,7 +285,7 @@ export function allowsWeightInput(exName, choice = null) {
 
 export function skipsWeightProgression(exName, choice = null) {
     const meta = getExerciseMeta(exName);
-    if (meta?.movement === 'core' || meta?.ppl === 'Core') return true;
+    if (meta?.movement === 'core' || meta?.ppl === 'Core' || meta?.coreLevel) return true;
     const profile = resolveLoadProfile(exName, choice);
     return !!profile.skipProgression || profile.code === 'free' || profile.code === 'none';
 }

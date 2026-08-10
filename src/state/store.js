@@ -21,7 +21,7 @@ export const store = {
     restStop: false, dependentAthlete: false, tdeePenalty: 0,
     diet: 'Standard', shopStyle: 'Cheap', injury: 'None', sport: 'None', repairLevel: 4,
     trainingWindow: 'Afternoon', seasonPhase: 'OffSeason_Hypertrophy',
-    experience: 'Beginner', oneRepMax: { squat: 0, bench: 0, deadlift: 0 }, canDoPullups: 'Yes',
+    experience: 'Beginner', coreStrength: null, oneRepMax: { squat: 0, bench: 0, deadlift: 0 }, canDoPullups: 'Yes',
     guidanceOff: { food: false, workout: false, timetabling: false },
     injuryRecord: null,
     networkEnabled: true,

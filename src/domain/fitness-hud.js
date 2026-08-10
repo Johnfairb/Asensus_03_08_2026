@@ -1029,7 +1029,7 @@ export function getWorkoutExerciseRows(focus) {
         let exercises = built.items.map(i => {
             if (i.isCoreBlock) {
                 return {
-                    name: `Core Circuit (${(i.coreExercises || []).length}×20)`,
+                    name: `Core Circuit (${(i.coreExercises || []).length} exercises)`,
                     sets: i.setsOverride || i.sets
                 };
             }
