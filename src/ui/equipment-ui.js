@@ -14,9 +14,14 @@ let _pendingConfirmAfterPick = null;
 
 export function ensureEquipmentPickModal() {
     let el = document.getElementById('equipment-pick-modal');
+    // Host inside the phone glass so fixed overlays stay framed on desktop;
+    // on real phones .iphone-screen is pass-through full viewport.
     const host = document.querySelector('.iphone-screen') || document.body;
+    const coverCss = 'position:fixed;inset:0;width:100%;height:100%;display:flex;justify-content:center;align-items:flex-end;padding:0;box-sizing:border-box;z-index:22000;background:rgba(0,0,0,0.45);pointer-events:auto;';
     if (el) {
         if (el.parentElement !== host) host.appendChild(el);
+        // Keep coverage styles even if an older DOM node was left without them
+        el.style.cssText = coverCss;
         return el;
     }
     el = document.createElement('div');
@@ -24,6 +29,8 @@ export function ensureEquipmentPickModal() {
     el.className = 'hidden';
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-modal', 'true');
+    // Inline fallback so the sheet covers the viewport even if CSS fails to load/cache
+    el.style.cssText = coverCss;
     el.innerHTML = `
         <div class="modal-content stealth-panel equipment-pick-sheet" onclick="event.stopPropagation()">
             <div class="sheet-handle" style="margin:0 auto 12px;"></div>
@@ -35,7 +42,7 @@ export function ensureEquipmentPickModal() {
             <div id="equipment-pick-list" class="equipment-pick-list"></div>
             <p id="equipment-pick-error" class="hidden" style="font-size:11px;color:#ff6b6b;margin:0;padding:0 16px;font-family:'Roboto Mono';"></p>
             <div style="padding:12px 16px calc(16px + env(safe-area-inset-bottom, 0px));border-top:1px solid var(--border-subtle);">
-                <button type="button" class="btn-primary is-primary" style="margin:0;width:100%;" onclick="confirmEquipmentPicks()">Confirm choices</button>
+                <button type="button" class="btn-primary is-primary" style="margin:0;width:100%;touch-action:manipulation;" onclick="confirmEquipmentPicks()">Confirm choices</button>
             </div>
         </div>`;
     el.addEventListener('click', (e) => {

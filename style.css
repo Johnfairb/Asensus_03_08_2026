@@ -1598,13 +1598,29 @@ div[id$="-modal"] .modal-content {
     100% { transform: translateY(0); }
 }
 
-/* Equipment pick: compact bottom sheet (not full-screen) */
+/* Equipment pick: compact bottom sheet (not full-screen)
+   Must set inset/size here — the desktop phone-frame media query is the only other
+   place that sizes div[id$="-modal"], so real phones (<480px) otherwise opened an
+   invisible/zero-coverage overlay and Confirm workout looked broken. */
 #equipment-pick-modal {
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
     z-index: 22000 !important;
     display: flex !important;
     justify-content: center !important;
     align-items: flex-end !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
     background: rgba(0, 0, 0, 0.45) !important;
+    pointer-events: auto !important;
+    transform: none !important;
 }
 #equipment-pick-modal.hidden {
     display: none !important;
@@ -1621,6 +1637,10 @@ div[id$="-modal"] .modal-content {
     overflow: hidden !important;
     background: var(--bg-surface) !important;
     box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.4);
+    pointer-events: auto !important;
+    /* Keep sheet interactive above any sibling chrome inside the phone glass */
+    position: relative;
+    z-index: 1;
 }
 #equipment-pick-modal .equipment-pick-list {
     flex: 1 1 auto;

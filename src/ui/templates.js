@@ -624,16 +624,22 @@ export function setConfirmRouteButtons(confirmed) {
 }
 
 export function acceptGhostTemplate() {
-    const proceed = () => acceptGhostTemplateAfterEquipment();
-    if (store.activeLog?.type === 'workout' || (store.currentGhostItems || []).some((it) => it?.exercise?.name && !it.isWarmupGroup)) {
-        if (!gateConfirmForEquipmentPicks(proceed)) return;
+    try {
+        const proceed = () => acceptGhostTemplateAfterEquipment();
+        if (store.activeLog?.type === 'workout' || (store.currentGhostItems || []).some((it) => it?.exercise?.name && !it.isWarmupGroup)) {
+            if (!gateConfirmForEquipmentPicks(proceed)) return;
+        }
+        proceed();
+    } catch (e) {
+        console.error('acceptGhostTemplate failed', e);
+        alert('Could not confirm workout. Please try again.');
     }
-    proceed();
 }
 
 function acceptGhostTemplateAfterEquipment() {
-    store._ghostBackupForUnconfirm = JSON.parse(JSON.stringify(store.currentGhostItems || []));
-    store.activeLog.items = [...store.currentGhostItems];
+    const ghost = Array.isArray(store.currentGhostItems) ? store.currentGhostItems : [];
+    store._ghostBackupForUnconfirm = JSON.parse(JSON.stringify(ghost));
+    store.activeLog.items = [...ghost];
     // Stamp planned-session kind so Complete Log always creates a Log tab card
     if (!window.manualSessionKind) {
         const focus = document.getElementById('today-focus')?.value || '';
