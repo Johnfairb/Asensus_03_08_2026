@@ -1,7 +1,7 @@
 import { store } from '../state/store.js';
 import { buildWeeklyTrainingPlan, getMondayISO, isStrengthEvent } from './route-planner.js';
 import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, SPORT_MATRIX } from './sports-matrix.js';
-import { HYPERTROPHY_POOLS, isHypertrophyPhase } from './hypertrophy-engine.js';
+import { HYPERTROPHY_POOLS, avoidLockedMuscleOnItems, isExerciseMuscleLocked, isHypertrophyPhase } from './hypertrophy-engine.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
 import { buildStrengthMetaMap, EXERCISE_CATALOG } from './exercise-catalog.js';
 import { pickCoreExercisesForLevel } from './core-programming.js';
@@ -459,28 +459,6 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
     try {
         const plans = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}');
         const locked = plans && plans[`strength_${session}`];
-        if (locked?.source === 'custom' && Array.isArray(locked.items) && locked.items.length) {
-            const compoundSets = strengthSetsForTier(tier, 'compound');
-            const items = locked.items.map((it) => {
-                const name = it.exercise?.name || it.name;
-                if (!name) return null;
-                const workSets = (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText);
-                return {
-                    name,
-                    slotLabel: it.slotLabel || 'Custom',
-                    notes: 'Custom cycle workout',
-                    sets: workSets.length || it.plannedSets || compoundSets,
-                    setsOverride: workSets.length || it.plannedSets || compoundSets,
-                    isIsolation: !!it.isIsolation,
-                    isExtra: !!it.isExtra,
-                    isStrengthCompound: !it.isIsolation,
-                    role: it.isIsolation ? 'isolation' : 'compound',
-                    targetReps: it.isIsolation ? 8 : 5,
-                    restSec: it.isIsolation ? 120 : 240
-                };
-            }).filter(Boolean);
-            return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items, source: 'custom' };
-        }
         if (locked?.exercisesConfirmed && Array.isArray(locked.lockedItems) && locked.lockedItems.length) {
             const compoundSets = strengthSetsForTier(tier, 'compound');
             const items = locked.lockedItems
@@ -491,7 +469,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
                     return {
                         name,
                         slotLabel: it.slotLabel || null,
-                        notes: it.note || it.notes || 'Confirmed for this month',
+                        notes: it.note || it.notes || 'Confirmed',
                         sets: workSets.length || it.plannedSets || compoundSets,
                         setsOverride: workSets.length || it.plannedSets || compoundSets,
                         isIsolation: !!it.isIsolation,
@@ -517,7 +495,30 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
                     restSec: 60
                 });
             });
-            return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items, source: 'confirmed' };
+            return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items: avoidLockedMuscleOnItems(items), source: locked.source === 'custom' ? 'custom' : 'confirmed' };
+        }
+        if (locked?.source === 'custom' && Array.isArray(locked.items) && locked.items.length) {
+            const compoundSets = strengthSetsForTier(tier, 'compound');
+            const items = locked.items.map((it) => {
+                const name = it.exercise?.name || it.name;
+                if (!name) return null;
+                if (it.isWarmupGroup || it.isStretchGroup || it.isSportSessionBlock) return null;
+                const workSets = (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText);
+                return {
+                    name,
+                    slotLabel: it.slotLabel || 'Custom',
+                    notes: 'Custom cycle workout',
+                    sets: workSets.length || it.plannedSets || compoundSets,
+                    setsOverride: workSets.length || it.plannedSets || compoundSets,
+                    isIsolation: !!it.isIsolation,
+                    isExtra: !!it.isExtra,
+                    isStrengthCompound: !it.isIsolation,
+                    role: it.isIsolation ? 'isolation' : 'compound',
+                    targetReps: it.isIsolation ? 8 : 5,
+                    restSec: it.isIsolation ? 120 : 240
+                };
+            }).filter(Boolean);
+            return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items: avoidLockedMuscleOnItems(items), source: 'custom' };
         }
     } catch (e) { /* generated path */ }
 
@@ -532,12 +533,21 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
     const coreSets = includeCore ? strengthSetsForTier(tier, 'core') : 0;
 
     const items = [];
+    const usedNames = new Set();
     slotIds.forEach((slotId) => {
         const meta = STRENGTH_COMPOUND_SLOTS[slotId];
         if (!meta) return;
-        const name = resolveProgrammedBwName(
+        let name = resolveProgrammedBwName(
             (plan.compoundPicks && plan.compoundPicks[slotId]) || pickCompoundForSlot(slotId)
         );
+        if (isExerciseMuscleLocked(name)) {
+            const pool = compoundPoolForSlot(slotId)
+                .map((n) => resolveProgrammedBwName(n))
+                .filter((n) => n && !usedNames.has(n) && !isExerciseMuscleLocked(n));
+            if (!pool.length) return;
+            name = pool[Math.floor(Math.random() * pool.length)];
+        }
+        usedNames.add(name);
         items.push({
             name,
             slotLabel: meta.label,
@@ -552,8 +562,18 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
 
     const sessionIsos = (plan.isolations || []).filter(iso => iso.session === session);
     sessionIsos.forEach((iso) => {
+        let name = resolveProgrammedBwName(iso.name);
+        if (isExerciseMuscleLocked(name)) {
+            const poolName = ISO_POOL_BY_MUSCLE[iso.muscleKey];
+            const pool = (HYPERTROPHY_POOLS[poolName] || [])
+                .map((n) => resolveProgrammedBwName(n))
+                .filter((n) => n && !usedNames.has(n) && !isExerciseMuscleLocked(n));
+            if (!pool.length) return;
+            name = pool[Math.floor(Math.random() * pool.length)];
+        }
+        usedNames.add(name);
         items.push({
-            name: resolveProgrammedBwName(iso.name),
+            name,
             slotLabel: `Isolation · ${iso.muscleKey}`,
             notes: `Session ${session} · Isolation · ${isoSets}×8 (6–10) · 2 min rest`,
             sets: isoSets,

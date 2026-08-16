@@ -14,14 +14,16 @@ const HIT_TYPE_LABELS_RE = new RegExp(
 );
 import { saveSettings } from '../domain/thermodynamics.js';
 import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, canSupersetPair, createSupersetFromIndices, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
-import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase } from '../domain/hypertrophy-engine.js';
+import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase, sessionAppliesMuscleLockout } from '../domain/hypertrophy-engine.js';
 import {
     allowsWeightInput,
     catalogLoadOptions,
     equipmentChoiceFromItem,
     expandLoadChoices,
+    increaseLoadOneStep,
     resolveLoadProfile,
-    roundUpLoad
+    roundUpLoad,
+    skipsWeightProgression
 } from '../domain/load-increments.js';
 import { switchCableEquipment } from './equipment-ui.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
@@ -33,11 +35,20 @@ import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, rende
 import { calculateTDEE } from '../domain/thermodynamics.js';
 import { notifyRestTimerDone, ensureNotificationPermission } from './notifications.js';
 import {
+    holdAudioAlive,
+    playRestAlarmSound,
+    pokeAudioAlive,
+    releaseAllAudioHolds,
+    releaseAudioAlive,
+    unlockAudio
+} from './audio.js';
+import {
     currentStretchStep,
     ensurePlannedStretchSetsShape,
     getStretchTimerState,
     isPlannedTimedStretchItem,
     remainingStretchStepSeconds,
+    resetStretchAudioHold,
     startStretchTimer,
     stretchSetBaseName,
     stretchSetLabel,
@@ -50,15 +61,19 @@ import { openAddExercisesModal } from './add-exercises-modal.js';
 import {
     clearWorkoutDraft,
     draftMatchesPlanEvent,
+    findActiveRestOnItems,
     getDraftRunningElapsedMs,
     getDraftSessionLabel,
     hasWorkoutDraft,
     hasWorkoutDraftKey,
     loadWorkoutDraft,
-    saveWorkoutDraft
+    remainingRestSecondsFromSet,
+    saveWorkoutDraft,
+    writeWorkoutDraft
 } from '../domain/workout-draft.js';
 import {
     formatDurationMs,
+    getExerciseDurationMs,
     getWorkoutElapsedMs,
     resetWorkoutTimer,
     setWorkoutElapsedMs,
@@ -67,17 +82,26 @@ import {
     stopWorkoutTimerDetailed,
     armWorkoutTimer,
     ensureWorkoutTimerStarted,
-    isWorkoutTimerRunning
+    isExerciseTimerRunning,
+    isWorkoutTimerRunning,
+    itemUsesExerciseTimer,
+    setWorkoutTimerTickHandler,
+    syncExerciseTimer,
+    freezeOpenExerciseTimers
 } from './workout-timer.js';
 
 /** Read editable duration field (edit-workout mode) into frozen session duration. */
 function syncEditDurationFromInput() {
+    if (!window._editingPreservedDuration) return;
     const input = document.getElementById('workout-edit-duration-min');
     if (!input) return;
     const mins = Math.max(0, Math.round(Number(input.value) || 0));
     window._lastSessionDurationMin = mins;
     window._loggedSessionDurationMs = mins > 0 ? mins * 60000 : 0;
     window._loggedSessionDurationLabel = mins > 0 ? formatDurationMs(mins * 60000) : '00:00';
+    setWorkoutElapsedMs(window._loggedSessionDurationMs);
+    const exIdx = window.currentModalExIdx;
+    if (exIdx != null) updateCardioPaceReadout(exIdx, 0);
 }
 
 /** Show frozen, editable duration instead of a running timer (edit workout). */
@@ -139,6 +163,7 @@ function clearEditableSessionDurationUi() {
 
 /** Freeze the session timer when Complete log is pressed (before diary). */
 function captureSessionTimerAtLog() {
+    try { freezeOpenExerciseTimers(store.activeLog?.items); } catch (e) { /* ignore */ }
     syncEditDurationFromInput();
     if (window._editingPreservedDuration || window._loggedSessionDurationMs > 0 || window._lastSessionDurationMin > 0) {
         return {
@@ -183,7 +208,10 @@ export function calculatePlates(targetWeight = null) {
 export function renderWorkoutLog() {
     const focus = getTodayFocus();
     const { footerNote, showCoachTip } = getWorkoutSessionAdvice(focus);
-    let html = '';
+    const rest = findActiveRestOnItems(store.activeLog?.items);
+    let html = rest
+        ? `<div id="workout-log-rest-timer" class="session-rest-timer">${restBannerInnerHtml(rest, { withControls: true })}</div>`
+        : `<div id="workout-log-rest-timer" class="session-rest-timer hidden"></div>`;
 
     if (footerNote || showCoachTip) {
         html += `<div style="margin-bottom:12px;">`;
@@ -341,7 +369,7 @@ export function renderWorkoutLog() {
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
                     <div class="workout-title" style="color:var(--text-main); margin-bottom:4px; font-size: 15px;">${displayName}${checkIcon}</div>
-                    <div ${(item.isStretchGroup || isStaticStretchingLogItem(item)) && !item.isCustomStretch ? `id="stretch-card-sub-${exIdx}"` : ''} style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${subtitle}</div>
+                    <div ${(item.isStretchGroup || isStaticStretchingLogItem(item)) && !item.isCustomStretch ? `id="stretch-card-sub-${exIdx}"` : ''} style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${subtitle}${exerciseCardTimerHtml(item, exIdx)}</div>
                 </div>
                 <button class="btn-primary is-primary" style="width:auto; margin:0; padding:10px 20px; font-size:12px;" onclick="window.beginExerciseLog(${exIdx})">${isAllCompleted ? 'Edit' : 'Log'}</button>
             </div>
@@ -361,6 +389,7 @@ export function renderWorkoutLog() {
     }
     
     document.getElementById('active-log-list').innerHTML = html;
+    syncGlobalRestBanners();
 }
 
 function isWorkoutItemFullyLogged(item) {
@@ -662,7 +691,22 @@ function maybeFixStaleWarmupLoads(item) {
 
 /** Steady duration always comes from the session timer (minutes, floored by rounding). */
 function getTimerDurationMinutes() {
-    return Math.max(0, Math.round(getWorkoutElapsedMs() / 60000));
+    return Math.max(0, Math.round(getCardioElapsedMs() / 60000));
+}
+
+/** Fractional minutes for live pace — whole-minute rounding left the readout blank for ~30s. */
+function getCardioElapsedMs() {
+    if (window._editingPreservedDuration) {
+        const edited = Number(window._loggedSessionDurationMs);
+        if (Number.isFinite(edited) && edited > 0) return edited;
+        const mins = Number(window._lastSessionDurationMin);
+        if (Number.isFinite(mins) && mins > 0) return mins * 60000;
+    }
+    return Math.max(0, getWorkoutElapsedMs());
+}
+
+function getTimerElapsedMinutesPrecise() {
+    return getCardioElapsedMs() / 60000;
 }
 
 function applyTimerDurationToSteadyItem(item) {
@@ -773,10 +817,11 @@ function lactateRestSlotHtml(item, exIdx) {
     const sets = item.sets || [];
     const locked = sets.find(s => s.locked && remainingRestSeconds(s) > 0);
     if (locked) {
+        const lockIdx = sets.indexOf(locked);
         return `<div id="lactate-rest-slot-${exIdx}" style="width:100%; margin-top:10px; padding:10px 12px; border-radius:6px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
             <div style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px;">Rest timer</div>
-            <div style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${remainingRestSeconds(locked)}s</div>
-            ${restOverrideButtonsHtml(exIdx, sets.indexOf(locked), { include60: false })}
+            <div data-rest-countdown="${exIdx}-${lockIdx}" style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${remainingRestSeconds(locked)}s</div>
+            ${restOverrideButtonsHtml(exIdx, lockIdx, { include60: false })}
         </div>`;
     }
     // Also show rest targeting the next lactate exercise (mixed modalities)
@@ -787,7 +832,7 @@ function lactateRestSlotHtml(item, exIdx) {
             const nIdx = (nextItem.sets || []).indexOf(nextLocked);
             return `<div id="lactate-rest-slot-${exIdx}" style="width:100%; margin-top:10px; padding:10px 12px; border-radius:6px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
                 <div style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px;">Rest before next interval</div>
-                <div style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${remainingRestSeconds(nextLocked)}s</div>
+                <div data-rest-countdown="${exIdx + 1}-${nIdx}" style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${remainingRestSeconds(nextLocked)}s</div>
                 ${restOverrideButtonsHtml(exIdx + 1, nIdx, { include60: false })}
             </div>`;
         }
@@ -796,9 +841,117 @@ function lactateRestSlotHtml(item, exIdx) {
 }
 
 function remainingRestSeconds(setObj) {
-    if (!setObj) return 0;
-    if (setObj.lockEndsAt) return Math.max(0, Math.ceil((setObj.lockEndsAt - Date.now()) / 1000));
-    return Math.max(0, Math.round(Number(setObj.lockTimeLeft) || 0));
+    return remainingRestSecondsFromSet(setObj);
+}
+
+function liveOrDraftRestItems() {
+    if (store.activeLog?.type === 'workout' && (store.activeLog.items || []).length) {
+        return store.activeLog.items;
+    }
+    return loadWorkoutDraft()?.items || [];
+}
+
+function findActiveRest() {
+    return findActiveRestOnItems(liveOrDraftRestItems());
+}
+
+function restBannerInnerHtml(rest, { withControls = false, compact = false } = {}) {
+    if (!rest) return '';
+    const name = String(rest.name || '').replace(/</g, '&lt;');
+    const sub = name ? ` · ${name}` : '';
+    const controls = withControls ? restOverrideButtonsHtml(rest.exIdx, rest.setIdx, { include60: false }) : '';
+    if (compact) {
+        return `<span class="workout-timer-label">Rest</span>
+            <span data-rest-countdown="${rest.exIdx}-${rest.setIdx}" class="workout-header-rest-count">${rest.left}s</span>`;
+    }
+    return `<div class="session-rest-timer-label">Rest timer${sub}</div>
+        <div data-rest-countdown="${rest.exIdx}-${rest.setIdx}" class="session-rest-timer-count">${rest.left}s</div>
+        ${controls}`;
+}
+
+function fillRestSlot(el, rest, opts) {
+    if (!el) return;
+    if (!rest) {
+        el.innerHTML = '';
+        el.classList.add('hidden');
+        return;
+    }
+    el.classList.remove('hidden');
+    const existing = el.querySelector(`[data-rest-countdown="${rest.exIdx}-${rest.setIdx}"]`);
+    if (existing) {
+        existing.textContent = `${rest.left}s`;
+        return;
+    }
+    el.innerHTML = restBannerInnerHtml(rest, opts);
+}
+
+/** Keep Plan + workout-list rest banners in sync with the live/draft countdown. */
+export function syncGlobalRestBanners() {
+    const rest = findActiveRest();
+    fillRestSlot(document.getElementById('workout-header-rest-timer'), rest, { compact: true });
+    fillRestSlot(document.getElementById('workout-log-rest-timer'), rest, { withControls: !!store.activeLog?.items?.length });
+    fillRestSlot(document.getElementById('plan-rest-timer-slot'), rest, { withControls: false });
+    ensureDraftRestDisplayTicker();
+}
+
+let _draftRestTicker = null;
+
+function stopDraftRestDisplayTicker() {
+    if (_draftRestTicker) {
+        clearInterval(_draftRestTicker);
+        _draftRestTicker = null;
+    }
+}
+
+function expireDraftRests() {
+    const draft = loadWorkoutDraft();
+    if (!draft?.items) return false;
+    let expired = false;
+    draft.items.forEach((item) => {
+        (item.sets || []).forEach((set) => {
+            if (!set?.locked) return;
+            if (remainingRestSecondsFromSet(set) > 0) return;
+            set.locked = false;
+            set.lockTimeLeft = 0;
+            delete set.lockEndsAt;
+            delete set.lockAlarmFired;
+            expired = true;
+        });
+    });
+    if (!expired) return false;
+    writeWorkoutDraft(draft);
+    playRestAlarm();
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+    return true;
+}
+
+function ensureDraftRestDisplayTicker() {
+    const live = store.activeLog?.type === 'workout' && (store.activeLog.items || []).length;
+    if (live) {
+        stopDraftRestDisplayTicker();
+        return;
+    }
+    const rest = findActiveRestOnItems(loadWorkoutDraft()?.items);
+    if (!rest) {
+        stopDraftRestDisplayTicker();
+        return;
+    }
+    if (_draftRestTicker) return;
+    _draftRestTicker = setInterval(() => {
+        if (expireDraftRests()) {
+            stopDraftRestDisplayTicker();
+            syncGlobalRestBanners();
+            try { getTodayFocus(); } catch (e) { /* refresh Plan card */ }
+            return;
+        }
+        const next = findActiveRestOnItems(loadWorkoutDraft()?.items);
+        if (!next) {
+            stopDraftRestDisplayTicker();
+            syncGlobalRestBanners();
+            return;
+        }
+        updateRestCountdownDom(next.exIdx, next.setIdx, next.left);
+    }, 250);
 }
 
 function clearRestInterval(exIdx, setIdx) {
@@ -809,41 +962,105 @@ function clearRestInterval(exIdx, setIdx) {
     }
 }
 
+function clearAllRestIntervals() {
+    Object.keys(store.restIntervals || {}).forEach(key => {
+        try { clearInterval(store.restIntervals[key]); } catch (e) { /* ignore */ }
+        delete store.restIntervals[key];
+    });
+}
+
+function releaseSetRestAudio(setObj) {
+    if (!setObj?._restAudioHeld) return;
+    delete setObj._restAudioHeld;
+    try { releaseAudioAlive(); } catch (e) { /* ignore */ }
+}
+
+function holdSetRestAudio(setObj) {
+    if (!setObj || setObj._restAudioHeld) return;
+    setObj._restAudioHeld = true;
+    try { holdAudioAlive(); } catch (e) { /* ignore */ }
+}
+
+function updateRestCountdownDom(exIdx, setIdx, left) {
+    const label = `${left}s`;
+    const btn = document.getElementById(`btn-check-${exIdx}-${setIdx}`);
+    if (btn) btn.innerText = label;
+    document.querySelectorAll(`[data-rest-countdown="${exIdx}-${setIdx}"]`).forEach(el => {
+        el.textContent = label;
+    });
+}
+
 function unlockRestSilent(setObj, exIdx, setIdx) {
     clearRestInterval(exIdx, setIdx);
+    releaseSetRestAudio(setObj);
     setObj.locked = false;
     setObj.lockTimeLeft = 0;
     delete setObj.lockEndsAt;
     delete setObj.lockAlarmFired;
+    syncGlobalRestBanners();
 }
 
-function finishRestNaturally(exIdx, setIdx) {
-    const setObj = store.activeLog?.items?.[exIdx]?.sets?.[setIdx];
-    if (!setObj) return;
-    if (setObj.lockAlarmFired) return;
-    setObj.lockAlarmFired = true;
-    unlockRestSilent(setObj, exIdx, setIdx);
+function finishRestNaturally(exIdx, setIdx, setHint) {
+    const setObj = setHint || store.activeLog?.items?.[exIdx]?.sets?.[setIdx];
+    if (setObj?.lockAlarmFired) return;
+    if (setObj) setObj.lockAlarmFired = true;
+    if (setObj) {
+        clearRestInterval(exIdx, setIdx);
+        releaseSetRestAudio(setObj);
+        setObj.locked = false;
+        setObj.lockTimeLeft = 0;
+        delete setObj.lockEndsAt;
+    } else {
+        clearRestInterval(exIdx, setIdx);
+    }
     playRestAlarm();
     if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) renderExerciseSets();
     else renderWorkoutLog();
+    syncGlobalRestBanners();
 }
 
-/** Sync wall-clock rest deadlines (critical after backgrounding). */
+function armRestTicker(exIdx, setIdx, target) {
+    clearRestInterval(exIdx, setIdx);
+    const tick = () => {
+        const live = store.activeLog?.items?.[exIdx]?.sets?.[setIdx] || target;
+        if (!live || !live.locked) {
+            clearRestInterval(exIdx, setIdx);
+            return;
+        }
+        const left = remainingRestSeconds(live);
+        live.lockTimeLeft = left;
+        if (live.locked) updateRestCountdownDom(exIdx, setIdx, left);
+        if (left <= 0) finishRestNaturally(exIdx, setIdx, live);
+    };
+    store.restIntervals[`${exIdx}-${setIdx}`] = setInterval(tick, 250);
+    tick();
+}
+
+/** Sync wall-clock rest deadlines (critical after backgrounding) and re-arm missing tickers. */
 export function syncRestTimersFromWallClock() {
+    restartRestTimersFromState();
+    syncGlobalRestBanners();
+}
+
+export function restartRestTimersFromState() {
+    try { pokeAudioAlive(); } catch (e) { /* ignore */ }
     const items = store.activeLog?.items || [];
     let changed = false;
     items.forEach((item, exIdx) => {
         (item.sets || []).forEach((set, setIdx) => {
             if (!set || !set.locked) return;
+            if (!set.lockEndsAt && Number(set.lockTimeLeft) > 0) {
+                set.lockEndsAt = Date.now() + Math.round(Number(set.lockTimeLeft)) * 1000;
+            }
             const left = remainingRestSeconds(set);
             set.lockTimeLeft = left;
             if (left <= 0) {
-                finishRestNaturally(exIdx, setIdx);
+                finishRestNaturally(exIdx, setIdx, set);
                 changed = true;
             } else {
-                const btn = document.getElementById(`btn-check-${exIdx}-${setIdx}`);
-                if (btn) btn.innerText = left + 's';
+                holdSetRestAudio(set);
+                armRestTicker(exIdx, setIdx, set);
             }
         });
     });
@@ -851,6 +1068,7 @@ export function syncRestTimersFromWallClock() {
         if (window.currentModalExIdx != null) renderExerciseSets();
         else renderWorkoutLog();
     }
+    syncGlobalRestBanners();
 }
 
 function startRestOnSet(exIdx, setIdx, restSec) {
@@ -862,25 +1080,11 @@ function startRestOnSet(exIdx, setIdx, restSec) {
     target.lockEndsAt = Date.now() + duration * 1000;
     target.lockTimeLeft = duration;
     delete target.lockAlarmFired;
-    clearRestInterval(exIdx, setIdx);
+    try { unlockAudio(); } catch (e) { /* ignore */ }
     try { ensureNotificationPermission(); } catch (e) { /* ignore */ }
-
-    const tick = () => {
-        if (!target.locked) {
-            clearRestInterval(exIdx, setIdx);
-            return;
-        }
-        const left = remainingRestSeconds(target);
-        target.lockTimeLeft = left;
-        const btn = document.getElementById(`btn-check-${exIdx}-${setIdx}`);
-        if (btn && target.locked) btn.innerText = left + 's';
-        if (window.currentModalExIdx == null) renderWorkoutLog();
-        if (left <= 0) {
-            finishRestNaturally(exIdx, setIdx);
-        }
-    };
-    store.restIntervals[`${exIdx}-${setIdx}`] = setInterval(tick, 250);
-    tick();
+    holdSetRestAudio(target);
+    armRestTicker(exIdx, setIdx, target);
+    syncGlobalRestBanners();
 }
 
 function formatCardioPace(distanceKm, timeMinutes) {
@@ -892,27 +1096,75 @@ function formatCardioPace(distanceKm, timeMinutes) {
 export function formatCardioPaceMsOnly(distanceKm, timeMinutes) {
     const dist = Number(distanceKm) || 0;
     const mins = Number(timeMinutes) || 0;
-    if (!(dist > 0) || !(mins > 0)) return null;
+    if (!(dist > 0) || !(mins >= 1 / 60)) return null;
     // distance (km) ÷ duration (hours) → km/h, then → m/s
     const ms = (dist / (mins / 60)) / 3.6;
+    if (!Number.isFinite(ms)) return null;
     return `${ms.toFixed(2)} m/s`;
 }
 
 export function updateCardioPaceReadout(exIdx, setIdx) {
     const el = document.getElementById(`cardio-pace-${exIdx}-${setIdx}`);
-    if (!el) return;
+    const durEl = document.getElementById(`cardio-timer-duration-${exIdx}-${setIdx}`);
+    if (!el && !durEl) return;
     const item = store.activeLog.items?.[exIdx];
     const set = item?.sets?.[setIdx];
     if (!set) return;
-    const mins = isSteadyCardioLogItem(item) ? getTimerDurationMinutes() : set.time_minutes;
-    el.innerText = formatCardioPace(set.distance_km, mins);
-    const durEl = document.getElementById(`cardio-timer-duration-${exIdx}-${setIdx}`);
-    if (durEl && isSteadyCardioLogItem(item)) {
+    const steady = isSteadyCardioLogItem(item);
+    if (steady) applyTimerDurationToSteadyItem(item);
+    const mins = steady ? getTimerElapsedMinutesPrecise() : Number(set.time_minutes) || 0;
+    if (el) el.innerText = formatCardioPace(set.distance_km, mins);
+    if (durEl && steady) {
+        const elapsedMs = getCardioElapsedMs();
         const timerMins = getTimerDurationMinutes();
-        const timerLabel = formatDurationMs(getWorkoutElapsedMs());
+        const timerLabel = formatDurationMs(elapsedMs);
         durEl.textContent = `${timerLabel}${timerMins > 0 ? ` · ${timerMins} min` : ''}`;
     }
 }
+
+function isEditingLoggedSession() {
+    return !!(window.editingSessionId || window._editingPreservedDuration);
+}
+
+function refreshExerciseTimerDisplays() {
+    document.querySelectorAll('[data-exercise-timer]').forEach(el => {
+        const idx = Number(el.getAttribute('data-exercise-timer'));
+        const item = store.activeLog?.items?.[idx];
+        if (!item) return;
+        const ms = getExerciseDurationMs(item);
+        const running = isExerciseTimerRunning(item);
+        if (!(ms > 0) && !item.exerciseTimerStartedAt) return;
+        el.textContent = formatDurationMs(ms);
+        el.classList.toggle('is-running', running);
+    });
+}
+
+function exerciseTimerBannerHtml(item, exIdx) {
+    if (!itemUsesExerciseTimer(item)) return '';
+    const ms = getExerciseDurationMs(item);
+    const running = isExerciseTimerRunning(item);
+    const label = running ? 'Exercise time' : (item.exerciseTimerEndedAt ? 'Time on exercise' : 'Exercise time');
+    return `<div class="exercise-set-timer-wrap">
+        <span class="workout-timer-label">${label}</span>
+        <span id="exercise-set-timer" class="exercise-set-timer${running ? ' is-running' : ''}" data-exercise-timer="${exIdx}">${formatDurationMs(ms)}</span>
+    </div>`;
+}
+
+function exerciseCardTimerHtml(item, exIdx) {
+    if (!itemUsesExerciseTimer(item)) return '';
+    if (!item.exerciseTimerStartedAt && !(Number(item.exerciseDurationMs) > 0)) return '';
+    const running = isExerciseTimerRunning(item);
+    return ` · <span data-exercise-timer="${exIdx}" class="exercise-card-timer${running ? ' is-running' : ''}">${formatDurationMs(getExerciseDurationMs(item))}</span>`;
+}
+
+setWorkoutTimerTickHandler(() => {
+    refreshExerciseTimerDisplays();
+    const exIdx = window.currentModalExIdx;
+    if (exIdx == null) return;
+    const item = store.activeLog?.items?.[exIdx];
+    if (!isSteadyCardioLogItem(item) || !item.cardioTypeChosen) return;
+    updateCardioPaceReadout(exIdx, 0);
+});
 
 export async function drawModalExerciseChart(exerciseName, hideChart = false) {
     const wrap = document.getElementById('sets-modal-progress-wrap');
@@ -1285,13 +1537,18 @@ export function renderExerciseSets() {
 
     // Strength core circuit: Set 1 / Set 2 → expand to 5 exercises with form videos
     if (item.isCoreBlock) {
-        let html = `<div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:16px; line-height:1.45;">
+        let html = exerciseTimerBannerHtml(item, exIdx);
+        html += `<div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:16px; line-height:1.45;">
             5 exercises with advised reps. No rest between exercises. 1 minute rest between sets.
         </div>`;
         item.sets.forEach((set, setIdx) => {
             const kids = Array.isArray(set.children) ? set.children : [];
             const expanded = !!set._uiExpanded;
             const chevron = expanded ? '−' : '+';
+            const lockOutClass = set.locked ? 'locked disabled' : '';
+            const restLeft = remainingRestSeconds(set);
+            const btnText = restLeft > 0 ? `${restLeft}s` : (set.completed ? '✓' : '');
+            const overridesHtml = set.locked ? restOverrideButtonsHtml(exIdx, setIdx, { include60: false }) : '';
             html += `<div style="display:flex; flex-direction:column; margin-bottom:14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
                     <button type="button" onclick="togglePrepPartExpand(${exIdx}, ${setIdx})"
@@ -1302,8 +1559,9 @@ export function renderExerciseSets() {
                         </div>
                         <div style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:4px;">${set.reps || '5 exercises · advised reps'}</div>
                     </button>
-                    <div class="check-btn ${set.completed ? 'completed' : ''}" style="flex-shrink:0;" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${set.completed ? '✓' : ''}</div>
-                </div>`;
+                    <div class="check-btn ${set.completed ? 'completed' : ''} ${lockOutClass}" id="btn-check-${exIdx}-${setIdx}" style="flex-shrink:0;" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${setIdx})">${btnText}</div>
+                </div>
+                ${overridesHtml}`;
             if (expanded) {
                 html += `<div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">`;
                 kids.forEach((child, cIdx) => {
@@ -1413,7 +1671,8 @@ export function renderExerciseSets() {
             return;
         }
 
-        let html = `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">Hit each interval’s <strong style="color:var(--text-main);">target intensity</strong> for the work time. Rest starts automatically.</div>`;
+        let html = exerciseTimerBannerHtml(item, exIdx);
+        html += `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">Hit each interval’s <strong style="color:var(--text-main);">target intensity</strong> for the work time. Rest starts automatically.</div>`;
         html += `<div class="set-header" style="margin-top:8px;"><div style="width:25px;">SET</div><div style="flex:1;text-align:center;">WORK</div><div style="flex:1;text-align:center; color:var(--text-muted);">REST</div><div style="width:48px;"></div></div>`;
         item.sets.forEach((set, setIdx) => {
             const dur = set.duration_sec != null ? set.duration_sec : (parseInt(set.reps, 10) || 30);
@@ -1595,7 +1854,8 @@ export function renderExerciseSets() {
     const isCableChoice = loadChoices.includes('Fca') || loadChoices.includes('Cca');
     const currentCable = equipmentChoiceFromItem(item) === 'Cca' ? 'Cca' : 'Fca';
 
-    let html = `
+    let html = exerciseTimerBannerHtml(item, exIdx);
+    html += `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
             <button onclick="openVideoModal('${item.exercise.name}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); padding:6px 10px; border-radius:4px; color:var(--text-silver); font-size:10px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:4px;">🎥 FORM VIDEO</button>
             ${isBarbell ? `<button onclick="document.getElementById('plate-calculator-modal').classList.remove('hidden')" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--gold-accent); font-size:10px; padding:6px 10px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer; font-weight:bold;">[PLATES]</button>` : ''}
@@ -1632,7 +1892,8 @@ export function renderExerciseSets() {
         const set = item.sets[0] || { distance_km: 0, time_minutes: 0, completed: false };
         const setIdx = 0;
         const timerMins = getTimerDurationMinutes();
-        const timerLabel = formatDurationMs(getWorkoutElapsedMs());
+        const elapsedMs = getCardioElapsedMs();
+        const timerLabel = formatDurationMs(elapsedMs);
 
         let borderClass = 'prog-same';
         if (set.distance_km > (set.prevDist || 0)) borderClass = 'prog-up';
@@ -1645,7 +1906,7 @@ export function renderExerciseSets() {
             overridesHtml = restOverrideButtonsHtml(exIdx, setIdx, { include60: true });
         }
 
-        const paceText = formatCardioPace(set.distance_km, timerMins);
+        const paceText = formatCardioPace(set.distance_km, getTimerElapsedMinutesPrecise());
         html += `<div style="display:flex; flex-direction:column; margin-bottom:8px; gap:10px;">
             <div style="display:flex; justify-content:flex-end; align-items:center;">
                 <div style="text-align:center;">
@@ -2028,54 +2289,70 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
         }
         updateCardioPaceReadout(exIdx, setIdx);
     }
+    if (field === 'rpe' && setObj?.completed && maybeIncreaseLoadAfterEasyRir(exIdx, setIdx)) {
+        if (window.currentModalExIdx != null) renderExerciseSets();
+    }
     if (field === 'duration_sec' && window.currentModalExIdx != null) renderExerciseSets();
     if (window._workoutSessionConfirmed) saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
     calculateLiveFitnessScores();
 }
 
+function loggedSetRir(setObj) {
+    const raw = setObj?.rpe;
+    if (raw === '' || raw === undefined || raw === null) return 2;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : 2;
+}
+
+/**
+ * RIR ≥ 5 on a working set → raise remaining incomplete working sets by one increment.
+ * Same-side only for supersets. Skip warmups, drops, cardio, and no-load movements.
+ */
+function maybeIncreaseLoadAfterEasyRir(exIdx, setIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    const setObj = item?.sets?.[setIdx];
+    if (!item || !setObj || !setObj.completed) return false;
+    if (setObj.isWarmup || setObj.isText || setObj.isDropSet || setObj.isLactateHit) return false;
+    if (setObj._easyRirProgressed) return false;
+    if (loggedSetRir(setObj) < 5) return false;
+
+    const currentW = Number(setObj.weight) || 0;
+    if (currentW <= 0) return false;
+
+    const exName = item.isSuperset
+        ? ((item.sides || []).find(s => s.key === setObj.side)?.exercise?.name || '')
+        : (item.exercise?.name || item.name || '');
+    if (!exName) return false;
+    if (skipsWeightProgression(exName, equipmentChoiceFromItem(item))) return false;
+
+    const nextW = increaseLoadOneStep(currentW, exName, equipmentChoiceFromItem(item));
+    if (!(nextW > currentW)) return false;
+
+    let bumped = false;
+    (item.sets || []).forEach((s, i) => {
+        if (i <= setIdx || !s || s.completed) return;
+        if (s.isWarmup || s.isText || s.isDropSet || s.isLactateHit) return;
+        if (item.isSuperset && s.side !== setObj.side) return;
+        const w = Number(s.weight) || 0;
+        if (w <= currentW) {
+            s.weight = nextW;
+            bumped = true;
+        }
+    });
+    if (bumped) setObj._easyRirProgressed = true;
+    return bumped;
+}
+
 /** Short multi-tone alarm when a rest timer finishes (plays 3 times, louder) */
 export function playRestAlarm() {
-    try { notifyRestTimerDone(); } catch (e) { /* ignore */ }
-    try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        if (!window._ascensusAudioCtx) window._ascensusAudioCtx = new AudioCtx();
-        const ctx = window._ascensusAudioCtx;
-        if (ctx.state === 'suspended') ctx.resume();
-
-        const pattern = [
-            { freq: 880, offset: 0, dur: 0.16 },
-            { freq: 1174.7, offset: 0.18, dur: 0.16 },
-            { freq: 1318.5, offset: 0.36, dur: 0.22 }
-        ];
-        const cycleLen = 0.75; // gap between repeats
-        const repeats = 3;
-        const peak = 0.55; // louder than before (~0.22)
-        const now = ctx.currentTime;
-
-        for (let r = 0; r < repeats; r++) {
-            const base = now + r * cycleLen;
-            pattern.forEach(t => {
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.type = 'square'; // more piercing / audible on phone speakers
-                osc.frequency.value = t.freq;
-                const start = base + t.offset;
-                gain.gain.setValueAtTime(0.0001, start);
-                gain.gain.exponentialRampToValueAtTime(peak, start + 0.015);
-                gain.gain.exponentialRampToValueAtTime(0.0001, start + t.dur);
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.start(start);
-                osc.stop(start + t.dur + 0.02);
-            });
-        }
-    } catch (e) {
+    try { playRestAlarmSound(); } catch (e) {
         console.warn("Rest alarm unavailable:", e);
     }
+    try { notifyRestTimerDone(); } catch (e) { /* ignore */ }
 }
 
 export function toggleSetComplete(exIdx, setIdx) { 
+    try { unlockAudio(); } catch (e) { /* ignore */ }
     let setObj = store.activeLog.items[exIdx].sets[setIdx];
     if (setObj.locked) return;
     const itemGate = store.activeLog.items[exIdx];
@@ -2086,6 +2363,11 @@ export function toggleSetComplete(exIdx, setIdx) {
     if (setObj.completed && navigator.vibrate) navigator.vibrate([50]); 
     
     const item = store.activeLog.items[exIdx];
+    try { syncExerciseTimer(item, { editing: isEditingLoggedSession() }); } catch (e) { /* ignore */ }
+    if (!isEditingLoggedSession() && isExerciseTimerRunning(item) && !isWorkoutTimerRunning()) {
+        try { ensureWorkoutTimerStarted(); } catch (e) { /* ignore */ }
+    }
+    if (setObj.completed) maybeIncreaseLoadAfterEasyRir(exIdx, setIdx);
     if (setObj.completed && !setObj.isWarmup && !setObj.isText) {
         const retireName = item.isSuperset
             ? ((item.sides || []).find(s => s.key === setObj.side)?.exercise?.name)
@@ -2125,11 +2407,7 @@ export function toggleSetComplete(exIdx, setIdx) {
         } else if (setObj.side === 'A') {
             // No rest between A and B — unlock the partner set immediately
             const next = item.sets[setIdx + 1];
-            if (next) {
-                next.locked = false;
-                delete next.lockTimeLeft;
-                try { clearInterval(store.restIntervals[`${exIdx}-${setIdx + 1}`]); } catch (e) { /* ignore */ }
-            }
+            if (next) unlockRestSilent(next, exIdx, setIdx + 1);
         } else if (setObj.side === 'B') {
             let partnerA = null;
             if (!setObj.isDropSet && setObj.round) {
@@ -2166,8 +2444,7 @@ export function toggleSetComplete(exIdx, setIdx) {
         startRestOnSet(exIdx, setIdx + 1, baseRest);
     } else if (!setObj.completed) {
         if (item.sets[setIdx + 1]) {
-            item.sets[setIdx + 1].locked = false;
-            clearInterval(store.restIntervals[`${exIdx}-${setIdx+1}`]);
+            unlockRestSilent(item.sets[setIdx + 1], exIdx, setIdx + 1);
         }
         // Clear cross-exercise lactate rest if unchecking
         if (isLactate) {
@@ -2175,10 +2452,7 @@ export function toggleSetComplete(exIdx, setIdx) {
                 const nxt = store.activeLog.items[j];
                 if (!isLactateHitLogItem(nxt)) break;
                 (nxt.sets || []).forEach((s, si) => {
-                    if (s.locked) {
-                        s.locked = false;
-                        clearInterval(store.restIntervals[`${j}-${si}`]);
-                    }
+                    if (s.locked) unlockRestSilent(s, j, si);
                 });
                 break;
             }
@@ -2189,11 +2463,13 @@ export function toggleSetComplete(exIdx, setIdx) {
     else renderActiveLog(); 
 
     if (window._workoutSessionConfirmed) saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
-    
+    if (window._workoutSessionConfirmed) setConfirmRouteButtons(true);
+
     calculateLiveFitnessScores();
 }
 
 export function overrideRest(exIdx, setIdx, seconds) {
+    try { unlockAudio(); } catch (e) { /* ignore */ }
     let setObj = store.activeLog.items[exIdx].sets[setIdx];
     if (!setObj.locked) return;
 
@@ -2216,6 +2492,7 @@ export function overrideRest(exIdx, setIdx, seconds) {
     else renderActiveLog();
     // Keep lactate rest slot on the plan cards in sync
     if (isLactateHitLogItem(store.activeLog.items?.[exIdx])) renderWorkoutLog();
+    syncGlobalRestBanners();
 }
 
 // ==========================================
@@ -2791,6 +3068,14 @@ export function parkInProgressWorkout() {
     const elapsed = getWorkoutElapsedMs();
     const timerWasRunning = isWorkoutTimerRunning() || elapsed > 0;
     const anchorAt = Date.now() - elapsed;
+    clearAllRestIntervals();
+    try { releaseAllAudioHolds(); } catch (e) { /* ignore */ }
+    try { resetStretchAudioHold(); } catch (e) { /* ignore */ }
+    (items || []).forEach(item => {
+        (item.sets || []).forEach(s => {
+            if (s) delete s._restAudioHeld;
+        });
+    });
     // Only write when we still have live items — never overwrite a parked draft with an empty log
     if (store.activeLog?.type === 'workout' && items.length) {
         saveWorkoutDraft({
@@ -2816,6 +3101,7 @@ export function parkInProgressWorkout() {
     const unconfirm = document.getElementById('btn-unconfirm-route');
     if (unconfirm) unconfirm.classList.add('hidden');
     try { getTodayFocus(); } catch (e) { /* refresh Plan Resume/Stop */ }
+    syncGlobalRestBanners();
     return true;
 }
 
@@ -2901,11 +3187,17 @@ export function resumeInProgressWorkout() {
         zone.classList.remove('hidden');
         setTimeout(() => zone.classList.add('show'), 10);
     }
+    try { restartRestTimersFromState(); } catch (e) { /* ignore */ }
+    try { syncStretchTimersFromWallClock(); } catch (e) { /* ignore */ }
+    syncGlobalRestBanners();
     return true;
 }
 
 /** Discard a parked or live in-progress workout. */
 export function discardInProgressWorkout() {
+    clearAllRestIntervals();
+    try { releaseAllAudioHolds(); } catch (e) { /* ignore */ }
+    try { resetStretchAudioHold(); } catch (e) { /* ignore */ }
     clearWorkoutDraft();
     window._workoutSessionConfirmed = false;
     window.manualWorkoutMode = false;
@@ -2922,6 +3214,8 @@ export function discardInProgressWorkout() {
     hideExecutionZoneShell();
     const unconfirm = document.getElementById('btn-unconfirm-route');
     if (unconfirm) unconfirm.classList.add('hidden');
+    stopDraftRestDisplayTicker();
+    syncGlobalRestBanners();
 }
 
 /** Stop (discard) a parked workout — used from Plan. */
@@ -3282,9 +3576,13 @@ export async function commitWorkoutSession() {
     let logsToSave = [];
     let saveError = null;
     const sessionKind = resolveActiveSessionKind();
-    const dateIso = dateToISO(new Date());
     const sessionId = window.editingSessionId || (`sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     const previousSnap = window.editingSessionId ? getWorkoutSessionSnapshot(window.editingSessionId) : null;
+    const dateIso = (previousSnap?.dateIso && /^\d{4}-\d{2}-\d{2}$/.test(previousSnap.dateIso))
+        ? previousSnap.dateIso
+        : ((window._adherenceDayIso && /^\d{4}-\d{2}-\d{2}$/.test(window._adherenceDayIso))
+            ? window._adherenceDayIso
+            : dateToISO(new Date()));
 
     // Prefer timer frozen at Complete log; otherwise stop now
     const timerSnap = captureSessionTimerAtLog();
@@ -3411,7 +3709,7 @@ export async function commitWorkoutSession() {
                         session_duration_min: timedMinutes || 0,
                         ...(liftPhase && !isCardio ? { periodization_phase: liftPhase } : {})
                     });
-                    if (!isCardio && set.rpe <= 1 && isHypertrophyPhase()) {
+                    if (!isCardio && set.rpe <= 1 && sessionAppliesMuscleLockout(sessionKind)) {
                         store.fatigueLockouts[sideInfo.exercise?.muscle_group] = true;
                     }
                 });
@@ -3434,9 +3732,11 @@ export async function commitWorkoutSession() {
             }
         }
 
-        (item.sets || []).forEach((set, sIdx) => {
+        let workSetNo = 0;
+        (item.sets || []).forEach((set) => {
             if (set.isWarmup) return; // warmups are session-local only
             if (set.completed && !set.isText) {
+                workSetNo += 1;
                 const rpeVal = (set.rpe === '' || set.rpe === undefined || set.rpe === null) ? 0 : Math.round(Number(set.rpe)) || 0;
                 const durationSec = Number(set.duration_sec) || 0;
                 const timeMins = durationSec > 0
@@ -3445,7 +3745,7 @@ export async function commitWorkoutSession() {
                 const exName = item.exercise?.name || item.name || 'Exercise';
                 logsToSave.push({
                     exercise: exName,
-                    sets: sIdx + 1,
+                    sets: workSetNo,
                     reps: durationSec > 0 ? Math.round(durationSec) : (Math.round(set.reps) || 0),
                     weight_kg: set.isLactateHit ? 0 : (set.weight || 0),
                     distance_km: set.distance_km || 0,
@@ -3456,15 +3756,16 @@ export async function commitWorkoutSession() {
                     ...(liftPhase && !isCardio && !set.isLactateHit ? { periodization_phase: liftPhase } : {})
                 });
 
-                if (!isCardio && set.rpe <= 1 && isHypertrophyPhase()) {
+                if (!isCardio && set.rpe <= 1 && sessionAppliesMuscleLockout(sessionKind)) {
                     store.fatigueLockouts[item.exercise?.muscle_group] = true;
                 }
             } else if (set.completed && set.isText) {
                 // Protocol / stretch blocks still need a log row so the session appears in Log
+                workSetNo += 1;
                 const exName = item.exercise?.name || item.name || 'Exercise';
                 logsToSave.push({
                     exercise: exName,
-                    sets: sIdx + 1,
+                    sets: workSetNo,
                     reps: 0,
                     weight_kg: 0,
                     distance_km: 0,
@@ -3501,7 +3802,7 @@ export async function commitWorkoutSession() {
         });
     }
 
-    if (isHypertrophyPhase()) {
+    if (sessionAppliesMuscleLockout(sessionKind)) {
         const fat = applyHypertrophyFatigueFromSession(store.activeLog.items);
         if (fat?.warning && fat.message) alert(fat.message);
     }
@@ -3582,19 +3883,25 @@ export async function commitWorkoutSession() {
             invalidateWeekPlanCache();
             try { generateFutureTimeline(); } catch (e) { /* ignore */ }
             try { getTodayFocus(); } catch (e) { /* ignore */ }
+            try { calculateLiveFitnessScores(); } catch (e) { /* ignore */ }
         } catch (e) {
             console.warn('Week-plan session credit failed:', e);
         }
     }
 
-    // Optimistic merge into today's Log history so the session appears straight away
+    // Optimistic merge into the session day's Log history so the session appears straight away
     try {
-        const todayStr = new Date().toLocaleDateString();
+        let dayStr = new Date().toLocaleDateString();
+        try {
+            if (dateIso && /^\d{4}-\d{2}-\d{2}$/.test(dateIso)) {
+                dayStr = new Date(`${dateIso}T12:00:00`).toLocaleDateString();
+            }
+        } catch (e) { /* keep today */ }
         if (!store.globalGroupedHistory) store.globalGroupedHistory = {};
-        if (!store.globalGroupedHistory[todayStr]) {
-            store.globalGroupedHistory[todayStr] = { items: [], macros: { cals:0, pro:0, carb:0, fat:0, cost:0 }, hasWorkout: false };
+        if (!store.globalGroupedHistory[dayStr]) {
+            store.globalGroupedHistory[dayStr] = { items: [], macros: { cals:0, pro:0, carb:0, fat:0, cost:0 }, hasWorkout: false };
         }
-        const dayBucket = store.globalGroupedHistory[todayStr];
+        const dayBucket = store.globalGroupedHistory[dayStr];
         if (previousSnap && Array.isArray(previousSnap.logIds)) {
             const oldIds = new Set(previousSnap.logIds.map(String));
             dayBucket.items = dayBucket.items.filter(it => !(it.type === 'workout' && oldIds.has(String(it.id))));
@@ -3784,7 +4091,7 @@ export async function finalizeWorkoutLog() {
         window._finalizeInProgress = false;
         if (btn) {
             btn.disabled = false;
-            btn.innerText = 'Sync & Close Session';
+            btn.innerText = 'Sync & close';
         }
         if (synced) {
             window.journalMode = null;
@@ -3873,7 +4180,7 @@ export function dismissJournalModal() {
     window._editingJournalExistingMedia = [];
     closeDiarySchemaEditor();
     const btn = document.getElementById('btn-finalize-workout');
-    if (btn) btn.innerText = 'Save & close';
+    if (btn) btn.innerText = 'Sync & close';
     const status = document.getElementById('log-status');
     if (status) status.innerText = '';
 }

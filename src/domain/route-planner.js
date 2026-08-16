@@ -102,7 +102,9 @@ export function getLactateSlotForDate(dateIso) {
     if (!dateIso) return 'A';
     try {
         const weekStart = getMondayISO(dateIso + 'T12:00:00');
-        const plan = buildWeeklyTrainingPlan(weekStart);
+        // Full week (ignore logged credits) so logging the first HIT session
+        // cannot flip the second day's A/B assignment.
+        const plan = buildWeeklyTrainingPlan(weekStart, { ignoreLoggedCredits: true });
         const lactateDays = (plan || [])
             .filter(d => (d.events || []).some(isLactateEvent))
             .map(d => d.dateStr)
@@ -163,21 +165,89 @@ export function normalizeLoggedSessionKind(kind) {
     return null;
 }
 
+function parsePlanSlotEvent(slotKey) {
+    const parts = String(slotKey || '').split('|');
+    if (parts.length < 3) return parts[1] || '';
+    return parts.slice(1, -1).join('|');
+}
+
+function bumpCreditKind(out, kind) {
+    const k = normalizeLoggedSessionKind(kind);
+    if (k === 'Cardio (Steady)') out.steady++;
+    else if (k === 'Lactate') out.lactate++;
+    else if (k === 'Full Body / Strength') out.strength++;
+    return k;
+}
+
+/** Walk local logs, snapshots, and synced completed GPS slots for one calendar day. */
+function forEachCreditOnDate(dateIso, fn) {
+    if (!dateIso || typeof fn !== 'function') return;
+    const map = loadLoggedSessionsMap();
+    (Array.isArray(map[dateIso]) ? map[dateIso] : []).forEach((entry) => {
+        fn(entry?.kind || entry, [entry?.sessionId, entry?.planSlotKey]);
+    });
+    Object.values(loadWorkoutSessionSnapshots() || {}).forEach((snap) => {
+        if (snap?.dateIso !== dateIso) return;
+        fn(snap.kind, [snap.id]);
+    });
+    Object.entries(loadCompletedPlanSlots() || {}).forEach(([slotKey, meta]) => {
+        const slotDate = String(slotKey || '').split('|')[0];
+        if (slotDate !== dateIso) return;
+        fn(parsePlanSlotEvent(slotKey), [meta?.sessionId, slotKey]);
+    });
+}
+
 /** Count logged Steady / Lactate / Gym sessions that already count for this week. */
 export function countLoggedWorkoutCredits(weekStartISO) {
-    const map = loadLoggedSessionsMap();
     const out = { steady: 0, lactate: 0, strength: 0 };
+    const seen = new Set();
+    const weekEnd = addDaysISO(weekStartISO, 6);
     for (let i = 0; i < 7; i++) {
         const ds = addDaysISO(weekStartISO, i);
-        const entries = Array.isArray(map[ds]) ? map[ds] : [];
-        entries.forEach(entry => {
-            const kind = normalizeLoggedSessionKind(entry?.kind || entry);
-            if (kind === 'Cardio (Steady)') out.steady++;
-            else if (kind === 'Lactate') out.lactate++;
-            else if (kind === 'Full Body / Strength') out.strength++;
+        if (ds < weekStartISO || ds > weekEnd) continue;
+        forEachCreditOnDate(ds, (kind, ids) => {
+            const tokens = (ids || []).filter(Boolean);
+            if (tokens.some((t) => seen.has(t))) {
+                tokens.forEach((t) => seen.add(t));
+                return;
+            }
+            const before = out.steady + out.lactate + out.strength;
+            const normalized = bumpCreditKind(out, kind);
+            if (!normalized || out.steady + out.lactate + out.strength === before) return;
+            if (tokens.length) tokens.forEach((t) => seen.add(t));
+            else seen.add(`${ds}:${normalized}:${before}`);
         });
     }
     return out;
+}
+
+/** Consumable plan-credit kinds already logged on this calendar day (deduped). */
+export function listLoggedCreditKeysForDate(dateIso) {
+    const keys = [];
+    const seen = new Set();
+    forEachCreditOnDate(dateIso, (kind, ids) => {
+        const tokens = (ids || []).filter(Boolean);
+        if (tokens.some((t) => seen.has(t))) {
+            tokens.forEach((t) => seen.add(t));
+            return;
+        }
+        const normalized = normalizeLoggedSessionKind(kind);
+        if (!normalized) return;
+        if (tokens.length) tokens.forEach((t) => seen.add(t));
+        else seen.add(`${dateIso}:${normalized}:${keys.length}`);
+        keys.push(normalized);
+    });
+    return keys;
+}
+
+/** True when a gym/strength/hypertrophy slot on this date is already credited. */
+export function dateHasCompletedLiftCredit(dateStr) {
+    if (!dateStr) return false;
+    let hit = false;
+    forEachCreditOnDate(dateStr, (kind) => {
+        if (normalizeLoggedSessionKind(kind) === 'Full Body / Strength') hit = true;
+    });
+    return hit;
 }
 
 export function loadCompletedPlanSlots() {
@@ -509,8 +579,13 @@ export function pushGPS(day, focus) {
     return true;
 }
 
+/** Strength Session A/B only — hypertrophy shares isStrengthEvent but must not take A/B labels. */
+export function isStrengthABEvent(e) {
+    return typeof e === 'string' && e.includes('Strength') && !e.includes('Hypertrophy');
+}
+
 export function resolveStrengthEventLetter(e) {
-    if (!isStrengthEvent(e)) return null;
+    if (!isStrengthABEvent(e)) return null;
     if (/Strength\s*B/i.test(e) || /\sB$/i.test(e)) return 'B';
     if (/Strength\s*A/i.test(e) || /\sA$/i.test(e)) return 'A';
     return null;
@@ -520,41 +595,116 @@ export function strengthLabelForLetter(letter) {
     return letter === 'B' ? 'Full Body / Strength B' : 'Full Body / Strength A';
 }
 
+const STRENGTH_WEEK_STICKY_KEY = 'ascensus_strength_week_sticky_v1';
+const STRENGTH_STICKY_KEEP_WEEKS = 20;
+
+function loadAllStrengthWeekSticky() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(STRENGTH_WEEK_STICKY_KEY) || 'null');
+        if (raw && raw.weeks && typeof raw.weeks === 'object') return raw.weeks;
+        if (raw && raw.weekStart) {
+            return { [raw.weekStart]: { sessions: raw.sessions || [], lastLetter: raw.lastLetter || null } };
+        }
+    } catch (e) { /* ignore */ }
+    return {};
+}
+
+function pruneStrengthWeekSticky(weeks, keepAroundISO) {
+    const keys = Object.keys(weeks || {});
+    if (keys.length <= STRENGTH_STICKY_KEEP_WEEKS) return weeks;
+    const anchor = keepAroundISO || keys[keys.length - 1];
+    const scored = keys.map((k) => {
+        const a = new Date((anchor || k) + 'T12:00:00').getTime();
+        const b = new Date(k + 'T12:00:00').getTime();
+        return { k, dist: Number.isFinite(a) && Number.isFinite(b) ? Math.abs(a - b) : Infinity };
+    });
+    scored.sort((x, y) => x.dist - y.dist);
+    const keep = new Set(scored.slice(0, STRENGTH_STICKY_KEEP_WEEKS).map((s) => s.k));
+    const next = {};
+    keys.forEach((k) => { if (keep.has(k)) next[k] = weeks[k]; });
+    return next;
+}
+
+function loadStrengthWeekSticky(weekStart) {
+    const weeks = loadAllStrengthWeekSticky();
+    const row = weekStart ? weeks[weekStart] : null;
+    if (!row || typeof row !== 'object') return { sessions: [], lastLetter: null };
+    return {
+        sessions: Array.isArray(row.sessions) ? row.sessions : [],
+        lastLetter: row.lastLetter === 'B' ? 'B' : (row.lastLetter === 'A' ? 'A' : null)
+    };
+}
+
+function saveStrengthWeekSticky(weekStart, sessions, lastLetter) {
+    if (!weekStart) return;
+    let weeks = loadAllStrengthWeekSticky();
+    weeks[weekStart] = { sessions: sessions || [], lastLetter: lastLetter || null };
+    weeks = pruneStrengthWeekSticky(weeks, weekStart);
+    try {
+        localStorage.setItem(STRENGTH_WEEK_STICKY_KEY, JSON.stringify({ weeks }));
+    } catch (e) { /* ignore */ }
+}
+
 export function getWeekStartStrengthLetter(weekStartISO) {
-    // Continue A/B from the previous planned week when available
+    if (!weekStartISO) return 'A';
+    const sticky = loadStrengthWeekSticky(weekStartISO);
+    const first = sticky.sessions && sticky.sessions[0] && sticky.sessions[0].letter;
+    if (first === 'A' || first === 'B') return first;
+
+    const prevISO = addDaysISO(weekStartISO, -7);
+    const prev = loadStrengthWeekSticky(prevISO);
+    if (prev.lastLetter === 'A' || prev.lastLetter === 'B') {
+        return prev.lastLetter === 'A' ? 'B' : 'A';
+    }
+    // Legacy single-tail keys — only valid when they actually belong to last week
     try {
         const prevWeek = localStorage.getItem('ascensus_strength_plan_tail_week');
         const prevTail = localStorage.getItem('ascensus_strength_plan_tail');
-        if (prevWeek === addDaysISO(weekStartISO, -7) && (prevTail === 'A' || prevTail === 'B')) {
+        if (prevWeek === prevISO && (prevTail === 'A' || prevTail === 'B')) {
             return prevTail === 'A' ? 'B' : 'A';
         }
-    } catch (e) {}
+    } catch (e) { /* ignore */ }
     return 'A';
 }
 
 export function persistWeekStrengthTail(days) {
     if (!days || !days.length) return;
+    const weekStart = days[0].dateStr;
+    const sessions = [];
     let lastLetter = null;
     for (let i = 0; i < days.length; i++) {
-        const ev = (days[i].events || []).find(isStrengthEvent);
+        const ev = (days[i].events || []).find(isStrengthABEvent);
         if (!ev) continue;
-        lastLetter = resolveStrengthEventLetter(ev) || 'A';
+        const letter = resolveStrengthEventLetter(ev) || 'A';
+        sessions.push({ dateStr: days[i].dateStr, letter });
+        lastLetter = letter;
     }
-    if (!lastLetter) return;
+    if (!sessions.length) return;
+    saveStrengthWeekSticky(weekStart, sessions, lastLetter);
+    // Keep legacy keys for cloud sync, but never let another week clobber this week's map entry
     try {
         localStorage.setItem('ascensus_strength_plan_tail', lastLetter);
-        localStorage.setItem('ascensus_strength_plan_tail_week', days[0].dateStr);
-    } catch (e) {}
+        localStorage.setItem('ascensus_strength_plan_tail_week', weekStart);
+    } catch (e) { /* ignore */ }
 }
 
-/** Force chronological Strength labels to A, B, A, B... */
+/** Apply Strength A/B labels. Dates already sticky for this week keep their letter. */
 export function enforceStrengthABAlternation(days, startLetter = 'A') {
+    const weekStart = days[0] && days[0].dateStr;
+    const sticky = weekStart ? loadStrengthWeekSticky(weekStart) : { sessions: [] };
+    const byDate = Object.create(null);
+    (sticky.sessions || []).forEach((s) => {
+        if (s && s.dateStr && (s.letter === 'A' || s.letter === 'B')) byDate[s.dateStr] = s.letter;
+    });
+
     let letter = startLetter === 'B' ? 'B' : 'A';
     for (let i = 0; i < days.length; i++) {
-        const sIdx = (days[i].events || []).findIndex(isStrengthEvent);
+        const sIdx = (days[i].events || []).findIndex(isStrengthABEvent);
         if (sIdx < 0) continue;
-        days[i].events[sIdx] = strengthLabelForLetter(letter);
-        letter = letter === 'A' ? 'B' : 'A';
+        const pinned = byDate[days[i].dateStr];
+        const use = (pinned === 'A' || pinned === 'B') ? pinned : letter;
+        days[i].events[sIdx] = strengthLabelForLetter(use);
+        letter = use === 'A' ? 'B' : 'A';
     }
 }
 
@@ -562,17 +712,46 @@ export function placeStrengthSessions(days, count) {
     const target = Math.min(4, Math.max(0, parseInt(count, 10) || 0));
     const weekStartISO = days[0] ? days[0].dateStr : null;
     const startLetter = weekStartISO ? getWeekStartStrengthLetter(weekStartISO) : 'A';
+    const sticky = weekStartISO ? loadStrengthWeekSticky(weekStartISO) : { sessions: [] };
+    const stickyDates = (sticky.sessions || []).map((s) => s.dateStr).filter(Boolean);
 
-    // Collect existing strength day indexes (e.g. from fixed schedules)
+    // Collect existing strength A/B day indexes (e.g. from fixed schedules)
     let strengthIdx = [];
     for (let i = 0; i < days.length; i++) {
-        if (dayHasStrength(days[i].events)) strengthIdx.push(i);
+        if (!((days[i].events || []).some(isStrengthABEvent))) continue;
+        if (dateHasCompletedLiftCredit(days[i].dateStr)) {
+            const sIdx = days[i].events.findIndex(isStrengthABEvent);
+            if (sIdx >= 0) days[i].events.splice(sIdx, 1);
+            continue;
+        }
+        strengthIdx.push(i);
     }
 
-    // Trim extras when gym willingness dropped (keep earliest sessions)
+    // Re-apply this week's sticky dates so a cache rebuild cannot move Session A/B.
+    // Skip days already logged — otherwise a completed session stays on the plan
+    // and a replacement is placed elsewhere (an extra gym day).
+    stickyDates.forEach((dateStr) => {
+        const i = days.findIndex((d) => d.dateStr === dateStr);
+        if (i < 0 || strengthIdx.includes(i)) return;
+        if (dateHasCompletedLiftCredit(dateStr)) return;
+        if ((days[i].events || []).some(isGameEvent)) return;
+        if ((days[i].events || []).some(isRestEvent)) return;
+        const letter = sticky.sessions.find((s) => s.dateStr === dateStr)?.letter;
+        const label = strengthLabelForLetter(letter === 'B' ? 'B' : 'A');
+        if (pushGPS(days[i], label)) strengthIdx.push(i);
+    });
+    strengthIdx.sort((a, b) => a - b);
+
+    // Trim extras when gym willingness dropped — drop non-sticky days first
     while (strengthIdx.length > target) {
-        const i = strengthIdx.pop();
-        const sIdx = days[i].events.findIndex(isStrengthEvent);
+        let dropPos = -1;
+        for (let k = strengthIdx.length - 1; k >= 0; k--) {
+            const ds = days[strengthIdx[k]].dateStr;
+            if (!stickyDates.includes(ds)) { dropPos = k; break; }
+        }
+        if (dropPos < 0) dropPos = strengthIdx.length - 1;
+        const i = strengthIdx.splice(dropPos, 1)[0];
+        const sIdx = days[i].events.findIndex(isStrengthABEvent);
         if (sIdx >= 0) days[i].events.splice(sIdx, 1);
         if (days[i].events.length === 0) days[i].events = [];
     }
@@ -604,7 +783,7 @@ export function placeStrengthSessions(days, count) {
         strengthIdx.sort((a, b) => a - b);
     }
 
-    // Chronological A/B/A/B labels
+    // Chronological A/B/A/B labels — sticky dates keep their letter
     enforceStrengthABAlternation(days, startLetter);
     persistWeekStrengthTail(days);
     return strengthIdx.length;
@@ -624,7 +803,13 @@ export function placeHypertrophySessions(days, count) {
 
     let liftIdx = [];
     for (let i = 0; i < days.length; i++) {
-        if (dayHasStrength(days[i].events)) liftIdx.push(i);
+        if (!dayHasStrength(days[i].events)) continue;
+        if (dateHasCompletedLiftCredit(days[i].dateStr)) {
+            const sIdx = days[i].events.findIndex(isStrengthEvent);
+            if (sIdx >= 0) days[i].events.splice(sIdx, 1);
+            continue;
+        }
+        liftIdx.push(i);
     }
 
     // Re-apply sticky dates first (as long as day is still placeable)
@@ -632,6 +817,7 @@ export function placeHypertrophySessions(days, count) {
     stickyDates.forEach(dateStr => {
         const i = days.findIndex(d => d.dateStr === dateStr);
         if (i < 0 || liftIdx.includes(i)) return;
+        if (dateHasCompletedLiftCredit(dateStr)) return;
         if ((days[i].events || []).some(isGameEvent)) return;
         if ((days[i].events || []).some(e => e === 'Rest' || e === 'Cannot Workout')) return;
         const kind = sticky.sessions.find(s => s.dateStr === dateStr)?.kind
@@ -1181,6 +1367,14 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
     if (countEventType(days, isAuxEvent) > 2) enforceAuxiliaryCap(days, 2);
     if (hypertrophyMode || prefs.strengthPhase) stripAllAuxiliary(days);
 
+    if (!ignoreLoggedCredits) {
+        days.forEach((day) => {
+            if (!dateHasCompletedLiftCredit(day.dateStr)) return;
+            const next = (day.events || []).filter((e) => normalizeLoggedSessionKind(e) !== 'Full Body / Strength');
+            day.events = next.length ? next : (day.events.some(isRestEvent) ? day.events.filter(isRestEvent) : ['Rest']);
+            if (!day.events.length) day.events = ['Rest'];
+        });
+    }
     persistWeekStrengthTail(days);
     store._weekPlanCache = { key: cacheKey, plan: days };
     return days;
@@ -1710,7 +1904,6 @@ export function generateFutureTimeline() {
     const container = document.getElementById('future-timeline-container');
     if (!container) return;
 
-    invalidateWeekPlanCache();
     let html = '';
     const numDays = 7;
     const today = new Date();

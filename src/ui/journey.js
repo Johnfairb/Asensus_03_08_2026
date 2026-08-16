@@ -14,10 +14,12 @@ import {
     loadWorkoutSessionSnapshots,
     prettyWorkoutTypeLabel
 } from '../domain/route-planner.js';
-import { formatDurationMs } from './workout-timer.js';
+import { formatDurationMs, formatExerciseDurationLabel } from './workout-timer.js';
+import { COOLDOWN_STRETCHES, isUnilateralCooldownStretch, stretchPartDisplayLabel } from '../domain/session-prep.js';
 import { estimateFoodWaterMl, getHydrationLitersForDate, parseFoodLogDetails } from '../lib/food-parse.js';
 import { computeAimBarLayout, formatMacroAimLabel, getMacroRange } from '../lib/macro-range.js';
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from '../domain/meal-planner.js';
+import { resolveLogPeriodization } from '../domain/periodization-logs.js';
 
 // ==========================================
 // 10. DASHBOARD, FORECAST, & TIMELINE
@@ -155,7 +157,7 @@ export async function loadHistory() {
     const fortyEightHoursAgo = new Date(Date.now() - (48 * 60 * 60 * 1000));
     if(workouts && store.globalExerciseDB.length > 0) {
         workouts.forEach(w => {
-            if (w.rpe <= 1 && new Date(w.created_at) > fortyEightHoursAgo) {
+            if (w.rpe <= 1 && new Date(w.created_at) > fortyEightHoursAgo && resolveLogPeriodization(w) === 'hypertrophy') {
                 let ex = store.globalExerciseDB.find(e => e.name === w.exercise); if(ex && ex.muscle_group) store.fatigueLockouts[ex.muscle_group] = true;
             }
         });
@@ -364,6 +366,7 @@ export async function openDayDetail(dateStr, isoHint) {
         ? isoHint
         : resolveIsoFromDateStr(dateStr);
     window._adherenceDayIso = iso;
+    window._adherenceDaySessions = {};
 
     const gymJournal = loadGymJournalEntry(dateStr) || loadGymJournalEntry(iso);
     const practiceJournal = loadPracticeJournalEntry(dateStr) || loadPracticeJournalEntry(iso);
@@ -421,33 +424,36 @@ export async function openDayDetail(dateStr, isoHint) {
 
         // All Drive → Log workout sessions for this day
         const { lactateBlocks, otherWorkouts, usedLogIds } = splitLactateSessionsFromDay(dateStr, wks, gymJournal, iso);
-        const nonLactateSessions = sessions.filter(s => !(isLactateEvent(s.kind) || s.kind === 'Lactate'));
-        html += renderAdherenceSessionCardsHtml(nonLactateSessions, dateStr, wks, usedLogIds);
-        html += renderLactateSessionCardsHtml(lactateBlocks, dateStr);
-
-        // Orphan workout rows not covered by a session snapshot (legacy)
+        const nonLactateSessions = sessions
+            .filter(s => !(isLactateEvent(s.kind) || s.kind === 'Lactate'))
+            .map(s => hydrateAdherenceSessionItems(s, dateStr, wks));
+        nonLactateSessions.forEach((sess) => {
+            const idSet = new Set((sess.logIds || []).map(String));
+            const names = new Set((sess.items || []).map(it => it.exercise?.name || it.name).filter(Boolean));
+            (wks || []).forEach(w => {
+                if (idSet.has(String(w.id)) || names.has(w.exercise)) usedLogIds.add(String(w.id));
+            });
+        });
         const orphanWorkouts = otherWorkouts.filter(l =>
             !usedLogIds.has(String(l.id))
             && l.exercise !== 'Practice'
             && l.exercise !== 'Match'
         );
-        const wksGrouped = orphanWorkouts.reduce((acc, w) => {
-            if (!acc[w.exercise]) acc[w.exercise] = [];
-            acc[w.exercise].push(w);
-            return acc;
-        }, {});
-        for (const exName in wksGrouped) {
-            const safeEx = String(exName).replace(/'/g, "\\'");
-            html += `<button type="button" onclick="openHistoryWorkoutDetail('${safeEx}', '${dateStr}')" style="display:block; width:100%; text-align:left; background:none; border:none; padding:0; margin-bottom:16px; padding-bottom:12px; border-bottom: 1px dashed var(--border-highlight); cursor:pointer;">
-                <div style="color:var(--text-muted); font-weight:800; font-family:'Roboto Mono'; font-size:10px; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">[ ${exName} ]</div>`;
-            wksGrouped[exName].forEach(log => {
-                html += `<div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--text-silver); margin-bottom:6px;">
-                    <span style="font-family:'Roboto Mono'; font-size:11px;">Set ${log.sets}</span>
-                    <span style="font-weight:700; color:var(--text-main);">${log.weight_kg > 0 ? log.weight_kg + 'kg x ' + log.reps : (log.distance_km > 0 ? log.distance_km + 'km' : (log.time_minutes ? log.time_minutes + ' min' : '—'))}</span>
-                </div>`;
-            });
-            html += `<div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:4px;">Tap for details</div></button>`;
+        if (orphanWorkouts.length) {
+            const host = nonLactateSessions.length === 1 && !(nonLactateSessions[0].items || []).length
+                ? nonLactateSessions[0]
+                : null;
+            if (host) {
+                host.items = mergeDiaryOntoItems(itemsFromWorkoutLogs(orphanWorkouts), dateStr, iso);
+                host.logIds = [...(host.logIds || []), ...orphanWorkouts.map(l => l.id).filter(Boolean)];
+                window._adherenceDaySessions[String(host.id)] = host;
+                orphanWorkouts.forEach(l => usedLogIds.add(String(l.id)));
+            } else {
+                nonLactateSessions.push(synthesizeAdherenceSessionFromLogs(dateStr, iso, orphanWorkouts));
+            }
         }
+        html += renderAdherenceSessionCardsHtml(nonLactateSessions, dateStr, wks, usedLogIds);
+        html += renderLactateSessionCardsHtml(lactateBlocks, dateStr);
 
         // Diary-only lactate day (journal + optional snapshot, no food/history rows)
         if (!lactateBlocks.length && (gymJournal?.type === 'lactate' || gymJournal?.hitTypes?.length)) {
@@ -571,20 +577,32 @@ function resolveIsoFromDateStr(dateStr) {
     return !isNaN(parsed.getTime()) ? dateToISO(parsed) : dateToISO(new Date());
 }
 
-/** Sessions for an adherence day — ISO preferred, locale fallback. */
+/** Sessions for an adherence day — ISO, locale date, or matching log ids. */
 function listSessionsForAdherenceDay(dateStr, isoHint) {
     const iso = (isoHint && /^\d{4}-\d{2}-\d{2}$/.test(isoHint))
         ? isoHint
         : resolveIsoFromDateStr(dateStr);
-    const byIso = listWorkoutSessionsForDate(iso);
-    if (byIso.length) return byIso;
+    const byId = new Map();
+    const add = (s) => {
+        if (s?.id && !byId.has(String(s.id))) byId.set(String(s.id), s);
+    };
     try {
-        return Object.values(loadWorkoutSessionSnapshots() || {})
-            .filter(s => s && s.dateIso && localeDateEquals(dateStr, s.dateIso))
-            .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
-    } catch (e) {
-        return [];
-    }
+        listWorkoutSessionsForDate(iso).forEach(add);
+        Object.values(loadWorkoutSessionSnapshots() || {}).forEach((s) => {
+            if (!s) return;
+            if (s.dateIso && localeDateEquals(dateStr, s.dateIso)) add(s);
+        });
+        const dayLogs = store.globalGroupedHistory?.[dateStr]?.items?.filter(i => i.type === 'workout') || [];
+        const dayIds = new Set(dayLogs.map(l => String(l.id)));
+        if (dayIds.size) {
+            Object.values(loadWorkoutSessionSnapshots() || {}).forEach((s) => {
+                if ((s?.logIds || []).some(id => dayIds.has(String(id)))) add(s);
+            });
+        }
+    } catch (e) { /* ignore */ }
+    return [...byId.values()].sort((a, b) =>
+        String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))
+    );
 }
 
 function renderSportDiaryBlockHtml(kind, journal, workoutLogs = []) {
@@ -667,95 +685,384 @@ function formatAdherenceCardioPace(distanceKm, timeMinutes) {
     return `${ms.toFixed(2)} m/s`;
 }
 
-function summarizeAdherenceSnapshotSets(sets, { lactate = false } = {}) {
-    const rows = (sets || []).filter(s => s && s.completed !== false);
-    if (!rows.length) return 'No sets';
-    if (lactate || rows.some(s => s.isLactateHit || Number(s.duration_sec) > 0)) {
-        return rows.map((s, i) => {
-            const { work, rest } = extractLactateWorkRest(s);
-            return `Set ${i + 1}: ${formatDurationSecShort(work)} action · ${rest > 0 ? formatDurationSecShort(rest) : '—'} rest`;
-        }).join('<br>');
+function isAdherenceStretchItem(item) {
+    if (!item) return false;
+    if (item.isStretchGroup || item.isCustomStretch) return true;
+    return /stretch/i.test(item.exercise?.name || item.name || '');
+}
+
+function adherenceItemDisplayName(item) {
+    if (item?.isSuperset && Array.isArray(item.sides) && item.sides.length) {
+        const a = item.sides[0]?.exercise?.name || 'A';
+        const b = item.sides[1]?.exercise?.name || 'B';
+        return `A · ${a} / B · ${b}`;
     }
-    const isCardio = rows.some(s => Number(s.distance_km) > 0 || (Number(s.time_minutes) > 0 && !(Number(s.weight) > 0) && !(Number(s.reps) > 0)));
-    if (isCardio) {
-        const dist = rows.map(s => Number(s.distance_km) || 0).find(n => n > 0) || 0;
-        const dur = rows.map(s => Number(s.time_minutes) || 0).find(n => n > 0) || 0;
-        const bits = [];
-        if (dist > 0) bits.push(`${dist}km`);
-        if (dur > 0) bits.push(`${dur} min`);
-        const pace = formatAdherenceCardioPace(dist, dur);
-        if (pace) bits.push(pace);
-        return bits.length ? bits.join(' · ') : `${rows.length} sets`;
+    return item?.exercise?.name || item?.name || 'Exercise';
+}
+
+function exerciseDiaryNameCandidates(item) {
+    const names = [];
+    const add = (n) => {
+        const s = String(n || '').trim();
+        if (s && !names.includes(s)) names.push(s);
+    };
+    add(adherenceItemDisplayName(item));
+    add(item?.exercise?.name);
+    add(item?.name);
+    if (item?.isSuperset && Array.isArray(item.sides)) {
+        item.sides.forEach(side => add(side?.exercise?.name || side?.name));
     }
-    const repsList = rows.map(s => Number(s.reps) || 0).filter(n => n > 0);
-    const weights = rows.map(s => Number(s.weight) || 0).filter(n => n > 0);
-    if (repsList.length && repsList.every(r => r === repsList[0])) {
-        let detail = `${rows.length}×${repsList[0]}`;
-        if (weights.length && weights.every(w => w === weights[0])) detail += ` @ ${weights[0]}kg`;
-        else if (weights.length) detail += ` @ ${[...new Set(weights)].join('/')}kg`;
-        return detail;
+    return names;
+}
+
+function exerciseDiaryHasContent(item) {
+    if (!item) return false;
+    if (String(item.diaryNotes || '').trim()) return true;
+    return Array.isArray(item.diaryMedia) && item.diaryMedia.length > 0;
+}
+
+function namesMatchExercise(item, exName) {
+    const want = String(exName || '').trim().toLowerCase();
+    if (!want) return false;
+    return exerciseDiaryNameCandidates(item).some(n => n.toLowerCase() === want);
+}
+
+/** Copy per-exercise diary notes/media onto reconstructed log items for the same day. */
+function mergeDiaryOntoItems(items, dateStr, iso) {
+    const list = items || [];
+    if (!list.length) return list;
+    let snaps = [];
+    try {
+        snaps = Object.values(loadWorkoutSessionSnapshots() || {});
+    } catch (e) {
+        return list;
     }
-    return `${rows.length} sets`;
+    const dateIso = iso || resolveIsoFromDateStr(dateStr);
+    const dayLogs = store.globalGroupedHistory?.[dateStr]?.items?.filter(i => i.type === 'workout') || [];
+    const dayIds = new Set(dayLogs.map(l => String(l.id)));
+    const daySnaps = snaps.filter(s => {
+        if (!s) return false;
+        if (dateIso && s.dateIso === dateIso) return true;
+        if (s.dateIso && dateStr && localeDateEquals(dateStr, s.dateIso)) return true;
+        if (dayIds.size && (s.logIds || []).some(id => dayIds.has(String(id)))) return true;
+        return false;
+    });
+    const byName = new Map();
+    daySnaps.forEach(s => {
+        (s.items || []).forEach(it => {
+            if (!exerciseDiaryHasContent(it)) return;
+            exerciseDiaryNameCandidates(it).forEach(n => {
+                const key = n.toLowerCase();
+                if (!byName.has(key)) {
+                    byName.set(key, {
+                        diaryNotes: it.diaryNotes || '',
+                        diaryMedia: Array.isArray(it.diaryMedia) ? it.diaryMedia : []
+                    });
+                }
+            });
+        });
+    });
+    list.forEach(it => {
+        if (exerciseDiaryHasContent(it)) return;
+        const hit = exerciseDiaryNameCandidates(it).map(n => byName.get(n.toLowerCase())).find(Boolean);
+        if (!hit) return;
+        it.diaryNotes = hit.diaryNotes;
+        it.diaryMedia = hit.diaryMedia;
+    });
+    return list;
+}
+
+function stretchMuscleLabel(set, index) {
+    const raw = stretchPartDisplayLabel(set);
+    if (raw && !/^set\s*\d+/i.test(raw) && !/^stretch(ing)?$/i.test(raw) && !/^muscle\s*\d+/i.test(raw)) return raw;
+    const base = String(set?.baseName || set?.partName || set?.name || '').trim();
+    if (base && !/^set\s*\d+/i.test(base) && !/^stretch(ing)?$/i.test(base) && !/^muscle\s*\d+/i.test(base)) {
+        return set?.side ? `${base} · ${set.side}` : base;
+    }
+    return `Muscle ${index + 1}`;
+}
+
+function cooldownMuscleCatalog(unilateral = true) {
+    const out = [];
+    COOLDOWN_STRETCHES.forEach((name) => {
+        if (unilateral && isUnilateralCooldownStretch(name)) {
+            out.push({ partName: name, baseName: name, side: 'Left' });
+            out.push({ partName: name, baseName: name, side: 'Right' });
+        } else {
+            out.push({ partName: name, baseName: name, side: null });
+        }
+    });
+    return out;
+}
+
+function stretchSetLooksUnnamed(set) {
+    const label = stretchPartDisplayLabel(set);
+    return !label || /^set\s*\d+/i.test(label) || /^stretch(ing)?$/i.test(label) || /^muscle\s*\d+/i.test(label);
+}
+
+function enrichStretchItemLabels(item) {
+    if (!isAdherenceStretchItem(item)) return item;
+    const sets = item.sets || [];
+    if (!sets.length || !sets.every(stretchSetLooksUnnamed)) return item;
+    const catalog = sets.length === cooldownMuscleCatalog(true).length
+        ? cooldownMuscleCatalog(true)
+        : (sets.length === cooldownMuscleCatalog(false).length ? cooldownMuscleCatalog(false) : null);
+    if (!catalog) return item;
+    sets.forEach((set, i) => {
+        const part = catalog[i];
+        if (!part || !set) return;
+        set.partName = part.partName;
+        set.baseName = part.baseName;
+        if (part.side) set.side = part.side;
+    });
+    return item;
+}
+
+function itemsFromWorkoutLogs(logs = []) {
+    const byEx = (logs || []).reduce((acc, log) => {
+        const key = log.exercise || 'Exercise';
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(log);
+        return acc;
+    }, {});
+    return Object.keys(byEx).map((exName) => {
+        const rows = byEx[exName].slice().sort((a, b) => (Number(a.sets) || 0) - (Number(b.sets) || 0));
+        const stretch = /stretch/i.test(exName);
+        const item = {
+            exercise: { name: exName, domain: stretch ? 'mobility' : (rows[0]?.type || 'strength') },
+            name: exName,
+            isStretchGroup: stretch,
+            sets: rows.map((log) => ({
+                completed: true,
+                weight: Number(log.weight_kg) || 0,
+                reps: log.reps,
+                distance_km: Number(log.distance_km) || 0,
+                time_minutes: Number(log.time_minutes) || 0,
+                rpe: log.rpe,
+                isText: stretch || !(Number(log.weight_kg) > 0) && !(Number(log.reps) > 0) && !(Number(log.distance_km) > 0)
+            }))
+        };
+        return enrichStretchItemLabels(item);
+    });
+}
+
+function logsForAdherenceSession(snap, dateStr, workoutLogs) {
+    const logs = workoutLogs || store.globalGroupedHistory?.[dateStr]?.items?.filter(i => i.type === 'workout') || [];
+    const idSet = new Set((snap?.logIds || []).map(String));
+    const byId = idSet.size ? logs.filter(l => idSet.has(String(l.id))) : [];
+    if (byId.length) return byId;
+    const names = new Set((snap?.items || []).map(it => it.exercise?.name || it.name).filter(Boolean));
+    if (names.size) return logs.filter(l => names.has(l.exercise));
+    return [];
+}
+
+function hydrateAdherenceSessionItems(snap, dateStr, workoutLogs) {
+    if (!snap) return snap;
+    const copy = {
+        ...snap,
+        items: Array.isArray(snap.items) ? snap.items.map(it => ({ ...it, sets: [...(it.sets || [])] })) : []
+    };
+    if (!copy.items.length) {
+        copy.items = itemsFromWorkoutLogs(logsForAdherenceSession(snap, dateStr, workoutLogs));
+    }
+    copy.items.forEach(enrichStretchItemLabels);
+    mergeDiaryOntoItems(copy.items, dateStr, copy.dateIso);
+    if (!window._adherenceDaySessions) window._adherenceDaySessions = {};
+    window._adherenceDaySessions[String(copy.id)] = copy;
+    return copy;
+}
+
+function synthesizeAdherenceSessionFromLogs(dateStr, iso, logs) {
+    const items = mergeDiaryOntoItems(itemsFromWorkoutLogs(logs), dateStr, iso);
+    const dur = (logs || []).reduce((m, l) => Math.max(m, Number(l.session_duration_min) || 0), 0);
+    const kind = items.some(it => /stretch/i.test(it.name || '') && items.length === 1)
+        ? 'Workout'
+        : 'Full Body / Strength';
+    const snap = {
+        id: `orphan-day-${iso || dateStr}`,
+        dateIso: iso,
+        kind,
+        items,
+        logIds: (logs || []).map(l => l.id).filter(Boolean),
+        durationMinutes: dur,
+        durationLabel: dur > 0 ? `${dur} min` : null
+    };
+    if (!window._adherenceDaySessions) window._adherenceDaySessions = {};
+    window._adherenceDaySessions[String(snap.id)] = snap;
+    return snap;
+}
+
+function isAdherenceWarmupSet(set) {
+    if (!set) return false;
+    if (set.isWarmup) return true;
+    const part = String(set.partName || '').trim();
+    return /^warmup\b/i.test(part);
+}
+
+function adherenceCompletedSets(item) {
+    return (item?.sets || []).filter(s => s && s.completed !== false && !s._sessionSkipped);
+}
+
+function adherenceWorkSets(item) {
+    return adherenceCompletedSets(item).filter(s => !isAdherenceWarmupSet(s) && !s.isText);
+}
+
+function adherenceWorkSetCount(item) {
+    if (!item || item.isWarmupGroup || item.isStretchGroup || isAdherenceStretchItem(item)) return 0;
+    if (item.isSteadyCardio) return 0;
+    if (item.isCoreBlock) {
+        return adherenceCompletedSets(item).length;
+    }
+    if (item.isSuperset) {
+        const bWork = adherenceCompletedSets(item).filter(s => s.side === 'B' && !isAdherenceWarmupSet(s) && !s.isDropSet);
+        if (bWork.length) return bWork.length;
+    }
+    return adherenceWorkSets(item).filter(s => !s.isDropSet).length;
+}
+
+function adherenceWorkSetCountLabel(item) {
+    const n = adherenceWorkSetCount(item);
+    if (!n) return '';
+    if (item?.isCoreBlock) return n === 1 ? '1 circuit' : `${n} circuits`;
+    if (item?.isSuperset) return n === 1 ? '1 round' : `${n} rounds`;
+    if (item?.isLactateHit) return n === 1 ? '1 interval' : `${n} intervals`;
+    return n === 1 ? '1 set' : `${n} sets`;
+}
+
+function adherenceSetRowLabel(set, index, { stretch = false, item = null } = {}) {
+    if (stretch) return stretchMuscleLabel(set, index);
+    if (isAdherenceWarmupSet(set)) {
+        const warmups = adherenceCompletedSets(item).filter(isAdherenceWarmupSet);
+        const n = warmups.indexOf(set) + 1;
+        return `Warmup ${n > 0 ? n : index + 1}`;
+    }
+    if (item?.isSuperset && set?.side) {
+        if (set.isDropSet) return `${set.side} · Drop`;
+        const sideSets = adherenceCompletedSets(item).filter(s => s.side === set.side && !isAdherenceWarmupSet(s) && !s.isDropSet);
+        const n = sideSets.indexOf(set) + 1;
+        return `${set.side} · Set ${n > 0 ? n : index + 1}`;
+    }
+    const part = String(set?.partName || '').trim();
+    if (part && !/^set\s*\d+/i.test(part) && !isAdherenceWarmupSet(set)) return part;
+    if (set?.isDropSet) return 'Drop';
+    const work = adherenceWorkSets(item);
+    const n = work.indexOf(set) + 1;
+    return `Set ${n > 0 ? n : index + 1}`;
+}
+
+function formatAdherenceSetDetail(set, { stretch = false, lactate = false } = {}) {
+    if (!set) return '—';
+    if (stretch) {
+        if (Number(set.holdSec) > 0) return formatDurationSecShort(set.holdSec);
+        if (set.reps && typeof set.reps === 'string' && !/^\d+$/.test(String(set.reps).trim())) {
+            return String(set.reps);
+        }
+        return 'Done';
+    }
+    if (lactate || set.isLactateHit || Number(set.duration_sec) > 0) {
+        const { work, rest } = extractLactateWorkRest(set);
+        return `${formatDurationSecShort(work)} action · ${rest > 0 ? formatDurationSecShort(rest) : '—'} rest`;
+    }
+    const weight = Number(set.weight) || 0;
+    const reps = Number(set.reps) || 0;
+    if (weight > 0 && reps > 0) return `${weight}kg × ${reps}`;
+    if (weight > 0) return `${weight}kg`;
+    if (reps > 0) return `${reps} reps`;
+    const dist = Number(set.distance_km) || 0;
+    const dur = Number(set.time_minutes) || 0;
+    const bits = [];
+    if (dist > 0) bits.push(`${dist}km`);
+    if (dur > 0) bits.push(`${dur} min`);
+    const pace = formatAdherenceCardioPace(dist, dur);
+    if (pace) bits.push(pace);
+    if (bits.length) return bits.join(' · ');
+    if (set.reps) return String(set.reps);
+    return 'Done';
+}
+
+function adherenceLogSets(item, { stretch = false } = {}) {
+    return (item?.sets || []).filter(s => {
+        if (!s || s.completed === false || s._sessionSkipped) return false;
+        if (stretch || item?.isWarmupGroup || item?.isStretchGroup) return true;
+        return !isAdherenceWarmupSet(s);
+    });
+}
+
+function renderAdherenceExerciseLogHtml(item, { lactate = false } = {}) {
+    enrichStretchItemLabels(item);
+    const timeLabel = formatExerciseDurationLabel(item);
+    const timeBanner = timeLabel
+        ? `<div style="margin-bottom:14px; padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Time on exercise</div>
+            <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(timeLabel)}</div>
+        </div>`
+        : '';
+    if (item?.isCoreBlock) {
+        const sets = (item.sets || []).filter(s => s && s.completed !== false);
+        if (!sets.length) return timeBanner || `<div style="font-size:12px; color:var(--text-muted);">No sets stored</div>`;
+        return timeBanner + sets.map((set, si) => {
+            const head = set.partName && !/^set\s*\d+/i.test(String(set.partName))
+                ? set.partName
+                : `Set ${si + 1}`;
+            const kids = Array.isArray(set.children) ? set.children : [];
+            const kidHtml = kids.length
+                ? kids.map(ch => `<div style="display:flex; justify-content:space-between; gap:10px; margin-top:6px; font-size:12px;">
+                    <span style="color:var(--text-main);">${escapeHtml(ch.name || 'Exercise')}</span>
+                    <span style="color:var(--text-silver); font-family:'Roboto Mono';">${escapeHtml(ch.reps || '')}${Number(ch.weight) > 0 ? ` · ${ch.weight}kg` : ''}</span>
+                </div>`).join('')
+                : `<div style="margin-top:6px; font-size:12px; color:var(--text-silver); font-family:'Roboto Mono';">${escapeHtml(formatAdherenceSetDetail(set, {}))}</div>`;
+            return `<div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--border-subtle);">
+                <div style="font-size:13px; color:var(--text-main); font-weight:700;">${escapeHtml(head)}</div>
+                ${kidHtml}
+            </div>`;
+        }).join('');
+    }
+    const stretch = isAdherenceStretchItem(item);
+    let rows = adherenceLogSets(item, { stretch });
+    if (!rows.length && !stretch) {
+        rows = adherenceCompletedSets(item);
+    }
+    if (!rows.length) return timeBanner || `<div style="font-size:12px; color:var(--text-muted);">No sets stored</div>`;
+    return timeBanner + rows.map((set, i) => {
+        const label = adherenceSetRowLabel(set, i, { stretch, item });
+        const detail = formatAdherenceSetDetail(set, { stretch, lactate: lactate || !!item.isLactateHit });
+        return `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border-subtle);">
+            <div style="font-size:13px; color:var(--text-main); font-weight:700; min-width:0;">${escapeHtml(label)}</div>
+            <div style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; font-weight:600; text-align:right; flex-shrink:0;">${escapeHtml(detail)}</div>
+        </div>`;
+    }).join('');
 }
 
 function renderAdherenceSessionCardsHtml(sessions, dateStr, workoutLogs, usedLogIds) {
     let html = '';
     (sessions || []).forEach(sess => {
-        const label = prettyWorkoutTypeLabel(sess.kind);
-        const idSet = new Set((sess.logIds || []).map(String));
+        const hydrated = hydrateAdherenceSessionItems(sess, dateStr, workoutLogs);
+        const label = prettyWorkoutTypeLabel(hydrated.kind);
+        const idSet = new Set((hydrated.logIds || []).map(String));
+        const itemNames = new Set((hydrated.items || []).map(it => it.exercise?.name || it.name).filter(Boolean));
         (workoutLogs || []).forEach(w => {
-            if (idSet.has(String(w.id))) usedLogIds.add(String(w.id));
+            if (idSet.has(String(w.id)) || itemNames.has(w.exercise)) usedLogIds.add(String(w.id));
         });
-        const isLactate = isLactateEvent(sess.kind) || sess.kind === 'Lactate';
-        let bodyHtml = '';
-        if (Array.isArray(sess.items) && sess.items.length) {
-            bodyHtml = sess.items.map(item => {
-                const name = item.exercise?.name || item.name || 'Exercise';
-                const summary = summarizeAdherenceSnapshotSets(item.sets || [], { lactate: isLactate || !!item.isLactateHit });
-                return `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px;">
-                    <div style="font-size:13px; color:var(--text-main); font-weight:700; min-width:0;">${escapeHtml(name)}</div>
-                    <div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; font-weight:600; text-align:right; flex-shrink:0;">${summary}</div>
-                </div>`;
-            }).join('');
-        }
-        const durMin = Number(sess.durationMinutes) || 0;
-        const durLabel = sess.durationLabel || (durMin > 0 ? `${durMin} min` : '');
-        const sid = String(sess.id || '').replace(/'/g, "\\'");
+        const isLactate = isLactateEvent(hydrated.kind) || hydrated.kind === 'Lactate';
+        const durMin = Number(hydrated.durationMinutes) || 0;
+        const durLabel = hydrated.durationLabel || (durMin > 0 ? `${durMin} min` : '');
+        const sid = String(hydrated.id || '').replace(/'/g, "\\'");
         const safeDate = String(dateStr).replace(/'/g, "\\'");
         const openAction = isLactate
             ? `openLactateSessionDetail('${sid}', '${safeDate}', 0)`
             : `openAdherenceSessionDetail('${sid}', '${safeDate}')`;
         html += `<button type="button" onclick="${openAction}" style="display:block; width:100%; text-align:left; background:none; border:none; padding:0; margin-bottom:16px; padding-bottom:12px; border-bottom: 1px dashed var(--border-highlight); cursor:pointer;">
             <div style="color:var(--gold-accent); font-weight:800; font-family:'Roboto Mono'; font-size:10px; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">[ ${escapeHtml(label)} ]</div>
-            ${durLabel ? `<div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-bottom:8px;">${escapeHtml(durLabel)}${sess.rpe != null ? ` · RPE ${sess.rpe}` : ''}</div>` : ''}
-            ${bodyHtml || `<div style="font-size:12px; color:var(--text-muted);">Session saved</div>`}
-            <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:6px;">Tap for details</div>
+            ${durLabel ? `<div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; margin-bottom:8px;">${escapeHtml(durLabel)}${hydrated.rpe != null ? ` · RPE ${hydrated.rpe}` : ''}</div>` : ''}
+            <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:6px;">Tap to view exercises</div>
         </button>`;
     });
     return html;
 }
 
-/** Open a non-lactate logged session from the adherence calendar (mirrors Drive → Log). */
-export function openAdherenceSessionDetail(sessionId, dateStr) {
-    const snap = getWorkoutSessionSnapshot(sessionId);
-    if (!snap) {
-        alert('Could not find that session.');
-        return;
-    }
-    const sheet = document.getElementById('meal-detail-sheet');
-    const titleEl = document.getElementById('meal-detail-title');
-    const subEl = document.getElementById('meal-detail-subtitle');
-    const macrosEl = document.getElementById('meal-detail-macros');
-    const foodsEl = document.getElementById('meal-detail-foods');
-    const actionsEl = document.getElementById('meal-detail-actions');
-    if (!sheet || !foodsEl) return;
-
-    const label = prettyWorkoutTypeLabel(snap.kind);
-    if (titleEl) titleEl.textContent = label;
-    if (subEl) subEl.textContent = dateStr || snap.dateIso || '';
+function renderAdherenceSessionMetaCards(snap) {
     const durLabel = snap.durationLabel
         || (snap.durationMs > 0 ? formatDurationMs(snap.durationMs) : (snap.durationMinutes > 0 ? `${snap.durationMinutes} min` : '—'));
-    const isLactate = isLactateEvent(snap.kind) || snap.kind === 'Lactate';
     const isSteady = isSteadyCardio(snap.kind) || /steady|cardio\s*\(steady\)/i.test(String(snap.kind || ''));
     let cardioMeta = null;
     const cardioItem = (snap.items || []).find(item => {
@@ -774,7 +1081,6 @@ export function openAdherenceSessionDetail(sessionId, dateStr) {
         const durMin = setDur || Number(snap.durationMinutes) || 0;
         cardioMeta = {
             distance: dist,
-            durationMin: durMin,
             durationLabel: setDur > 0
                 ? `${setDur} min`
                 : (snap.durationLabel || (durMin > 0 ? `${durMin} min` : '—')),
@@ -782,54 +1088,101 @@ export function openAdherenceSessionDetail(sessionId, dateStr) {
         };
     }
 
-    if (macrosEl) {
-        const cards = [];
-        if (cardioMeta) {
+    const cards = [];
+    if (cardioMeta) {
+        cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Time</div>
+            <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(cardioMeta.durationLabel)}</div>
+        </div>`);
+        cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Distance</div>
+            <div style="font-size:20px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono';">${cardioMeta.distance > 0 ? `${cardioMeta.distance} km` : '—'}</div>
+        </div>`);
+        if (cardioMeta.pace) {
             cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
-                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Time</div>
-                <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(cardioMeta.durationLabel)}</div>
-            </div>`);
-            cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
-                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Distance</div>
-                <div style="font-size:20px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono';">${cardioMeta.distance > 0 ? `${cardioMeta.distance} km` : '—'}</div>
-            </div>`);
-            if (cardioMeta.pace) {
-                cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
-                    <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Pace</div>
-                    <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(cardioMeta.pace)}</div>
-                </div>`);
-            }
-        } else {
-            cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
-                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Duration</div>
-                <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(durLabel)}</div>
+                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Pace</div>
+                <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(cardioMeta.pace)}</div>
             </div>`);
         }
-        if (snap.rpe != null) {
-            cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
-                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">RPE</div>
-                <div style="font-size:20px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono';">${snap.rpe}</div>
-            </div>`);
+    } else {
+        cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Duration</div>
+            <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(durLabel)}</div>
+        </div>`);
+    }
+    if (snap.rpe != null) {
+        cards.push(`<div style="padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">RPE</div>
+            <div style="font-size:20px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono';">${snap.rpe}</div>
+        </div>`);
+    }
+    return cards.join('');
+}
+
+function renderAdherenceSessionSheet() {
+    const snap = window._openGymSessionSnap;
+    const sessionId = window._adherenceSessionId;
+    const dateStr = window._adherenceSessionDate;
+    const exerciseIndex = window._adherenceExerciseIndex;
+    const sheet = document.getElementById('meal-detail-sheet');
+    const titleEl = document.getElementById('meal-detail-title');
+    const subEl = document.getElementById('meal-detail-subtitle');
+    const macrosEl = document.getElementById('meal-detail-macros');
+    const foodsEl = document.getElementById('meal-detail-foods');
+    const actionsEl = document.getElementById('meal-detail-actions');
+    if (!snap || !sheet || !foodsEl) return;
+
+    const label = prettyWorkoutTypeLabel(snap.kind);
+    const isLactate = isLactateEvent(snap.kind) || snap.kind === 'Lactate';
+    const sid = String(sessionId || snap.id || '').replace(/'/g, "\\'");
+    const safeDate = String(dateStr || snap.dateIso || '').replace(/'/g, "\\'");
+    const item = Number.isInteger(exerciseIndex) ? (snap.items || [])[exerciseIndex] : null;
+
+    if (item) {
+        if (titleEl) titleEl.textContent = adherenceItemDisplayName(item);
+        if (subEl) subEl.textContent = label;
+        if (macrosEl) macrosEl.innerHTML = '';
+        foodsEl.innerHTML = `
+            <button type="button" onclick="backToAdherenceSession()" style="background:none; border:none; padding:0; margin-bottom:14px; cursor:pointer; font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono';">← Back to session</button>
+            ${renderAdherenceExerciseLogHtml(item, { lactate: isLactate || !!item.isLactateHit })}
+            ${renderAdherenceExerciseDiaryHtml(item)}`;
+        if (actionsEl) {
+            actionsEl.classList.remove('hidden');
+            actionsEl.innerHTML = `
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="backToAdherenceSession()">Back to session</button>
+                    <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="editLoggedWorkoutSession('${sid}')">Edit workout</button>
+                </div>`;
         }
-        macrosEl.innerHTML = cards.join('');
+        sheet.classList.remove('hidden');
+        fillAdherenceExerciseDiaryMedia(item, dateStr || snap.dateIso);
+        return;
     }
 
+    if (titleEl) titleEl.textContent = label;
+    if (subEl) subEl.textContent = dateStr || snap.dateIso || '';
+    if (macrosEl) macrosEl.innerHTML = renderAdherenceSessionMetaCards(snap);
+
     let body = '';
-    (snap.items || []).forEach(item => {
-        const name = item.exercise?.name || item.name || 'Exercise';
-        body += `<div style="margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border-subtle);">
-            <div style="font-size:13px; color:var(--text-main); font-weight:700; margin-bottom:8px;">${escapeHtml(name)}</div>
-            <div style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; line-height:1.5;">${summarizeAdherenceSnapshotSets(item.sets || [], { lactate: isLactate || !!item.isLactateHit })}</div>
-        </div>`;
+    (snap.items || []).forEach((exItem, idx) => {
+        const name = adherenceItemDisplayName(exItem);
+        const diaryHint = exerciseDiaryHasContent(exItem) ? ' · diary' : '';
+        const timeLabel = formatExerciseDurationLabel(exItem);
+        const setCountLabel = adherenceWorkSetCountLabel(exItem);
+        const tapBits = [setCountLabel, 'Tap to view log' + diaryHint].filter(Boolean).join(' · ');
+        body += `<button type="button" onclick="openAdherenceExerciseLog(${idx})" style="display:block; width:100%; text-align:left; background:none; border:none; padding:0; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border-subtle); cursor:pointer;">
+            <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
+                <div style="font-size:13px; color:var(--text-main); font-weight:700; min-width:0;">${escapeHtml(name)}</div>
+                ${timeLabel ? `<div class="exercise-log-time" style="flex-shrink:0;">${escapeHtml(timeLabel)}</div>` : ''}
+            </div>
+            <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:6px;">${escapeHtml(tapBits)}</div>
+        </button>`;
     });
-    foodsEl.innerHTML = (body || `<div style="font-size:12px; color:var(--text-muted);">No sets stored</div>`)
+    foodsEl.innerHTML = (body || `<div style="font-size:12px; color:var(--text-muted);">No exercises stored</div>`)
         + `<div id="gym-session-diary-panel" style="margin-top:12px;"></div>`;
     window._gymSessionDiaryOpen = false;
-    window._openGymSessionSnap = snap;
 
     if (actionsEl) {
-        const sid = String(sessionId).replace(/'/g, "\\'");
-        const safeDate = String(dateStr || snap.dateIso || '').replace(/'/g, "\\'");
         actionsEl.classList.remove('hidden');
         actionsEl.innerHTML = `
             <div style="display:flex; flex-direction:column; gap:8px;">
@@ -838,6 +1191,97 @@ export function openAdherenceSessionDetail(sessionId, dateStr) {
             </div>`;
     }
     sheet.classList.remove('hidden');
+}
+
+/** Open a non-lactate logged session from the adherence calendar (mirrors Drive → Log). */
+export function openAdherenceSessionDetail(sessionId, dateStr) {
+    const snap = getWorkoutSessionSnapshot(sessionId)
+        || window._adherenceDaySessions?.[String(sessionId)]
+        || null;
+    if (!snap) {
+        alert('Could not find that session.');
+        return;
+    }
+    const hydrated = hydrateAdherenceSessionItems(snap, dateStr);
+    window._openGymSessionSnap = hydrated;
+    window._adherenceSessionId = sessionId;
+    window._adherenceSessionDate = dateStr || hydrated.dateIso || '';
+    window._adherenceExerciseIndex = null;
+    window._gymSessionDiaryOpen = false;
+    renderAdherenceSessionSheet();
+}
+
+export function openAdherenceExerciseLog(itemIndex) {
+    const snap = window._openGymSessionSnap;
+    const idx = Number(itemIndex);
+    if (!snap || !Number.isInteger(idx) || !(snap.items || [])[idx]) return;
+    window._adherenceExerciseIndex = idx;
+    window._gymSessionDiaryOpen = false;
+    renderAdherenceSessionSheet();
+}
+
+export function backToAdherenceSession() {
+    window._adherenceExerciseIndex = null;
+    window._gymSessionDiaryOpen = false;
+    renderAdherenceSessionSheet();
+}
+
+function renderAdherenceExerciseDiaryHtml(item) {
+    const notes = String(item?.diaryNotes || '').trim();
+    return `<div style="margin-top:20px; padding:14px; border:1px solid rgba(212,175,55,0.35); border-radius:10px; background:rgba(212,175,55,0.06);">
+        <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">[ Exercise diary ]</div>
+        ${notes
+            ? `<div style="font-size:13px; color:var(--text-main); line-height:1.5; white-space:pre-wrap;">${escapeHtml(notes)}</div>`
+            : `<div style="font-size:12px; color:var(--text-muted);">No notes saved for this exercise.</div>`}
+        <div id="adherence-exercise-diary-media"></div>
+    </div>`;
+}
+
+let _adherenceDiaryMediaGen = 0;
+
+async function fillAdherenceExerciseDiaryMedia(item, dateStr) {
+    const gen = ++_adherenceDiaryMediaGen;
+    const slot = document.getElementById('adherence-exercise-diary-media');
+    if (!slot) return;
+    const media = await resolveExerciseDiaryMedia(item, dateStr);
+    if (gen !== _adherenceDiaryMediaGen) return;
+    const liveSlot = document.getElementById('adherence-exercise-diary-media');
+    if (!liveSlot) return;
+    if (!media.length) {
+        if (!String(item?.diaryNotes || '').trim()) {
+            liveSlot.innerHTML = `<div style="font-size:12px; color:var(--text-muted); margin-top:10px;">No photos or videos saved.</div>`;
+        }
+        return;
+    }
+    const html = await buildJournalMediaGalleryHtml(media, 'Photos / videos');
+    if (gen !== _adherenceDiaryMediaGen) return;
+    const still = document.getElementById('adherence-exercise-diary-media');
+    if (still) still.innerHTML = html;
+}
+
+async function resolveExerciseDiaryMedia(item, dateStr) {
+    const declared = Array.isArray(item?.diaryMedia) ? item.diaryMedia.filter(m => m && m.id) : [];
+    if (declared.length) return declared;
+    try {
+        const all = await idbGetAllJournalMedia();
+        const names = new Set(exerciseDiaryNameCandidates(item).map(n => n.toLowerCase()));
+        const dateKeys = new Set(
+            [dateStr, resolveIsoFromDateStr(dateStr), window._adherenceDayIso, window._adherenceSessionDate, window._openGymSessionSnap?.dateIso]
+                .filter(Boolean)
+                .map(String)
+        );
+        return all
+            .filter(rec => {
+                if (!rec?.id) return false;
+                const ex = String(rec.exerciseName || '').toLowerCase();
+                if (!names.has(ex)) return false;
+                if (!rec.dateKey) return true;
+                return dateKeys.has(String(rec.dateKey));
+            })
+            .map(rec => ({ id: rec.id, kind: rec.kind, name: rec.name, mime: rec.mime }));
+    } catch (e) {
+        return [];
+    }
 }
 
 /** Toggle gym/workout diary inside the adherence session sheet. */
@@ -1118,12 +1562,21 @@ function buildLactateIntervalRowsHtml(block) {
                 </div>`);
                 return;
             }
-            if (/static\s*stretch/i.test(name)) {
+            if (item.isStretchGroup || /static\s*stretch/i.test(name) || /stretch/i.test(name)) {
+                const muscles = adherenceLogSets(item, { stretch: true })
+                    .map((s, i) => stretchMuscleLabel(s, i));
+                const muscleHtml = muscles.length
+                    ? muscles.map(m => `<div>${escapeHtml(m)}</div>`).join('')
+                    : 'Cool-down';
                 rows.push(`<div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--border-subtle);">
                     <div style="font-size:12px; color:var(--text-main); font-weight:700;">${escapeHtml(name)}</div>
-                    <div style="margin-top:6px; font-size:11px; color:var(--text-silver); font-family:'Roboto Mono';">Cool-down</div>
+                    <div style="margin-top:6px; font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; line-height:1.5;">${muscleHtml}</div>
                 </div>`);
                 return;
+            }
+            const timeLabel = formatExerciseDurationLabel(item);
+            if (timeLabel) {
+                rows.push(`<div style="margin-bottom:10px; font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:700;">${escapeHtml(name)} · ${escapeHtml(timeLabel)}</div>`);
             }
             const sets = (item.sets || []).filter(s => s && s.completed !== false);
             sets.forEach((set, si) => {
@@ -1363,9 +1816,28 @@ export function openHistoryWorkoutDetail(exName, dateStr) {
         openLactateSessionDetail('', dateStr, 0);
         return;
     }
+
+    const sessions = listSessionsForAdherenceDay(dateStr);
+    for (const sess of sessions) {
+        const items = Array.isArray(sess.items) && sess.items.length
+            ? sess.items
+            : (getWorkoutSessionSnapshot(sess.id)?.items || []);
+        const idx = items.findIndex(it => namesMatchExercise(it, exName)
+            || adherenceItemDisplayName(it) === exName
+            || (it.exercise?.name || it.name) === exName);
+        if (idx >= 0 && sess.id) {
+            openAdherenceSessionDetail(sess.id, dateStr);
+            openAdherenceExerciseLog(idx);
+            return;
+        }
+    }
+
     const data = store.globalGroupedHistory[dateStr];
     if (!data) return;
-    const logs = (data.items || []).filter(i => i.type === 'workout' && i.exercise === exName);
+    const logs = (data.items || [])
+        .filter(i => i.type === 'workout' && i.exercise === exName)
+        .slice()
+        .sort((a, b) => (Number(a.sets) || 0) - (Number(b.sets) || 0));
     const sheet = document.getElementById('meal-detail-sheet');
     const titleEl = document.getElementById('meal-detail-title');
     const subEl = document.getElementById('meal-detail-subtitle');
@@ -1378,27 +1850,55 @@ export function openHistoryWorkoutDetail(exName, dateStr) {
     if (subEl) subEl.textContent = dateStr || '';
     if (macrosEl) macrosEl.innerHTML = '';
 
+    let diaryItem = null;
+    try {
+        const iso = resolveIsoFromDateStr(dateStr);
+        const snaps = Object.values(loadWorkoutSessionSnapshots() || {});
+        for (const s of snaps) {
+            if (!(s?.dateIso === iso || (s?.dateIso && localeDateEquals(dateStr, s.dateIso)))) continue;
+            const hit = (s.items || []).find(it => namesMatchExercise(it, exName));
+            if (hit) {
+                diaryItem = hit;
+                if (exerciseDiaryHasContent(hit)) break;
+            }
+        }
+    } catch (e) { /* ignore */ }
+    if (diaryItem) mergeDiaryOntoItems([diaryItem], dateStr, diaryItem.dateIso);
+
+    const isStretch = /stretch/i.test(exName || '');
     let html = '';
-    logs.forEach(log => {
+    const timeLabel = formatExerciseDurationLabel(diaryItem);
+    if (timeLabel) {
+        html += `<div style="margin-bottom:14px; padding:12px; border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-surface-elevated);">
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Time on exercise</div>
+            <div style="font-size:20px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtml(timeLabel)}</div>
+        </div>`;
+    }
+    logs.forEach((log, i) => {
         const detail = log.weight_kg > 0
             ? `${log.weight_kg}kg × ${log.reps}`
             : (exName === 'Practice' || exName === 'Match'
                 ? `RPE ${log.rpe || '—'}`
                 : `${log.distance_km || 0} km${log.time_minutes ? ` · ${log.time_minutes} min` : ''}`);
+        const rowLabel = isStretch
+            ? (String(log.notes || '').trim() || 'Stretch')
+            : `Set ${i + 1}`;
         html += `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border-subtle);">
             <div>
-                <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Set ${log.sets}</div>
-                <div style="font-size:13px; color:var(--text-main); font-weight:700; margin-top:4px;">${detail}</div>
+                <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${escapeHtml(rowLabel)}</div>
+                <div style="font-size:13px; color:var(--text-main); font-weight:700; margin-top:4px;">${isStretch ? 'Done' : detail}</div>
             </div>
             <button type="button" onclick="deleteHistoryLog('workout_logs', ${log.id})" style="background:none; color:var(--text-stealth); border:none; cursor:pointer; font-size:14px; display:flex; align-items:center;"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
         </div>`;
     });
-    foodsEl.innerHTML = html || `<div style="font-size:12px; color:var(--text-muted);">No sets</div>`;
+    foodsEl.innerHTML = (html || `<div style="font-size:12px; color:var(--text-muted);">No sets</div>`)
+        + (diaryItem ? renderAdherenceExerciseDiaryHtml(diaryItem) : renderAdherenceExerciseDiaryHtml({ diaryNotes: '', diaryMedia: [] }));
     if (actionsEl) {
         actionsEl.classList.add('hidden');
         actionsEl.innerHTML = '';
     }
     sheet.classList.remove('hidden');
+    fillAdherenceExerciseDiaryMedia(diaryItem || { exercise: { name: exName }, name: exName }, dateStr);
 }
 
 export function escapeHtml(str) {
@@ -1440,6 +1940,16 @@ export async function idbGetJournalMedia(id) {
         const tx = db.transaction(JOURNAL_MEDIA_STORE, 'readonly');
         const req = tx.objectStore(JOURNAL_MEDIA_STORE).get(id);
         req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+export async function idbGetAllJournalMedia() {
+    const db = await openJournalMediaDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(JOURNAL_MEDIA_STORE, 'readonly');
+        const req = tx.objectStore(JOURNAL_MEDIA_STORE).getAll();
+        req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
         req.onerror = () => reject(req.error);
     });
 }
@@ -1682,7 +2192,7 @@ export async function persistPendingJournalMedia(dateKey) {
     return meta;
 }
 
-export async function buildJournalMediaGalleryHtml(mediaList) {
+export async function buildJournalMediaGalleryHtml(mediaList, heading = 'Session media') {
     if (!mediaList || !mediaList.length) return '';
     const cards = [];
     for (const m of mediaList) {
@@ -1711,7 +2221,7 @@ export async function buildJournalMediaGalleryHtml(mediaList) {
     }
     if (!cards.length) return '';
     return `<div style="margin-top:12px;">
-        <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Session media</div>
+        ${heading ? `<div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">${escapeHtml(heading)}</div>` : ''}
         <div style="display:flex; flex-wrap:wrap; gap:8px;">${cards.join('')}</div>
     </div>`;
 }

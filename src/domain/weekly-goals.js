@@ -1,18 +1,30 @@
 /**
  * Weekly Exercise goals (Mon–Sun) + Asensus points.
  */
-import { store } from '../state/store.js';
-import { getMondayISO, dateToISO, addDaysISO, getPlannedDayEvents, isLactateEvent, isSteadyCardio, isLiftingEvent, isStrengthEvent, isPracticeEvent, isGameEvent, loadWorkoutSessionSnapshots } from './route-planner.js';
+import { getMondayISO, dateToISO, addDaysISO, getPlannedDayEvents, isLactateEvent, isSteadyCardio, isLiftingEvent, isStrengthEvent, isPracticeEvent, isGameEvent, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind } from './route-planner.js';
 
 const POINTS_KEY = 'ascensus_points_total';
 const WEEK_AWARD_KEY = 'ascensus_points_week_awarded';
 
-function localeKey(d) {
-    return d.toLocaleDateString();
-}
-
 function parseISO(iso) {
     return new Date(iso + 'T12:00:00');
+}
+
+/** Snapshots are keyed by sessionId; older builds may have used dateIso → array. */
+function sessionsForDate(snaps, iso) {
+    const fromIds = Object.values(snaps || {}).filter(s => s && typeof s === 'object' && !Array.isArray(s) && s.dateIso === iso);
+    if (fromIds.length) return fromIds;
+    const legacy = snaps?.[iso];
+    return Array.isArray(legacy) ? legacy : [];
+}
+
+function isGymStrengthKind(kind) {
+    const k = String(kind || '');
+    return normalizeLoggedSessionKind(k) === 'Full Body / Strength'
+        || isStrengthEvent(k)
+        || k === 'Gym'
+        || k === 'Gym Workout'
+        || /hypertrophy|strength/i.test(k);
 }
 
 export function getAsensusPoints() {
@@ -120,6 +132,7 @@ function lactateBlockFraction(snap) {
 
 function steadyMinutes(snap) {
     let mins = Number(snap?.durationMinutes) || 0;
+    if (!(mins > 0) && Number(snap?.durationMs) > 0) mins = Number(snap.durationMs) / 60000;
     (snap?.items || []).forEach(it => {
         (it.sets || []).forEach(s => {
             if (Number(s.time_minutes) > mins) mins = Number(s.time_minutes);
@@ -156,25 +169,27 @@ export function computeWeeklyGoalScores(weekStartISO = getMondayISO(new Date()))
     let strengthSessionCount = 0;
 
     days.forEach(iso => {
-        const daySnaps = snaps[iso] || [];
+        const daySnaps = sessionsForDate(snaps, iso);
         daySnaps.forEach(snap => {
             const kind = String(snap.kind || '');
-            if (isLactateEvent(kind) || /lactate|hit/i.test(kind)) {
+            const creditKind = normalizeLoggedSessionKind(kind);
+            if (creditKind === 'Lactate' || isLactateEvent(kind) || /lactate|hit/i.test(kind)) {
                 const f = lactateBlockFraction(snap);
-                anaerobic += f >= 0.5 ? f : 0;
+                if (f >= 0.5) anaerobic += f;
+                else if (snap.isHitClass) anaerobic += 1;
             }
             // Practice/match with diary RPE ≥ 7 counts as anaerobic
-            if ((/practice/i.test(kind) || /match|game/i.test(kind))) {
+            if (isPracticeEvent(kind) || isGameEvent(kind) || /practice/i.test(kind) || /match|game/i.test(kind)) {
                 const rpe = Number(snap.rpe);
                 if (Number.isFinite(rpe) && rpe >= 7) anaerobic += 1;
             }
-            if (isSteadyCardio(kind) || /steady/i.test(kind)) {
+            if (creditKind === 'Cardio (Steady)' || isSteadyCardio(kind) || /steady/i.test(kind)) {
                 if (steadyMinutes(snap) > 40) aerobic += 1;
             }
             if (sessionHasCompletedStretch(snap)) stretchDone += 1;
             if (sessionHasCompletedWarmup(snap)) warmupDone += 1;
 
-            if (isLiftingEvent(kind) || isStrengthEvent(kind) || /hypertrophy|strength/i.test(kind)) {
+            if (isGymStrengthKind(kind)) {
                 strengthFracSum += gymSetFraction(snap);
                 strengthSessionCount += 1;
             }
@@ -185,12 +200,12 @@ export function computeWeeklyGoalScores(weekStartISO = getMondayISO(new Date()))
             const pj = JSON.parse(localStorage.getItem('ascensus_practice_journal_' + iso) || 'null');
             if (pj && Number(pj.rpe) >= 7) {
                 // Avoid double-count if already counted from snap with same day
-                const already = (snaps[iso] || []).some(s => /practice/i.test(String(s.kind || '')) && Number(s.rpe) >= 7);
+                const already = daySnaps.some(s => /practice/i.test(String(s.kind || '')) && Number(s.rpe) >= 7);
                 if (!already) anaerobic += 1;
             }
             const mj = JSON.parse(localStorage.getItem('ascensus_match_journal_' + iso) || 'null');
             if (mj && Number(mj.rpe) >= 7) {
-                const already = (snaps[iso] || []).some(s => /match|game/i.test(String(s.kind || '')) && Number(s.rpe) >= 7);
+                const already = daySnaps.some(s => /match|game/i.test(String(s.kind || '')) && Number(s.rpe) >= 7);
                 if (!already) anaerobic += 1;
             }
         } catch (e) { /* ignore */ }

@@ -1,6 +1,7 @@
 import { store } from '../state/store.js';
 import { getTodayFocus } from '../domain/fitness-hud.js';
 import { generateFutureTimeline } from '../domain/route-planner.js';
+import { refreshCloudPlanCredits } from '../domain/thermodynamics.js';
 import { hydrateStretchSettingsDom } from '../domain/session-prep.js';
 import { drawExerciseChart, drawMacroChart, drawUnifiedChart } from './charts.js';
 import { closeExecutionZone } from './drive.js';
@@ -115,10 +116,23 @@ export function switchTab(element, tabId, title) {
         redrawJourneyPanel(getActiveJourneyPanel(), 400);
     }
     if (tabId === 'route') {
+        refreshCloudPlanCredits()
+            .then((pulled) => { if (pulled) refreshPlanPanel(getActivePlanPanel(), 0); })
+            .catch(() => {});
         refreshPlanPanel(getActivePlanPanel(), 100);
     }
     if (tabId === 'drive') {
+        refreshCloudPlanCredits()
+            .then((pulled) => {
+                if (pulled) {
+                    try { getTodayFocus(); } catch (e) { console.warn(e); }
+                }
+            })
+            .catch(() => {});
         try { getTodayFocus(); } catch (e) { console.warn(e); }
+        try {
+            if (typeof window.updateDomainBars === 'function') window.updateDomainBars();
+        } catch (e) { /* ignore */ }
     }
     if (tabId === 'library') {
         const active = document.querySelector('#library-sub-nav .catalogue-sub-btn.active');
@@ -155,6 +169,11 @@ export function switchDriveSubTab(panel, btn) {
     else {
         const fallback = document.querySelector(`#drive-sub-nav .catalogue-sub-btn[data-drive="${panel}"]`);
         if (fallback) setCatalogueSubBtnActive('#drive-sub-nav', fallback);
+    }
+    if (panel === 'goals') {
+        try {
+            if (typeof window.updateDomainBars === 'function') window.updateDomainBars();
+        } catch (e) { /* ignore */ }
     }
     if (panel === 'log') {
         try {

@@ -157,8 +157,11 @@ function shuffle(arr) {
 function pickRandom(list, exclude = new Set()) {
     // Apply monthly / permanent BW swaps so we don't programme banned press-ups etc.
     const mapped = (list || []).map(n => resolveProgrammedBwName(n));
-    const pool = mapped.filter(n => n && !exclude.has(n));
-    if (!pool.length) return mapped[0] || (list || [])[0] || null;
+    const pool = mapped.filter(n => n && !exclude.has(n) && !isExerciseMuscleLocked(n));
+    if (!pool.length) {
+        const unlocked = mapped.filter(n => n && !isExerciseMuscleLocked(n));
+        return unlocked[0] || null;
+    }
     return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -591,30 +594,6 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
     try {
         const plans = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}');
         const locked = plans && plans[sessionTypeId];
-        if (locked?.source === 'custom' && Array.isArray(locked.items) && locked.items.length) {
-            const prefs = getHypertrophyPlanPrefs();
-            const plan = {
-                kind,
-                label: HYPERTROPHY_DISPLAY_LABELS[HYPERTROPHY_EVENT_TYPES[kind]] || kind,
-                tier: prefs.maxTime,
-                maxTime: prefs.maxTime,
-                split: prefs.split,
-                items: locked.items.map((it) => ({
-                    name: it.exercise?.name || it.name,
-                    slotLabel: it.slotLabel || null,
-                    notes: it.notes || 'Custom cycle workout',
-                    sets: (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText).length || it.plannedSets || 3,
-                    isIsolation: !!(it.isIsolation),
-                    isExtra: !!it.isExtra,
-                    isSuperset: !!it.isSuperset,
-                    sides: it.sides
-                })).filter((it) => it.name),
-                note: 'Hypertrophy · custom workout for this month',
-                source: 'custom'
-            };
-            window.currentHypertrophySession = plan;
-            return plan;
-        }
         if (locked?.exercisesConfirmed && Array.isArray(locked.lockedItems) && locked.lockedItems.length) {
             const prefs = getHypertrophyPlanPrefs();
             const plan = {
@@ -635,15 +614,40 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
                         isSuperset: !!it.isSuperset,
                         sides: it.sides
                     })),
-                note: 'Hypertrophy · confirmed for this month',
-                source: 'confirmed'
+                note: locked.source === 'custom' ? 'Hypertrophy · custom workout' : 'Hypertrophy · confirmed',
+                source: locked.source === 'custom' ? 'custom' : 'confirmed'
             };
             window.currentHypertrophySession = plan;
-            return plan;
+            return finalizeHypPlan(plan);
+        }
+        if (locked?.source === 'custom' && Array.isArray(locked.items) && locked.items.length) {
+            const prefs = getHypertrophyPlanPrefs();
+            const plan = {
+                kind,
+                label: HYPERTROPHY_DISPLAY_LABELS[HYPERTROPHY_EVENT_TYPES[kind]] || kind,
+                tier: prefs.maxTime,
+                maxTime: prefs.maxTime,
+                split: prefs.split,
+                items: locked.items
+                    .filter((it) => it && (it.exercise?.name || it.name) && !it.isWarmupGroup && !it.isStretchGroup)
+                    .map((it) => ({
+                        name: it.exercise?.name || it.name,
+                        slotLabel: it.slotLabel || null,
+                        notes: it.notes || 'Custom cycle workout',
+                        sets: (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText).length || it.plannedSets || 3,
+                        isIsolation: !!(it.isIsolation),
+                        isExtra: !!it.isExtra,
+                        isSuperset: !!it.isSuperset,
+                        sides: it.sides
+                    })),
+                note: 'Hypertrophy · custom workout',
+                source: 'custom'
+            };
+            window.currentHypertrophySession = plan;
+            return finalizeHypPlan(plan);
         }
         if (locked?.plan && Array.isArray(locked.plan.items)) {
-            window.currentHypertrophySession = locked.plan;
-            return locked.plan;
+            return finalizeHypPlan(locked.plan);
         }
     } catch (e) { /* fall through */ }
 
@@ -662,8 +666,7 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
         if (raw) {
             const cached = JSON.parse(raw);
             if (cached && cached.key === key && cached.plan && Array.isArray(cached.plan.items)) {
-                window.currentHypertrophySession = cached.plan;
-                return cached.plan;
+                return finalizeHypPlan(cached.plan);
             }
         }
     } catch (e) { /* rebuild */ }
@@ -676,7 +679,7 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
         localStorage.setItem('ascensus_cycle_session_plans_v1', JSON.stringify(plans));
     } catch (e) { /* ignore */ }
     window.currentHypertrophySession = plan;
-    return plan;
+    return finalizeHypPlan(plan);
 }
 
 /**
@@ -700,10 +703,18 @@ export function buildHypertrophySessionRoutine(focus) {
     let items = trimToBudget(groups.g1, groups.g2, budget.compounds, budget.isolations);
 
     // Fatigue filter: avoid primary muscles that are blocked
-    items = items.filter(it => !isPrimaryMuscleBlocked(it.primary));
-    // If filtering removed too many, refill lightly from same groups
+    items = items.filter(it => it && !isPrimaryMuscleBlocked(it.primary) && !isExerciseMuscleLocked(it.name));
+    // If filtering removed too many, refill from unlocked picks only
     if (items.length < Math.min(4, budget.compounds + budget.isolations)) {
-        items = trimToBudget(groups.g1, groups.g2, budget.compounds, budget.isolations);
+        const refill = trimToBudget(groups.g1, groups.g2, budget.compounds, budget.isolations)
+            .filter(it => it && !isPrimaryMuscleBlocked(it.primary) && !isExerciseMuscleLocked(it.name));
+        const seen = new Set(items.map(it => it.name));
+        refill.forEach((it) => {
+            if (!seen.has(it.name)) {
+                items.push(it);
+                seen.add(it.name);
+            }
+        });
     }
 
     const label = HYPERTROPHY_DISPLAY_LABELS[HYPERTROPHY_EVENT_TYPES[kind]] || kind;
@@ -792,6 +803,85 @@ export function isPrimaryMuscleBlocked(muscle) {
     if (!entry) return false;
     const elapsedHrs = (Date.now() - (entry.updatedAt || 0)) / 3600000;
     return elapsedHrs < st.blockPrimaryHours;
+}
+
+/** Hypertrophy GPS sessions, plus generic gym labels during a hypertrophy block (not Strength A/B). */
+export function usesHypertrophyProgramming(focus) {
+    if (isHypertrophyFocus(focus)) return true;
+    if (!isHypertrophyPhase()) return false;
+    if (/Strength\s*[AB]/i.test(focus || '')) return false;
+    return focus === 'Full Body / Strength' || focus === 'Gym' || focus === 'Gym Workout';
+}
+
+/** Lockout is created by hypertrophy programming only — never by Strength A/B. */
+export function sessionAppliesMuscleLockout(kind) {
+    return usesHypertrophyProgramming(kind);
+}
+
+/** True when this exercise's primary muscle is in a hypertrophy lockout / 48h fatigue lock. */
+export function isExerciseMuscleLocked(name) {
+    if (!name) return false;
+    const meta = HYPERTROPHY_EXERCISE_META[name] || getExerciseMeta(name) || {};
+    const primaries = [];
+    if (Array.isArray(meta.primaryMuscles)) primaries.push(...meta.primaryMuscles);
+    else if (Array.isArray(meta.primary)) primaries.push(...meta.primary);
+    else if (meta.primary) primaries.push(meta.primary);
+    if (primaries.some((m) => isPrimaryMuscleBlocked(m))) return true;
+    const mg = meta.muscle_group;
+    if (mg && store.fatigueLockouts && store.fatigueLockouts[mg]) return true;
+    return false;
+}
+
+function pickUnlockedAlternative(name) {
+    const meta = HYPERTROPHY_EXERCISE_META[name] || getExerciseMeta(name) || {};
+    const candidates = Object.keys(HYPERTROPHY_EXERCISE_META).filter((n) => {
+        if (n === name) return false;
+        if (isExerciseMuscleLocked(n)) return false;
+        const m = HYPERTROPHY_EXERCISE_META[n];
+        if (meta.movement && m.movement && m.movement !== meta.movement) return false;
+        if (meta.role && m.role && m.role !== meta.role) return false;
+        return true;
+    });
+    if (candidates.length) return candidates[Math.floor(Math.random() * candidates.length)];
+    return Object.keys(HYPERTROPHY_EXERCISE_META).find((n) => n !== name && !isExerciseMuscleLocked(n)) || null;
+}
+
+/** Swap or drop items whose primary muscle is locked — does not rewrite the stored month plan. */
+export function avoidLockedMuscleOnItems(items) {
+    return (items || []).map((it) => {
+        if (!it || it.isCoreBlock || it.isWarmupGroup || it.isStretchGroup) return it;
+        if (it.isSuperset && Array.isArray(it.sides)) {
+            const sides = it.sides.map((side) => {
+                const n = side.exercise?.name || side.name;
+                if (!isExerciseMuscleLocked(n)) return side;
+                const alt = pickUnlockedAlternative(n);
+                if (!alt) return null;
+                return {
+                    ...side,
+                    name: alt,
+                    exercise: side.exercise ? { ...side.exercise, name: alt } : side.exercise
+                };
+            }).filter(Boolean);
+            if (!sides.length) return null;
+            return { ...it, sides };
+        }
+        const n = it.name || it.exercise?.name;
+        if (!isExerciseMuscleLocked(n)) return it;
+        const alt = pickUnlockedAlternative(n);
+        if (!alt) return null;
+        return {
+            ...it,
+            name: alt,
+            exercise: it.exercise ? { ...it.exercise, name: alt } : it.exercise
+        };
+    }).filter(Boolean);
+}
+
+function finalizeHypPlan(plan) {
+    if (!plan || !Array.isArray(plan.items)) return plan;
+    const next = { ...plan, items: avoidLockedMuscleOnItems(plan.items) };
+    window.currentHypertrophySession = next;
+    return next;
 }
 
 function isBodyweightWarmupLift(exName) {

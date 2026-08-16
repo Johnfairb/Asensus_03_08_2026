@@ -520,6 +520,8 @@ export function openFoodDetail(id) {
     document.getElementById('library-detail-subtitle').textContent = food._heading
         ? `${food._heading}${food._rawLabel ? ` · ${food._rawLabel}` : ''}`
         : (food._category ? `Per 100g · ${food._category}` : 'Per 100g');
+    const pin = document.getElementById('library-detail-pin');
+    if (pin) pin.innerHTML = '';
     document.getElementById('library-detail-body').innerHTML = [
         libraryDetailRow('Calories', `${cals} kcal`),
         libraryDetailRow('Protein', `${pro} g`),
@@ -575,18 +577,22 @@ export function openExerciseDetail(id) {
     `).join('');
 
     const bodyParts = [];
+    const pin = document.getElementById('library-detail-pin');
+    if (pin) pin.innerHTML = '';
     if (!isCardio) {
         const safeName = String(displayName || '').replace(/'/g, "\\'");
-        bodyParts.push(`
+        const weightHtml = `
             <div class="detail-metric-row">
                 <div class="hud-label" style="margin:0 0 8px 0;">Working weight</div>
+                <button type="button" id="library-ex-dont-know-btn" class="btn-primary is-secondary ${savedWeight === '' ? '' : 'hidden'}" style="margin:0 0 10px; width:100%;" onclick="openLibraryDontKnowWeight('${safeName}')">I don't know the weight</button>
                 <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Saved for future sessions. Normal progression still applies after you log.</div>
                 <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">WEIGHT (KG)</label>
                 <input type="number" inputmode="decimal" min="0" step="0.5" class="input-field" id="library-ex-weight-input" value="${savedWeight === '' ? '' : savedWeight}" placeholder="e.g. 60" style="margin-bottom:8px;" oninput="syncLibraryWeightDontKnowBtn()">
                 <div id="library-ex-weight-error" style="display:none; font-size:12px; color:#ff6b6b; margin-bottom:8px;"></div>
-                <button type="button" class="btn-primary is-primary" style="margin:0 0 8px; width:100%;" onclick="saveExerciseWorkingWeightFromDetail()">Save weight</button>
-                <button type="button" id="library-ex-dont-know-btn" class="btn-primary is-secondary ${savedWeight === '' ? '' : 'hidden'}" style="margin:0; width:100%;" onclick="openLibraryDontKnowWeight('${safeName}')">I don't know my weight</button>
-            </div>`);
+                <button type="button" class="btn-primary is-primary" style="margin:0; width:100%;" onclick="saveExerciseWorkingWeightFromDetail()">Save weight</button>
+            </div>`;
+        if (pin) pin.innerHTML = weightHtml;
+        else bodyParts.push(weightHtml);
     }
     if (catalog) {
         bodyParts.push(`

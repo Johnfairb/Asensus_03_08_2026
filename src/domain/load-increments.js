@@ -290,6 +290,17 @@ export function skipsWeightProgression(exName, choice = null) {
     return !!profile.skipProgression || profile.code === 'free' || profile.code === 'none';
 }
 
+/** One equipment increment above current load. Unchanged if progression is skipped or already at max. */
+export function increaseLoadOneStep(weight, exName, choice = null) {
+    const w = Number(weight) || 0;
+    if (w <= 0) return w;
+    if (skipsWeightProgression(exName, choice)) return w;
+    const profile = resolveLoadProfile(exName, choice, { weight: w });
+    const step = Number(profile?.step);
+    if (!Number.isFinite(step) || step <= 0) return w;
+    return roundUpLoad(w + step, profile);
+}
+
 /** Map profile → legacy equipment string still used in a few call sites. */
 export function profileToLegacyEquipment(profile) {
     const code = typeof profile === 'string' ? profile : profile?.code;

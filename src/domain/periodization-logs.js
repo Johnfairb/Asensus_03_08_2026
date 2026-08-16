@@ -9,7 +9,8 @@ import {
     equipmentForExercise,
     isHypertrophyFocus,
     isHypertrophyPhase,
-    roundUpLoad
+    roundUpLoad,
+    usesHypertrophyProgramming
 } from './hypertrophy-engine.js';
 import { isStrengthFocus, isStrengthPhase } from './strength-engine.js';
 
@@ -17,12 +18,8 @@ const PHASE_MAP_KEY = 'ascensus_log_periodization_v1';
 
 export function periodizationBucketForSession(phase, focus) {
     const p = phase || getSeasonPhase();
-    if (isHypertrophyFocus(focus) || (isHypertrophyPhase(p) && isStrengthFocus(focus))) {
-        return 'hypertrophy';
-    }
-    if (isStrengthFocus(focus) && !isHypertrophyFocus(focus)) {
-        return 'strength';
-    }
+    if (usesHypertrophyProgramming(focus)) return 'hypertrophy';
+    if (isStrengthFocus(focus) && !isHypertrophyFocus(focus)) return 'strength';
     if (isHypertrophyPhase(p)) return 'hypertrophy';
     if (isStrengthPhase(p)) return 'strength';
     return null;

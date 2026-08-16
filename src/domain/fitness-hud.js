@@ -1,14 +1,15 @@
 import { store } from '../state/store.js';
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from './meal-planner.js';
 import { getLactateProtocolForSlot } from './lactate-engine.js';
-import { assignPairedSessionSlots, dateToISO, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, saveWorkoutSessionSnapshots } from './route-planner.js';
+import { assignPairedSessionSlots, dateToISO, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listLoggedCreditKeysForDate, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, saveWorkoutSessionSnapshots } from './route-planner.js';
 import { loadDayJournal } from '../ui/journey.js';
 import { SPORT_MATRIX } from './sports-matrix.js';
 import { buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, resolveStrengthSession } from './strength-engine.js';
 import {
     getHypertrophySessionRoutine,
     isHypertrophyFocus,
-    isHypertrophyPhase
+    isHypertrophyPhase,
+    usesHypertrophyProgramming
 } from './hypertrophy-engine.js';
 import { explainDayNutritionTargets, persistUserConfigToCloud } from './thermodynamics.js';
 import { DAILY_HYDRATION_TARGET_L } from '../config/constants.js';
@@ -17,11 +18,12 @@ import { computeDomainBarLayout, formatDomainAimLabel, getMacroRange } from '../
 import { getRecommendedSleepHours, getSleepDrivingRpeLoad, getTodaySleepHours, resolveSessionRpe } from './sleep-rpe.js';
 import {
     draftMatchesPlanEvent,
+    findActiveRestOnItems,
     getDraftRunningElapsedMs,
     getDraftSessionLabel,
     loadWorkoutDraft
 } from './workout-draft.js';
-import { formatDurationMs } from '../ui/workout-timer.js';
+import { formatDurationMs, formatExerciseDurationLabel } from '../ui/workout-timer.js';
 
 // --- THE FITNESS HUD DOMAIN MULTIPLIERS ---
 // Before the JSON seed is applied, these fallbacks convert volume into fitness scores.
@@ -88,7 +90,7 @@ export function getTodayFocus() {
         else if (focus === 'Auxiliary') {
             descEl.innerText = "No auxiliary in this phase — use Strength or Hypertrophy gym days instead.";
         }
-        else if (isHypertrophyFocus(focus) || (isHypertrophyPhase() && isStrengthFocus(focus))) {
+        else if (usesHypertrophyProgramming(focus)) {
             const built = getHypertrophySessionRoutine(focus);
             descEl.innerText = `Hypertrophy — ${built.label || 'session'}. Stick to rest times so the session finishes on schedule.`;
         }
@@ -219,10 +221,7 @@ function getTodayLoggedCreditCounts() {
         counts[key] = (counts[key] || 0) + 1;
     };
 
-    const sessions = (typeof listWorkoutSessionsForDate === 'function')
-        ? listWorkoutSessionsForDate(todayIso)
-        : [];
-    sessions.forEach(s => bump(planEventCreditKey(s?.kind)));
+    (listLoggedCreditKeysForDate(todayIso) || []).forEach((key) => bump(planEventCreditKey(key) || key));
 
     const dayJournal = loadDayJournal(todayIso);
     if (dayJournal && (dayJournal.source === 'practice' || dayJournal.type === 'practice')) {
@@ -247,6 +246,17 @@ function filterUnloggedPlanSlots(slots, creditCounts) {
         }
         return true;
     });
+}
+
+function planRestTimerSlotHtml(draft) {
+    const rest = findActiveRestOnItems(draft?.items);
+    if (!rest) return `<div id="plan-rest-timer-slot" class="plan-rest-timer hidden"></div>`;
+    const name = String(rest.name || '').replace(/</g, '&lt;');
+    const sub = name ? ` · ${name}` : '';
+    return `<div id="plan-rest-timer-slot" class="plan-rest-timer">
+        <div class="session-rest-timer-label">Rest timer${sub}</div>
+        <div data-rest-countdown="${rest.exIdx}-${rest.setIdx}" class="session-rest-timer-count">${rest.left}s</div>
+    </div>`;
 }
 
 export function renderWorkoutPreview(focus) {
@@ -331,6 +341,7 @@ export function renderWorkoutPreview(focus) {
                 </div>
                 ${resumeStopActions()}
             </div>
+            ${planRestTimerSlotHtml(draft)}
         </div>`
         : '';
 
@@ -348,6 +359,7 @@ export function renderWorkoutPreview(focus) {
             </div>
         </div>` : '');
         updatePreviousMatchEntryButton(dayEvents);
+        try { window.syncGlobalRestBanners?.(); } catch (e) { /* ignore */ }
         return;
     }
 
@@ -365,11 +377,13 @@ export function renderWorkoutPreview(focus) {
         }
         previewEl.innerHTML = html;
         updatePreviousMatchEntryButton(dayEvents);
+        try { window.syncGlobalRestBanners?.(); } catch (e) { /* ignore */ }
         return;
     }
 
     previewEl.innerHTML = draftBanner + slotsForDisplay.map(s => buildCard(s.event, s.time)).join('');
     updatePreviousMatchEntryButton(dayEvents);
+    try { window.syncGlobalRestBanners?.(); } catch (e) { /* ignore */ }
 }
 
 /** Optional Zone 2 card shown on every Rest day. */
@@ -625,7 +639,33 @@ export function generateDailyExerciseLog() {
         return `${rows.length} sets`;
     };
 
-    const renderExerciseLines = (logs) => {
+    const durationForName = (sessionItems, exName) => {
+        const want = String(exName || '').trim().toLowerCase();
+        if (!want) return '';
+        for (const it of sessionItems || []) {
+            const n = String(it?.exercise?.name || it?.name || '').trim().toLowerCase();
+            if (n === want) return formatExerciseDurationLabel(it);
+            if (it?.isSuperset && (it.sides || []).some(s => String(s?.exercise?.name || '').trim().toLowerCase() === want)) {
+                return formatExerciseDurationLabel(it);
+            }
+        }
+        return '';
+    };
+
+    const exerciseRowHtml = (name, detail, timeLabel) => {
+        const timeBit = timeLabel
+            ? `<div style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:700; margin-top:3px;">${timeLabel}</div>`
+            : '';
+        return `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px;">
+            <div style="min-width:0;">
+                <div style="font-size:13px; color:var(--text-main); font-weight:700;">${name}</div>
+                ${timeBit}
+            </div>
+            <div style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; font-weight:600; white-space:nowrap; flex-shrink:0; text-align:right;">${detail}</div>
+        </div>`;
+    };
+
+    const renderExerciseLines = (logs, sessionItems) => {
         let block = '';
         const grouped = (logs || []).reduce((acc, w) => {
             const key = w.exercise || 'Workout';
@@ -637,10 +677,7 @@ export function generateDailyExerciseLog() {
             const rows = grouped[exName];
             rows.forEach(log => { if (log.id != null) usedLogIds.add(String(log.id)); });
             const detail = summarizeSetRows(rows);
-            block += `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px;">
-                <div style="font-size:13px; color:var(--text-main); font-weight:700; min-width:0;">${exName}</div>
-                <div style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; font-weight:600; white-space:nowrap; flex-shrink:0;">${detail}</div>
-            </div>`;
+            block += exerciseRowHtml(exName, detail, durationForName(sessionItems, exName));
         }
         return block;
     };
@@ -744,22 +781,16 @@ export function generateDailyExerciseLog() {
                 bodyHtml = sess.items.map(item => {
                     const name = item.exercise?.name || item.name || 'Exercise';
                     const summary = summarizeLactateSnapshotSets(item.sets || []);
-                    return `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px;">
-                        <div style="font-size:13px; color:var(--text-main); font-weight:700; min-width:0;">${name}</div>
-                        <div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; font-weight:600; text-align:right; flex-shrink:0;">${summary}</div>
-                    </div>`;
+                    return exerciseRowHtml(name, summary, formatExerciseDurationLabel(item));
                 }).join('');
             } else {
-                bodyHtml = renderExerciseLines(sessionLogs);
+                bodyHtml = renderExerciseLines(sessionLogs, sess.items);
             }
             if (!bodyHtml && Array.isArray(sess.items)) {
                 bodyHtml = sess.items.map(item => {
                     const name = item.exercise?.name || item.name || 'Exercise';
                     const summary = summarizeSnapshotSets(item.sets || []);
-                    return `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px;">
-                        <div style="font-size:13px; color:var(--text-main); font-weight:700; min-width:0;">${name}</div>
-                        <div style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; font-weight:600; white-space:nowrap; flex-shrink:0;">${summary}</div>
-                    </div>`;
+                    return exerciseRowHtml(name, summary, formatExerciseDurationLabel(item));
                 }).join('');
             }
             const durMin = Number(sess.durationMinutes) || 0;
@@ -1013,7 +1044,7 @@ export function getWorkoutExerciseRows(focus) {
     if (focus === 'Practice') {
         return { sessionType: 'Practice', sessionName: 'Practice Day', exercises: [{ name: 'Log practice when finished' }] };
     }
-    if (isHypertrophyFocus(focus) || (isHypertrophyPhase() && isStrengthFocus(focus))) {
+    if (usesHypertrophyProgramming(focus)) {
         const built = getHypertrophySessionRoutine(focus);
         return {
             sessionType: 'Hypertrophy',

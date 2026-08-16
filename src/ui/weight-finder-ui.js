@@ -49,7 +49,7 @@ function ensureWeightFinderSheet() {
         if (e.target === sheet) dismissWeightFinder();
     };
     sheet.innerHTML = `
-        <div id="weight-finder-panel" class="detail-bottom-panel" onclick="event.stopPropagation()" style="max-height:85vh;">
+        <div id="weight-finder-panel" class="detail-bottom-panel" onclick="event.stopPropagation()">
             <div id="weight-finder-body"></div>
         </div>`;
     const root = document.querySelector('.iphone-screen') || document.body;
@@ -156,7 +156,7 @@ function renderBwCompetencyQuestion(exIdx) {
         <p style="font-size:13px; color:var(--text-silver); line-height:1.5; margin:0 0 18px;">
             If not, we’ll swap this lift for the rest of the calendar month and ask again next month.
         </p>
-        <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="weight-finder-actions">
             <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="confirmBwGateYes()">Yes</button>
             <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="confirmBwGateNo()">No — swap for this month</button>
         </div>`;
@@ -175,13 +175,13 @@ function renderKnowWeightQuestion(exIdx) {
             </div>
             <button type="button" onclick="dismissWeightFinder()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
-        <p style="font-size:13px; color:var(--text-silver); line-height:1.5; margin:0 0 18px;">
-            You haven't logged this exercise before. Set a work weight now (before logging sets), or find a starting load with 10 reps @ 5 RIR. Bodyweight is allowed (0 kg).
-        </p>
-        <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="weight-finder-actions" style="margin-top:4px; margin-bottom:14px;">
             <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="confirmWeightFinderKnowsYes()">Yes — I know the weight</button>
-            <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="confirmWeightFinderKnowsNo()">No — help me find it</button>
-        </div>`;
+            <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="confirmWeightFinderKnowsNo()">I don't know the weight</button>
+        </div>
+        <p style="font-size:13px; color:var(--text-silver); line-height:1.5; margin:0;">
+            You haven't logged this exercise before. Set a work weight now (before logging sets), or find a starting load with 10 reps @ 5 RIR. Bodyweight is allowed (0 kg).
+        </p>`;
 }
 
 function renderKnownWeightEntry(exIdx) {
@@ -204,9 +204,9 @@ function renderKnownWeightEntry(exIdx) {
         <input id="weight-finder-input" type="number" inputmode="decimal" min="0" step="0.5" placeholder="e.g. 60"
             style="width:100%; box-sizing:border-box; padding:12px; border-radius:8px; border:1px solid var(--border-subtle); background:rgba(255,255,255,0.04); color:var(--text-main); font-size:16px; font-weight:700; margin-bottom:8px;" />
         <div id="weight-finder-error" style="display:none; font-size:12px; color:#ff6b6b; margin-bottom:10px;"></div>
-        <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;" class="weight-finder-actions">
             <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="submitKnownWorkWeight()">Set work weight</button>
-            <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="confirmWeightFinderKnowsNo()">Actually, help me find it</button>
+            <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="confirmWeightFinderKnowsNo()">I don't know the weight</button>
         </div>`;
     setTimeout(() => document.getElementById('weight-finder-input')?.focus(), 50);
 }
@@ -235,7 +235,7 @@ function renderFinderEntry(exIdx) {
             style="width:100%; box-sizing:border-box; padding:12px; border-radius:8px; border:1px solid var(--border-subtle); background:rgba(255,255,255,0.04); color:var(--text-main); font-size:16px; font-weight:700; margin-bottom:8px;" />
         <div id="weight-finder-preview" style="font-size:12px; color:var(--gold-accent); font-family:'Roboto Mono',monospace; margin-bottom:8px; min-height:16px;"></div>
         <div id="weight-finder-error" style="display:none; font-size:12px; color:#ff6b6b; margin-bottom:10px;"></div>
-        <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;" class="weight-finder-actions">
             <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="${submitFn}">Set work weight (+10%)</button>
             <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="${knowFn}">${knowLabel}</button>
         </div>`;

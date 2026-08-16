@@ -34,8 +34,8 @@ function serializableDraftItems(items) {
             copy.sets = copy.sets.map(s => {
                 if (!s || typeof s !== 'object') return s;
                 const sc = { ...s };
-                // Wall-clock deadlines are rebuilt when rest is started again
-                delete sc.lockEndsAt;
+                delete sc._restAudioHeld;
+                delete sc.lockAlarmFired;
                 return sc;
             });
         }
@@ -184,4 +184,35 @@ export function getDraftRunningElapsedMs(draft = loadWorkoutDraft()) {
         return Math.max(0, Date.now() - anchor);
     }
     return Math.max(0, Number(draft.elapsedMs) || 0);
+}
+
+export function remainingRestSecondsFromSet(setObj) {
+    if (!setObj) return 0;
+    if (setObj.lockEndsAt) return Math.max(0, Math.ceil((setObj.lockEndsAt - Date.now()) / 1000));
+    return Math.max(0, Math.round(Number(setObj.lockTimeLeft) || 0));
+}
+
+/** First locked rest that still has time left (live items or a parked draft). */
+export function findActiveRestOnItems(items) {
+    const list = items || [];
+    for (let exIdx = 0; exIdx < list.length; exIdx++) {
+        const item = list[exIdx];
+        const sets = item?.sets || [];
+        for (let setIdx = 0; setIdx < sets.length; setIdx++) {
+            const set = sets[setIdx];
+            if (!set?.locked) continue;
+            const left = remainingRestSecondsFromSet(set);
+            if (left <= 0) continue;
+            const name = String(item?.exercise?.name || item?.name || '').trim();
+            return { exIdx, setIdx, left, name, set };
+        }
+    }
+    return null;
+}
+
+/** Write a parked draft blob (live saveWorkoutDraft no-ops when the log is empty). */
+export function writeWorkoutDraft(draft) {
+    if (!draft) return null;
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch (e) { /* ignore */ }
+    return draft;
 }

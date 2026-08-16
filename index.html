@@ -1164,6 +1164,7 @@
                     <span class="workout-timer-label">Timer</span>
                     <span id="workout-session-timer" class="workout-session-timer">00:00</span>
                 </div>
+                <div id="workout-header-rest-timer" class="hidden workout-header-rest-timer"></div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
                 <div style="display: flex; gap: 8px; align-items: center;" id="fuel-toggles">
@@ -1341,8 +1342,8 @@
     </div>
 
 <!-- POST-SESSION BRAIN DUMP (JOURNAL) -->
-    <div id="post-session-modal" class="hidden" style="position: fixed !important; top: 0; left: 0; width: 100vw; height: 100vh; background: transparent; z-index: 26000; display: flex; justify-content: center; align-items: flex-end; padding: 0;" onclick="if(event.target===this) dismissJournalModal()">
-        <div class="modal-content stealth-panel post-session-sheet" style="width: 100%; max-width: 390px; background: var(--bg-surface); max-height: min(90dvh, 720px); pointer-events: auto; border-radius: 20px 20px 0 0; box-shadow: 0 -8px 40px rgba(0,0,0,0.35); display: flex; flex-direction: column; overflow: hidden;" onclick="event.stopPropagation()">
+    <div id="post-session-modal" class="hidden" onclick="if(event.target===this) dismissJournalModal()">
+        <div class="modal-content stealth-panel post-session-sheet" style="width: 100%; background: var(--bg-surface); pointer-events: auto; border-radius: 20px 20px 0 0; box-shadow: 0 -8px 40px rgba(0,0,0,0.35);" onclick="event.stopPropagation()">
             <div class="post-session-scroll" style="flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 20px 20px 8px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:5px;">
                 <div style="font-family:'Roboto Mono', monospace; font-size:10px; color:var(--gold-accent); font-weight:800; text-transform:uppercase; letter-spacing:1px;" id="journal-modal-eyebrow">Session Complete</div>
@@ -1411,8 +1412,8 @@
             <div id="journal-schema-editor" class="hidden" style="margin-top:12px; padding:14px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-surface-elevated);"></div>
             </div>
 
-            <div class="post-session-footer" style="flex-shrink:0; padding:12px 20px calc(12px + env(safe-area-inset-bottom, 0px)); border-top:1px solid var(--border-subtle); background:var(--bg-surface);">
-                <button type="button" id="btn-finalize-workout" class="btn-primary is-primary" style="margin:0; width:100%; pointer-events: auto; cursor: pointer;" onclick="finalizeWorkoutLog()">Save & close</button>
+            <div class="post-session-footer" style="flex-shrink:0; border-top:1px solid var(--border-subtle); background:var(--bg-surface);">
+                <button type="button" id="btn-finalize-workout" class="btn-primary is-primary" style="margin:0; width:100%; pointer-events: auto; cursor: pointer;" onclick="finalizeWorkoutLog()">Sync & close</button>
             </div>
         </div>
     </div>
@@ -1856,8 +1857,9 @@
             </div>
             <button type="button" onclick="closeLibraryDetail()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
+        <div id="library-detail-pin" class="library-detail-pin"></div>
         <div id="library-detail-body" style="display:flex; flex-direction:column; gap:10px;"></div>
-        <div style="display:flex; gap:10px; margin-top:16px;">
+        <div class="library-detail-footer">
             <button type="button" id="library-detail-edit-btn" class="btn-primary is-secondary" style="margin:0; flex:1;" onclick="editFromLibraryDetail()">Edit</button>
             <button type="button" id="library-detail-ban-btn" class="btn-primary is-secondary" style="margin:0; flex:1; border-color:rgba(255,59,48,0.45); color:#FF3B30;" onclick="toggleBanFromLibraryDetail()">Ban</button>
         </div>

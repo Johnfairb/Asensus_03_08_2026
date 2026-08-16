@@ -12,6 +12,8 @@ import {
     HYPERTROPHY_EXERCISE_META,
     isHypertrophyFocus,
     isHypertrophyPhase,
+    isExerciseMuscleLocked,
+    usesHypertrophyProgramming,
     progressHypertrophyWeight,
     resolveWarmupRestOptions,
     roundUpLoad
@@ -32,7 +34,8 @@ import { formatCoreRepLabel } from './exercise-catalog.js';
 import { hasCoreStrengthRating } from './core-programming.js';
 
 import { renderActiveLog } from '../ui/templates.js';
-import { ensureCycleStarted, ensureCyclePlansForProgramme, sessionTypeIdFromFocus, sessionNeedsExerciseConfirm, confirmSessionExercises } from './workout-cycle.js';
+import { syncExerciseTimer } from '../ui/workout-timer.js';
+import { ensureCycleStarted, ensureCyclePlansForProgramme, sessionTypeIdFromFocus, confirmSessionExercises } from './workout-cycle.js';
 import { getEquivalentExercises, resolveItemSlotLabel } from './exercise-slots.js';
 import { latestPhaseWeight, strengthLoadFromHypertrophy, resolveLogPeriodization } from './periodization-logs.js';
 
@@ -57,7 +60,7 @@ export function addExercisesByIds(ids) {
     list.forEach((id) => {
         const ex = store.globalExerciseDB.find(e => e.id == id || String(e.id) === String(id));
         if (!ex) return;
-        if (store.fatigueLockouts[ex.muscle_group]) {
+        if (store.fatigueLockouts[ex.muscle_group] || isExerciseMuscleLocked(ex.name)) {
             if (!confirm(`System Optimization Notice: The [${ex.muscle_group.toUpperCase()}] muscle group is in a recovery phase. Loading this mechanical pathway may be suboptimal. Proceed with override?`)) {
                 return;
             }
@@ -100,6 +103,13 @@ export function addExerciseToActiveLog() {
     select.value = '';
 }
 
+function canRemoveGhostItem(item) {
+    if (!item) return false;
+    if (item.isWarmupGroup || item.isStretchGroup || item.isSportSessionBlock) return false;
+    if (/stretch/i.test(item.exercise?.name || '')) return false;
+    return !!(item.exercise?.name || item.isCoreBlock);
+}
+
 /** Swap an exercise in the ghost preview (pre-confirm). */
 export function swapGhostExercise(ghostIdx, newId) {
     if (!newId && newId !== 0) return;
@@ -114,6 +124,14 @@ export function swapGhostExercise(ghostIdx, newId) {
     renderGhostWorkoutFromItems();
 }
 
+/** Remove an exercise from the ghost preview (pre-confirm). */
+export function removeGhostExercise(ghostIdx) {
+    const item = store.currentGhostItems[ghostIdx];
+    if (!canRemoveGhostItem(item)) return;
+    store.currentGhostItems.splice(ghostIdx, 1);
+    renderGhostWorkoutFromItems();
+}
+
 export function renderGhostWorkoutFromItems() {
     const content = document.getElementById('ghost-content');
     const container = document.getElementById('ghost-template-container');
@@ -121,13 +139,12 @@ export function renderGhostWorkoutFromItems() {
 
     const focus = document.getElementById('today-focus')?.value || window.manualSessionKind || '';
     const sessionTypeId = sessionTypeIdFromFocus(focus) || sessionTypeIdFromFocus(window.manualSessionKind || '');
-    const allowSwap = sessionNeedsExerciseConfirm(sessionTypeId);
-    const phaseStr = getSeasonPhase();
+    const allowEdit = !!sessionTypeId || store.currentGhostItems.some(canRemoveGhostItem);
 
     let html = '';
-    if (allowSwap) {
+    if (allowEdit) {
         html += `<div style="margin-bottom:12px; padding:10px 12px; border:1px solid rgba(212,175,55,0.35); border-radius:8px; background:rgba(212,175,55,0.06); font-family:'Roboto Mono'; font-size:11px; color:var(--gold-accent); line-height:1.45;">
-            Review exercises — swap any for an equivalent in the same slot, then Confirm workout to lock them for this month.
+            Review exercises — swap any for an equivalent in the same slot, or remove any you don't want. Confirm workout to keep this list until you change it again.
         </div>`;
     }
 
@@ -142,7 +159,10 @@ export function renderGhostWorkoutFromItems() {
         if (item.isCoreBlock) {
             const n = item.plannedSets || (item.sets || []).length;
             html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
-                <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Core Circuit</div>
+                <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom: 4px;">
+                    <div style="font-size: 12px; color:#D4AF37; font-weight:800; text-transform:uppercase;">Core Circuit</div>
+                    <button type="button" onclick="removeGhostExercise(${idx})" style="background:rgba(255,59,48,0.08); border:1px solid rgba(255,59,48,0.28); padding:4px 8px; border-radius:4px; color:#FF3B30; font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">REMOVE</button>
+                </div>
                 <div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc;"><span>Circuits</span><span style="color:#D4AF37; font-weight:bold;">${n} set${n === 1 ? '' : 's'}</span></div>
             </div>`;
             return;
@@ -161,12 +181,13 @@ export function renderGhostWorkoutFromItems() {
         }
 
         const slot = resolveItemSlotLabel(item);
-        const equivalents = allowSwap && !item.isExtra ? getEquivalentExercises(item) : [];
+        const equivalents = !item.isExtra ? getEquivalentExercises(item) : [];
         html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
             <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom: 4px;">
                 <div style="font-size: 12px; color:#D4AF37; font-weight:800; text-transform:uppercase;">${item.exercise.name}</div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <button type="button" onclick="openVideoModal('${String(item.exercise.name).replace(/'/g, "\\'")}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:4px 8px; border-radius:4px; color:var(--text-silver); font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">🎥 FORM</button>
+                    <button type="button" onclick="removeGhostExercise(${idx})" style="background:rgba(255,59,48,0.08); border:1px solid rgba(255,59,48,0.28); padding:4px 8px; border-radius:4px; color:#FF3B30; font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">REMOVE</button>
                 </div>
             </div>`;
         if (slot) {
@@ -246,6 +267,7 @@ export function addSetToExercise(exIdx) {
         restTime: lastWork.restTime != null ? lastWork.restTime : 90,
         prevWeight: lastWork.prevWeight || lastWork.weight || 0
     });
+    try { syncExerciseTimer(exItem, { editing: !!(window.editingSessionId || window._editingPreservedDuration) }); } catch (e) { /* ignore */ }
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
     else renderActiveLog();
 }
@@ -273,6 +295,7 @@ export function addDropSetToExercise(exIdx) {
         prevWeight: last.weight || 0,
         notes: 'Drop set · 80%'
     });
+    try { syncExerciseTimer(exItem, { editing: !!(window.editingSessionId || window._editingPreservedDuration) }); } catch (e) { /* ignore */ }
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
     else renderActiveLog();
 }
@@ -308,6 +331,7 @@ export function createSupersetFromIndices(idxA, idxB) {
     items.splice(hi, 1);
     items.splice(lo, 1);
     items.splice(lo, 0, merged);
+    try { syncExerciseTimer(merged, { editing: !!(window.editingSessionId || window._editingPreservedDuration) }); } catch (e) { /* ignore */ }
 
     if (window.currentModalExIdx != null) {
         if (window.currentModalExIdx === hi || window.currentModalExIdx === lo) {
@@ -512,7 +536,11 @@ export function buildSupersetItem(itemA, itemB) {
             }
         ],
         sets,
-        plannedSets: rounds
+        plannedSets: rounds,
+        exerciseTimerStartedAt: [itemA.exerciseTimerStartedAt, itemB.exerciseTimerStartedAt]
+            .map(n => Number(n) || 0).filter(n => n > 0).sort((a, b) => a - b)[0] || null,
+        exerciseTimerEndedAt: null,
+        exerciseDurationMs: 0
     };
 }
 
@@ -604,6 +632,7 @@ export function addSupersetRound(exIdx) {
         prevWeight: tb.prevWeight || tb.weight || 0
     });
     item.plannedSets = round;
+    try { syncExerciseTimer(item, { editing: !!(window.editingSessionId || window._editingPreservedDuration) }); } catch (e) { /* ignore */ }
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
     else renderActiveLog();
 }
@@ -630,6 +659,7 @@ export function addDropSetToSupersetSide(exIdx, side) {
         prevWeight: last.weight || 0,
         notes: `Drop set · 80% · ${side}`
     });
+    try { syncExerciseTimer(item, { editing: !!(window.editingSessionId || window._editingPreservedDuration) }); } catch (e) { /* ignore */ }
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
     else renderActiveLog();
 }
@@ -763,8 +793,7 @@ export async function generateWorkoutTemplate() {
         return options[options.length - 1].n;
     };
 
-    const useHypertrophy = isHypertrophyFocus(focus)
-        || (isHypertrophyPhase(phaseStr) && (isStrengthFocus(focus) || focus === 'Full Body / Strength'));
+    const useHypertrophy = usesHypertrophyProgramming(focus);
     if (useHypertrophy || (isStrengthFocus(focus) && !isHypertrophyFocus(focus))) {
         try {
             ensureCycleStarted(new Date());

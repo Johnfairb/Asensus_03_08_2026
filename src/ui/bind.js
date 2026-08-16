@@ -9,7 +9,9 @@ import {
   editHistoryFoodMass,
   editLactateSessionFromCalendar,
   onJournalMediaSelected,
+  openAdherenceExerciseLog,
   openAdherenceSessionDetail,
+  backToAdherenceSession,
   openDayDetail,
   openHistoryWorkoutDetail,
   openLactateSessionDetail,
@@ -24,7 +26,7 @@ import {
 } from './journey.js';
 import { showShopStyleInfo, toggleFoodHeading } from '../domain/food-catalog.js';
 import { cancelExEdit, cancelFoodEdit, closeLibraryDetail, deleteItem, editExercise, editFood, editFromLibraryDetail, filterBoot, loadExercises, loadInventory, openExerciseDetail, openFoodDetail, openLibraryDontKnowWeight, saveExerciseIncrementsFromDetail, saveExerciseToCloud, saveExerciseWorkingWeightFromDetail, saveFoodToCloud, syncLibraryWeightDontKnowBtn, syncPackSizeFieldMode, toggleBanFromLibraryDetail, toggleExForm, togglePantryForm } from './fuel.js';
-import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, drawModalExerciseChart, redrawModalExerciseChart, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, beginExerciseLog, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, renderWorkoutLog, resumeInProgressWorkout, selectCardioTypeInLog, setWorkoutLogFilter, showConstraintInfo, startExecution, startManualWorkout, stopInProgressWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, switchCableEquipmentAndRefresh, toggleConstraint, togglePrepChildExpand, togglePrepPartExpand, toggleStretchListExpand, toggleStretchGroupComplete, toggleStretchMuscleGroupComplete, startStretchTimer, toggleSessionStretchExclude, toggleExerciseDiary, updateCoreChildWeight, updateExerciseDiaryNotes, onExerciseDiaryMediaSelected, removeExerciseDiaryMedia, toggleSetComplete, toggleToolsMenu, updateWorkoutSet, workoutCardDragLeave, workoutCardDragOver, workoutCardDragStart, workoutCardDrop, workoutCardTouchEnd, workoutCardTouchStart, openManualGymRestModal, closeManualGymRestModal, toggleManualRestCustomFields, confirmManualGymRestPrefs } from './drive.js';
+import { calculatePlates, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, drawModalExerciseChart, redrawModalExerciseChart, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, beginExerciseLog, manualAdd, openBodyFatModal, openExerciseSetsModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, renderWorkoutLog, resumeInProgressWorkout, selectCardioTypeInLog, setWorkoutLogFilter, showConstraintInfo, startExecution, startManualWorkout, stopInProgressWorkout, submitBlindReroute, submitBodyFatLog, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, switchCableEquipmentAndRefresh, syncGlobalRestBanners, toggleConstraint, togglePrepChildExpand, togglePrepPartExpand, toggleStretchListExpand, toggleStretchGroupComplete, toggleStretchMuscleGroupComplete, startStretchTimer, toggleSessionStretchExclude, toggleExerciseDiary, updateCoreChildWeight, updateExerciseDiaryNotes, onExerciseDiaryMediaSelected, removeExerciseDiaryMedia, toggleSetComplete, toggleToolsMenu, updateWorkoutSet, workoutCardDragLeave, workoutCardDragOver, workoutCardDragStart, workoutCardDrop, workoutCardTouchEnd, workoutCardTouchStart, openManualGymRestModal, closeManualGymRestModal, toggleManualRestCustomFields, confirmManualGymRestPrefs } from './drive.js';
 import { confirmEquipmentPicks } from './equipment-ui.js';
 import { dismissPlannedWarmupFromLog, dismissPlannedStretchFromLog, hydrateStretchSettingsDom, saveSessionPrepSettings } from '../domain/session-prep.js';
 import { closeLactateHitPicker, confirmLactateHitPicker, filterLactateHitOptions, openLactateHitPicker, toggleLactateHitType, selectLactateDesiredRpe, confirmLactateDesiredRpe, lactateWizardBackToTypes, lactateWizardBackToRpe, openLactateBaselineRedo, toggleLactateRedoType, confirmLactateRedoSelection, submitLactateBaselineStep, adjustLactateSessionRpe, openLactateBaselineRedoFromSession, redoLactateBaselineForType } from './lactate-ui.js';
@@ -33,7 +35,7 @@ import { exportData, injectPitchData } from './demos.js';
 import { drawExerciseChart, drawMacroChart, drawUnifiedChart, executeSundayForecast, filterExerciseChartList, onProgressRangeChange, selectExerciseForChart } from './charts.js';
 import { completeOnboarding, nextObStep, selectAuthTheme, selectObCard, triggerBootSequence } from './auth-onboarding.js';
 import { handleAuth, handleSignOut, quickLogin } from '../services/auth.js';
-import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, swapGhostExercise, unmergeSuperset } from '../domain/workout-generator.js';
+import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, removeGhostExercise, swapGhostExercise, unmergeSuperset } from '../domain/workout-generator.js';
 import { openAddExercisesModal, closeAddExercisesModal, confirmAddExercisesModal } from './add-exercises-modal.js';
 import { calculateAchievability, handleFocusChange, handleSportChange, onGymDaysOrPhaseUiChange, onHybridSplitChange, onSeasonPhaseChange, roundToEquipment, saveSettings, toggleRestStop } from '../domain/thermodynamics.js';
 import { addFixedSchedule, closeFixedScheduleModal, closeSleepModal, closeVideoModal, commitMatchSession, commitPracticeSession, deleteFixedSchedule, deleteSportDiaryFromLog, editSportDiaryFromLog, generateFutureTimeline, getTeachingPoints, getVideoDirectives, openFixedScheduleModal, openFuturePlan, openMatchLogModal, openPracticeLogModal, openSleepModal, openVideoModal, selectTeachingPointVideo, submitSleepLog, syncSleepHoursWarning, switchDayPlanSubTab, toggleSchedTimeVisibility } from '../domain/route-planner.js';
@@ -85,6 +87,7 @@ export function bindUi() {
   window.unconfirmGhostTemplate = unconfirmGhostTemplate;
   window.addExerciseToActiveLog = addExerciseToActiveLog;
   window.swapGhostExercise = swapGhostExercise;
+  window.removeGhostExercise = removeGhostExercise;
   window.openAddExercisesModal = openAddExercisesModal;
   window.closeAddExercisesModal = closeAddExercisesModal;
   window.confirmAddExercisesModal = confirmAddExercisesModal;
@@ -207,6 +210,8 @@ export function bindUi() {
   window.openCoachesNotesModal = openCoachesNotesModal;
   window.openDayDetail = openDayDetail;
   window.openAdherenceSessionDetail = openAdherenceSessionDetail;
+  window.openAdherenceExerciseLog = openAdherenceExerciseLog;
+  window.backToAdherenceSession = backToAdherenceSession;
   window.openLactateSessionDetail = openLactateSessionDetail;
   window.showLactateFullWorkout = showLactateFullWorkout;
   window.toggleLactateFullWorkout = toggleLactateFullWorkout;
@@ -251,6 +256,7 @@ export function bindUi() {
   window.closeExerciseSetsModal = closeExerciseSetsModal;
   window.renderExerciseSets = renderExerciseSets;
   window.renderWorkoutLog = renderWorkoutLog;
+  window.syncGlobalRestBanners = syncGlobalRestBanners;
   window.saveCalendarEvent = saveCalendarEvent;
   window.saveCurrentAsTemplate = saveCurrentAsTemplate;
   window.saveExerciseToCloud = saveExerciseToCloud;

@@ -250,18 +250,14 @@ function snapshotHypertrophyKind(hypKind) {
     };
 }
 
-/** True when this session type still needs the swap-and-confirm flow. */
+/** True when this session type can swap/remove exercises on the confirm screen. */
 export function sessionNeedsExerciseConfirm(sessionTypeId) {
-    if (!sessionTypeId) return false;
-    const plan = getCyclePlan(sessionTypeId);
-    if (!plan) return true;
-    if (plan.source === 'kept' || plan.source === 'custom') return false;
-    if (plan.exercisesConfirmed) return false;
-    return true;
+    return !!sessionTypeId;
 }
 
 /**
- * Lock ghost items (programmed + pre-confirm extras) for the rest of the month.
+ * Lock ghost items (programmed + extras). The list stays until the user edits it again,
+ * including later months when they keep this session type.
  */
 export function confirmSessionExercises(sessionTypeId, ghostItems) {
     if (!sessionTypeId) return null;
@@ -276,6 +272,9 @@ export function confirmSessionExercises(sessionTypeId, ghostItems) {
         lockedItems: items,
         source: prev.source === 'custom' ? 'custom' : (prev.source === 'kept' ? 'kept' : 'confirmed')
     };
+    if (next.source === 'custom' || next.source === 'kept') {
+        next.items = items;
+    }
 
     // Keep hypertrophy `.plan.items` in sync for generators that read plan
     if (next.family === 'hypertrophy' || sessionTypeId.startsWith('hyp_')) {

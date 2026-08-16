@@ -5,6 +5,7 @@ import { store } from '../state/store.js';
 import { excludeBannedExercises } from '../domain/bans.js';
 import { getLibraryMuscleGroup, LIBRARY_MUSCLE_ORDER } from '../domain/bodyweight-lifts.js';
 import { getExerciseMeta } from '../domain/exercise-catalog.js';
+import { isExerciseMuscleLocked } from '../domain/hypertrophy-engine.js';
 import { addExercisesByIds } from '../domain/workout-generator.js';
 
 function groupExercisesForPicker() {
@@ -13,6 +14,7 @@ function groupExercisesForPicker() {
         if (store.fatigueLockouts && ex.muscle_group && store.fatigueLockouts[ex.muscle_group]) {
             return false;
         }
+        if (isExerciseMuscleLocked(ex.name)) return false;
         return true;
     });
     const grouped = new Map();

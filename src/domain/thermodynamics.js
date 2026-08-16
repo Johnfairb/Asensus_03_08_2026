@@ -52,43 +52,98 @@ export function calculateAchievability() {
     }
 }
 
+function readSyncedJson(key, fallback) {
+    try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
+    catch (e) { return fallback; }
+}
+
+function writeSyncedJson(key, val) {
+    if (val == null) return;
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { /* ignore */ }
+}
+
+function mergeCompletedPlanSlots(local, remote) {
+    return { ...(remote || {}), ...(local || {}) };
+}
+
+function mergeLoggedSessions(local, remote) {
+    const out = { ...(remote || {}) };
+    Object.entries(local || {}).forEach(([date, list]) => {
+        const loc = Array.isArray(list) ? list : [];
+        const rem = Array.isArray(out[date]) ? out[date] : [];
+        const byId = new Map();
+        [...rem, ...loc].forEach((entry) => {
+            const id = entry?.sessionId || JSON.stringify(entry);
+            byId.set(id, entry);
+        });
+        out[date] = [...byId.values()];
+    });
+    return out;
+}
+
+function mergeHypertrophyFatigue(local, remote) {
+    const out = { ...(remote || {}) };
+    Object.entries(local || {}).forEach(([muscle, entry]) => {
+        const cur = out[muscle];
+        const localAt = Number(entry?.updatedAt) || 0;
+        const remoteAt = Number(cur?.updatedAt) || 0;
+        out[muscle] = localAt >= remoteAt ? entry : cur;
+    });
+    return out;
+}
+
+/** Union credit / fatigue maps from another device into localStorage. */
+function mergeCreditStateFromRemote(remote) {
+    if (!remote || typeof remote !== 'object') return false;
+    writeSyncedJson(
+        'ascensus_completed_plan_slots',
+        mergeCompletedPlanSlots(readSyncedJson('ascensus_completed_plan_slots', {}), remote.completedPlanSlots)
+    );
+    writeSyncedJson(
+        'ascensus_logged_sessions',
+        mergeLoggedSessions(readSyncedJson('ascensus_logged_sessions', {}), remote.loggedSessions)
+    );
+    writeSyncedJson(
+        'ascensus_hypertrophy_fatigue',
+        mergeHypertrophyFatigue(readSyncedJson('ascensus_hypertrophy_fatigue', {}), remote.hypertrophyFatigue)
+    );
+    invalidateWeekPlanCache();
+    return true;
+}
+
 export function captureSyncedLocalState() {
-    const readJson = (key, fallback) => {
-        try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
-        catch (e) { return fallback; }
-    };
     return {
-        fixedSchedules: readJson('ascensus_fixed_schedules', {}),
-        specificSchedules: readJson('ascensus_specific_schedules', {}),
-        routeOverrides: readJson('ascensus_route_overrides', {}),
-        strengthMonthPicks: readJson('ascensus_strength_month_picks', {}),
-        metricTargets: readJson('ascensus_metric_targets', {}),
+        fixedSchedules: readSyncedJson('ascensus_fixed_schedules', {}),
+        specificSchedules: readSyncedJson('ascensus_specific_schedules', {}),
+        routeOverrides: readSyncedJson('ascensus_route_overrides', {}),
+        strengthMonthPicks: readSyncedJson('ascensus_strength_month_picks', {}),
+        metricTargets: readSyncedJson('ascensus_metric_targets', {}),
         gpsIndex: localStorage.getItem('ascensus_gps_index'),
         strengthAB: localStorage.getItem('ascensus_strength_ab'),
         theme: localStorage.getItem('ascensus_theme'),
         strengthPlanTail: localStorage.getItem('ascensus_strength_plan_tail'),
         strengthPlanTailWeek: localStorage.getItem('ascensus_strength_plan_tail_week'),
-        completedPlanSlots: readJson('ascensus_completed_plan_slots', {})
+        strengthWeekSticky: readSyncedJson('ascensus_strength_week_sticky_v1', {}),
+        completedPlanSlots: readSyncedJson('ascensus_completed_plan_slots', {}),
+        loggedSessions: readSyncedJson('ascensus_logged_sessions', {}),
+        hypertrophyFatigue: readSyncedJson('ascensus_hypertrophy_fatigue', {})
     };
 }
 
 export function restoreSyncedLocalState(sync) {
     if (!sync || typeof sync !== 'object') return;
-    const writeJson = (key, val) => {
-        if (val == null) return;
-        try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
-    };
-    writeJson('ascensus_fixed_schedules', sync.fixedSchedules);
-    writeJson('ascensus_specific_schedules', sync.specificSchedules);
-    writeJson('ascensus_route_overrides', sync.routeOverrides);
-    writeJson('ascensus_strength_month_picks', sync.strengthMonthPicks);
-    writeJson('ascensus_metric_targets', sync.metricTargets);
-    writeJson('ascensus_completed_plan_slots', sync.completedPlanSlots);
+    writeSyncedJson('ascensus_fixed_schedules', sync.fixedSchedules);
+    writeSyncedJson('ascensus_specific_schedules', sync.specificSchedules);
+    writeSyncedJson('ascensus_route_overrides', sync.routeOverrides);
+    writeSyncedJson('ascensus_strength_month_picks', sync.strengthMonthPicks);
+    writeSyncedJson('ascensus_metric_targets', sync.metricTargets);
     if (sync.gpsIndex != null) localStorage.setItem('ascensus_gps_index', String(sync.gpsIndex));
     if (sync.strengthAB != null) localStorage.setItem('ascensus_strength_ab', String(sync.strengthAB));
     if (sync.theme) localStorage.setItem('ascensus_theme', sync.theme);
     if (sync.strengthPlanTail != null) localStorage.setItem('ascensus_strength_plan_tail', String(sync.strengthPlanTail));
     if (sync.strengthPlanTailWeek != null) localStorage.setItem('ascensus_strength_plan_tail_week', String(sync.strengthPlanTailWeek));
+    writeSyncedJson('ascensus_strength_week_sticky_v1', sync.strengthWeekSticky);
+    mergeCreditStateFromRemote(sync);
     try {
         if (typeof store.specificSchedules !== 'undefined') {
             store.specificSchedules = JSON.parse(localStorage.getItem('ascensus_specific_schedules') || '{}') || {};
@@ -96,6 +151,30 @@ export function restoreSyncedLocalState(sync) {
     } catch (e) {
         if (typeof store.specificSchedules !== 'undefined') store.specificSchedules = {};
     }
+}
+
+/** Pull plan credits logged on another device so this week's timetable does not grow an extra session. */
+export async function refreshCloudPlanCredits() {
+    if (!store.currentUser || !store.supabaseClient) return false;
+    try {
+        const { data } = await store.supabaseClient
+            .from('user_profiles')
+            .select('config')
+            .eq('id', store.currentUser.id)
+            .maybeSingle();
+        const remote = data?.config?.syncedLocal;
+        if (!remote) return false;
+        return mergeCreditStateFromRemote(remote);
+    } catch (e) {
+        return false;
+    }
+}
+
+export async function onAppBecameVisible() {
+    const pulled = await refreshCloudPlanCredits();
+    if (!pulled) return;
+    try { generateFutureTimeline(); } catch (e) { /* ignore */ }
+    try { getTodayFocus(); } catch (e) { /* ignore */ }
 }
 
 export function applyUserConfigToDom() {
@@ -168,6 +247,7 @@ export function applyUserConfigToDom() {
 }
 
 export async function persistUserConfigToCloud(statusElId) {
+    try { await refreshCloudPlanCredits(); } catch (e) { /* still persist local */ }
     store.userConfig.syncedLocal = captureSyncedLocalState();
     localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig));
     if (!store.currentUser || !store.supabaseClient) return;

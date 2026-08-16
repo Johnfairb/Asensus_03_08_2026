@@ -11,32 +11,30 @@ import {
 } from '../domain/session-prep.js';
 import { saveWorkoutDraft } from '../domain/workout-draft.js';
 import { getWorkoutElapsedMs } from './workout-timer.js';
+import { holdAudioAlive, playStretchBeepSound, releaseAudioAlive, unlockAudio } from './audio.js';
 
 let _tickInterval = null;
+let _stretchAudioHeld = false;
 
 /** Single short beep (distinct from the multi-tone rest alarm). */
 export function playStretchBeep() {
-    try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        if (!window._ascensusAudioCtx) window._ascensusAudioCtx = new AudioCtx();
-        const ctx = window._ascensusAudioCtx;
-        if (ctx.state === 'suspended') ctx.resume();
-        const now = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = 880;
-        gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(0.28, now + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.16);
-    } catch (e) {
-        console.warn('Stretch beep unavailable:', e);
-    }
+    playStretchBeepSound();
+}
+
+function holdStretchAudio() {
+    if (_stretchAudioHeld) return;
+    _stretchAudioHeld = true;
+    holdAudioAlive();
+}
+
+function releaseStretchAudio() {
+    if (!_stretchAudioHeld) return;
+    _stretchAudioHeld = false;
+    releaseAudioAlive();
+}
+
+export function resetStretchAudioHold() {
+    _stretchAudioHeld = false;
 }
 
 export function isPlannedTimedStretchItem(item) {
@@ -218,6 +216,7 @@ function markStretchSessionFinished(item) {
         item._stretchTimer.running = false;
         item._stretchTimer.finished = true;
     }
+    if (!anyStretchTimerRunning()) releaseStretchAudio();
     if (navigator.vibrate) navigator.vibrate([40, 40, 80]);
     try {
         if (window._workoutSessionConfirmed) {
@@ -297,6 +296,8 @@ export function startStretchTimer(exIdx) {
         stepStartedAt: Date.now(),
         stepEndsAt: Date.now() + Math.max(1, steps[0].durationSec) * 1000
     };
+    try { unlockAudio(); } catch (e) { /* ignore */ }
+    holdStretchAudio();
     ensureStretchTick();
     refreshStretchUi(exIdx);
 }
@@ -380,7 +381,12 @@ export function syncStretchTimersFromWallClock() {
         }
         if (t.running) updateStretchCountdownDom(exIdx, item);
     });
-    if (anyStretchTimerRunning()) ensureStretchTick();
+    if (anyStretchTimerRunning()) {
+        holdStretchAudio();
+        ensureStretchTick();
+    } else {
+        releaseStretchAudio();
+    }
 }
 
 export function stretchTimerStatusSubtitle(item) {

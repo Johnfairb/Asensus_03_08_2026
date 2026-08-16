@@ -4,6 +4,7 @@ let _timerInterval = null;
 let _startedAt = null;
 let _elapsedMs = 0;
 let _running = false;
+let _onTick = null;
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -29,11 +30,17 @@ export function getWorkoutElapsedMinutes() {
   return Math.max(1, Math.round(getWorkoutElapsedMs() / 60000));
 }
 
+export function setWorkoutTimerTickHandler(fn) {
+  _onTick = typeof fn === 'function' ? fn : null;
+}
+
 function renderTimerUi() {
   const el = document.getElementById('workout-session-timer');
-  if (!el) return;
-  el.textContent = formatDurationMs(getWorkoutElapsedMs());
-  el.classList.toggle('is-running', _running);
+  if (el) {
+    el.textContent = formatDurationMs(getWorkoutElapsedMs());
+    el.classList.toggle('is-running', _running);
+  }
+  try { _onTick?.(); } catch (e) { /* ignore */ }
 }
 
 /** Show 00:00 without counting — used after Confirm / session setup. */
@@ -122,4 +129,86 @@ export function pauseWorkoutTimer() {
 
 export function isWorkoutTimerRunning() {
   return _running;
+}
+
+/** True for lifts / supersets / lactate / core — not session warmup, stretch, or steady cardio. */
+export function itemUsesExerciseTimer(item) {
+  if (!item) return false;
+  if (item.isWarmupGroup || item.isCustomWarmup) return false;
+  if (item.isStretchGroup || item.isCustomStretch) return false;
+  if (item.isSportSessionBlock) return false;
+  if (item.isSteadyCardio) return false;
+  const name = String(item.exercise?.name || item.name || '');
+  if (/static\s*stretch/i.test(name)) return false;
+  if (/hit\s*class/i.test(name)) return false;
+  const domain = String(item.exercise?.domain || '').toLowerCase();
+  const hasLactate = !!(item.isLactateHit || (item.sets || []).some(s => s && s.isLactateHit));
+  if (domain === 'cardio' && !hasLactate && !item.isSuperset) return false;
+  return Array.isArray(item.sets) && item.sets.length > 0;
+}
+
+function timedExerciseSets(item) {
+  return (item?.sets || []).filter(s => s && !s._sessionSkipped);
+}
+
+export function isExerciseTimerRunning(item) {
+  return !!(item?.exerciseTimerStartedAt && !item.exerciseTimerEndedAt);
+}
+
+/** Live or frozen time on this exercise (first logged set → last logged set). */
+export function getExerciseDurationMs(item) {
+  if (!item) return 0;
+  const started = Number(item.exerciseTimerStartedAt) || 0;
+  const ended = Number(item.exerciseTimerEndedAt) || 0;
+  const frozen = Number(item.exerciseDurationMs) || 0;
+  if (started && ended && ended >= started) return ended - started;
+  if (started && !ended) return Math.max(0, Date.now() - started);
+  return Math.max(0, frozen);
+}
+
+export function formatExerciseDurationLabel(item) {
+  const ms = getExerciseDurationMs(item);
+  return ms > 0 ? formatDurationMs(ms) : '';
+}
+
+/**
+ * Start on the first logged set (typically the first warmup) and freeze when
+ * every remaining set is logged. Adding a set after finish resumes the clock.
+ * No-op while editing a past session so stored times are not rewritten.
+ */
+export function syncExerciseTimer(item, { editing = false } = {}) {
+  if (!item || editing || !itemUsesExerciseTimer(item)) return;
+  const sets = timedExerciseSets(item);
+  if (!sets.length) return;
+
+  const completed = sets.filter(s => s.completed);
+  if (!completed.length) {
+    item.exerciseTimerStartedAt = null;
+    item.exerciseTimerEndedAt = null;
+    item.exerciseDurationMs = 0;
+    return;
+  }
+
+  const now = Date.now();
+  if (!item.exerciseTimerStartedAt) {
+    item.exerciseTimerStartedAt = now;
+  }
+
+  const allDone = sets.every(s => s.completed);
+  if (allDone) {
+    if (!item.exerciseTimerEndedAt) item.exerciseTimerEndedAt = now;
+    item.exerciseDurationMs = Math.max(0, item.exerciseTimerEndedAt - item.exerciseTimerStartedAt);
+  } else {
+    item.exerciseTimerEndedAt = null;
+  }
+}
+
+/** Freeze any still-running exercise clocks when Complete log is pressed. */
+export function freezeOpenExerciseTimers(items) {
+  const now = Date.now();
+  (items || []).forEach(item => {
+    if (!item?.exerciseTimerStartedAt || item.exerciseTimerEndedAt) return;
+    item.exerciseTimerEndedAt = now;
+    item.exerciseDurationMs = Math.max(0, now - Number(item.exerciseTimerStartedAt));
+  });
 }

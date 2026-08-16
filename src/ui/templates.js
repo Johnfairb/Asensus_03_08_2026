@@ -6,11 +6,11 @@ import { getExerciseMeta } from '../domain/exercise-catalog.js';
 import { isGuidanceOff } from '../domain/fitness-hud.js';
 import { getVisualPortion, resolveDayMealItems } from '../domain/meal-planner.js';
 import { smartRoundMass } from '../domain/thermodynamics.js';
-import { generateWorkoutTemplate } from '../domain/workout-generator.js';
+import { generateWorkoutTemplate, renderGhostWorkoutFromItems } from '../domain/workout-generator.js';
 import { renderWorkoutLog } from './drive.js';
 import { clearWorkoutDraft, saveWorkoutDraft } from '../domain/workout-draft.js';
 import { resetWorkoutTimer, armWorkoutTimer } from './workout-timer.js';
-import { sessionTypeIdFromFocus, confirmSessionExercises, sessionNeedsExerciseConfirm, getCyclePlan } from '../domain/workout-cycle.js';
+import { sessionTypeIdFromFocus, confirmSessionExercises } from '../domain/workout-cycle.js';
 import { gateConfirmForEquipmentPicks } from './equipment-ui.js';
 
 // ==========================================
@@ -599,6 +599,18 @@ export function loadGhostTemplate() {
     }
 }
 
+function isCompletedWorkingSet(item, setObj) {
+    if (!item || !setObj || !setObj.completed) return false;
+    if (item.isWarmupGroup || item.isStretchGroup) return false;
+    if (setObj.isWarmup) return false;
+    if (setObj.isText && !setObj.isLactateHit && !item.isLactateHit) return false;
+    return true;
+}
+
+export function sessionHasCompletedWorkingSet(items) {
+    return (items || []).some((item) => (item?.sets || []).some((s) => isCompletedWorkingSet(item, s)));
+}
+
 export function setConfirmRouteButtons(confirmed) {
     const loadRecipeBtn = document.getElementById('btn-load-recipe');
     const loadWorkoutBtn = document.getElementById('btn-load-workout-picker');
@@ -610,7 +622,11 @@ export function setConfirmRouteButtons(confirmed) {
     if (confirmed) {
         if (loadRecipeBtn) loadRecipeBtn.classList.add('hidden');
         if (loadWorkoutBtn) loadWorkoutBtn.classList.add('hidden');
-        if (unconfirmBtn) unconfirmBtn.classList.remove('hidden');
+        const hideUnconfirm = isWorkout && sessionHasCompletedWorkingSet(store.activeLog.items);
+        if (unconfirmBtn) {
+            if (hideUnconfirm) unconfirmBtn.classList.add('hidden');
+            else unconfirmBtn.classList.remove('hidden');
+        }
         if (lockBtn) lockBtn.style.display = 'none';
     } else {
         if (unconfirmBtn) unconfirmBtn.classList.add('hidden');
@@ -645,18 +661,12 @@ function acceptGhostTemplateAfterEquipment() {
         const focus = document.getElementById('today-focus')?.value || '';
         window.manualSessionKind = focus || 'Full Body / Strength';
     }
-    // Lock exercises for this session type for the rest of the billing month
+    // Persist this session's exercise list until the user edits it again
     if (store.activeLog.type === 'workout') {
         try {
             const focus = window.manualSessionKind || document.getElementById('today-focus')?.value || '';
             const sid = sessionTypeIdFromFocus(focus);
-            if (sid) {
-                const needs = sessionNeedsExerciseConfirm(sid);
-                const existing = getCyclePlan(sid);
-                if (needs || existing?.exercisesConfirmed) {
-                    confirmSessionExercises(sid, store.currentGhostItems);
-                }
-            }
+            if (sid) confirmSessionExercises(sid, store.currentGhostItems);
         } catch (e) {
             console.warn('confirmSessionExercises failed', e);
         }
@@ -686,16 +696,41 @@ function acceptGhostTemplateAfterEquipment() {
     }
 }
 
-/** Undo Confirm meal / Confirm workout — restore planned ghost and Load Recipe/Workout. */
+/** Undo Confirm meal / Confirm workout — restore the confirm screen, keeping user edits. */
 export function unconfirmGhostTemplate() {
+    const isWorkout = store.activeLog.type === 'workout';
+    const liveItems = isWorkout && Array.isArray(store.activeLog.items) && store.activeLog.items.length
+        ? JSON.parse(JSON.stringify(store.activeLog.items))
+        : null;
     const backup = store._ghostBackupForUnconfirm;
     store.activeLog.items = [];
-    document.getElementById('active-log-list').innerHTML = '';
+    const logList = document.getElementById('active-log-list');
+    if (logList) logList.innerHTML = '';
     setConfirmRouteButtons(false);
-    if (store.activeLog.type === 'workout') {
+    if (isWorkout) {
         clearWorkoutDraft();
         window._workoutSessionConfirmed = false;
         resetWorkoutTimer();
+        const items = liveItems || (Array.isArray(backup) && backup.length
+            ? JSON.parse(JSON.stringify(backup))
+            : null);
+        if (items) {
+            items.forEach((it) => {
+                (it.sets || []).forEach((s) => {
+                    if (!s) return;
+                    s.completed = false;
+                    s.locked = false;
+                    delete s.lockEndsAt;
+                    delete s.lockTimeLeft;
+                    delete s._restAudioHeld;
+                });
+            });
+            store.currentGhostItems = items;
+            renderGhostWorkoutFromItems();
+            return;
+        }
+        loadGhostTemplate();
+        return;
     }
     if (Array.isArray(backup) && backup.length) {
         store.currentGhostItems = JSON.parse(JSON.stringify(backup));
