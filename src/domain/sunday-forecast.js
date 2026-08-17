@@ -1,13 +1,19 @@
 import { store } from '../state/store.js';
 import { persistUserConfigToCloud } from './thermodynamics.js';
 import { specificEventName } from '../lib/food-parse.js';
-import { sportEventLabel, sportEventSelectOptionsHtml } from './sports-matrix.js';
+import {
+    getSportEvents,
+    sameSportEvent,
+    sportEventLabel,
+    sportEventSelectOptionsHtml
+} from './sports-matrix.js';
 import {
     addDaysISO,
     dateToISO,
     generateFutureTimeline,
     getMondayISO,
     invalidateWeekPlanCache,
+    isRestEvent,
     loadFixedSchedules,
     scheduleEventName,
     scheduleEventTime
@@ -37,6 +43,21 @@ function persistSpecificSchedules(map) {
 function prettyLockName(name) {
     if (name === 'Rest' || name === 'Cannot Workout') return 'Rest';
     return sportEventLabel(name) || name || 'Lock';
+}
+
+function isWeekExtraEntry(raw) {
+    return !!(raw && typeof raw === 'object' && raw.note === 'Week extra');
+}
+
+function lockNames(locks) {
+    return (locks || []).map(scheduleEventName).filter(Boolean);
+}
+
+function extraAlreadyOnLocks(locks, event) {
+    if (!event || event === 'None') return false;
+    const names = lockNames(locks);
+    if (isRestEvent(event)) return names.some(isRestEvent);
+    return names.some((name) => name === event || sameSportEvent(name, event));
 }
 
 /** Monday ISO of the week this forecast is planning (tomorrow’s Mon–Sun when opened on Sunday). */
@@ -74,12 +95,28 @@ export function onSundayWeekEventTypeChange(dateStr) {
     timeEl.style.display = (val === 'None' || val === 'Rest') ? 'none' : '';
 }
 
-function eventSelectHtml(dateStr, selected, time) {
+function sportOptionsHtml(selected, noneLabel) {
+    let html = sportEventSelectOptionsHtml({
+        selected,
+        includeNone: true,
+        includeRest: true,
+        noneLabel
+    });
+    if (getSportEvents().length) return html;
+    const practiceSel = selected === 'Practice' ? ' selected' : '';
+    const matchSel = (selected === 'Match' || selected === 'Game') ? ' selected' : '';
+    return html.replace(
+        '<option value="Rest"',
+        `<option value="Practice"${practiceSel}>Practice</option><option value="Match"${matchSel}>Match</option><option value="Rest"`
+    );
+}
+
+function eventSelectHtml(dateStr, selected, time, noneLabel = 'None') {
     const timeVal = time || 'Afternoon';
     const showTime = selected && selected !== 'None' && selected !== 'Rest';
     return `
         <select id="sunday-week-event-${dateStr}" class="input-field" style="margin:0; padding:10px; font-size:12px;" onchange="onSundayWeekEventTypeChange('${dateStr}')">
-            ${sportEventSelectOptionsHtml({ selected, includeNone: true, includeRest: true })}
+            ${sportOptionsHtml(selected, noneLabel)}
         </select>
         <select id="sunday-week-time-${dateStr}" class="input-field" style="margin:0; padding:10px; font-size:12px;${showTime ? '' : ' display:none;'}">
             <option value="Morning"${timeVal === 'Morning' ? ' selected' : ''}>Morning</option>
@@ -101,21 +138,26 @@ export function populateSundayWeekEvents(now = new Date()) {
         const dow = d.getDay();
         const label = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
         const locks = fixed[dow] || [];
+        const raw = specific[dateStr];
+        const showSpecific = isWeekExtraEntry(raw) || !locks.length;
+        const extraName = showSpecific ? (specificEventName(raw) || 'None') : 'None';
+        const time = showSpecific && raw && typeof raw === 'object' ? (raw.time || '') : '';
         html += `<div style="display:flex; flex-direction:column; gap:6px; padding:10px; border:1px solid var(--border-subtle); border-radius:10px;">
             <div style="font-size:11px; font-family:'Roboto Mono'; color:var(--text-main); font-weight:700;">${label}</div>`;
         if (locks.length) {
             const lockBits = locks.map((ev) => {
                 const name = prettyLockName(scheduleEventName(ev));
-                const time = scheduleEventTime(ev);
-                return time ? `${name} · ${time}` : name;
+                const lockTime = scheduleEventTime(ev);
+                return lockTime ? `${name} · ${lockTime}` : name;
             }).join(' · ');
-            html += `<div style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono';">Locked: ${lockBits}</div>`;
-        } else {
-            const raw = specific[dateStr];
-            const evName = specificEventName(raw) || 'None';
-            const time = (raw && typeof raw === 'object') ? (raw.time || '') : '';
-            html += eventSelectHtml(dateStr, evName, time);
+            html += `<div style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono';">Repeating: ${lockBits}</div>`;
         }
+        html += eventSelectHtml(
+            dateStr,
+            extraName,
+            time,
+            locks.length ? 'Keep repeating' : 'None'
+        );
         html += `</div>`;
     }
     list.innerHTML = html;
@@ -129,18 +171,22 @@ export function saveSundayWeekEvents(now = new Date()) {
         const dateStr = addDaysISO(weekStart, i);
         const d = new Date(dateStr + 'T12:00:00');
         const dow = d.getDay();
-        if ((fixed[dow] || []).length) continue;
+        const locks = fixed[dow] || [];
         const sel = document.getElementById('sunday-week-event-' + dateStr);
         if (!sel) continue;
         const val = sel.value || 'None';
-        if (val === 'None') {
-            delete specific[dateStr];
+        const existing = specific[dateStr];
+        const existingIsExtra = isWeekExtraEntry(existing) || (!locks.length && existing);
+
+        if (val === 'None' || extraAlreadyOnLocks(locks, val)) {
+            if (existingIsExtra) delete specific[dateStr];
             continue;
         }
+
         const event = val;
         const timeEl = document.getElementById('sunday-week-time-' + dateStr);
         const time = (val === 'Rest') ? '' : (timeEl?.value || 'Afternoon');
-        specific[dateStr] = time ? { event, time, note: 'Week extra' } : event;
+        specific[dateStr] = { event, time, note: 'Week extra' };
     }
     persistSpecificSchedules(specific);
     invalidateWeekPlanCache();

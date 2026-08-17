@@ -1406,7 +1406,7 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
         ? Math.max(0, (hypPrefs.sessionCount || 0) - (loggedCredits.strength || 0))
         : 0;
     const cacheKey = [
-        'v10-sport-energy',
+        'v11-week-extra-merge',
         weekStartISO,
         store.userConfig?.sport || '',
         ignoreLoggedCredits ? 'full' : 'net',
@@ -1431,13 +1431,14 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
         loggedCredits.lactate || 0,
         loggedCredits.strength || 0,
         loggedCredits.power || 0,
-        isGuidanceOff('timetabling') ? 1 : 0
+        isGuidanceOff('timetabling') ? 1 : 0,
+        weekSpecificFingerprint(weekStartISO)
     ].join('|');
 
     if (store._weekPlanCache.key === cacheKey && store._weekPlanCache.plan) return store._weekPlanCache.plan;
 
     const fixedScheds = loadFixedSchedules();
-    const specificScheds = JSON.parse(localStorage.getItem('ascensus_specific_schedules')) || {};
+    const specificScheds = loadSpecificSchedulesMap();
     const routeOverrides = loadRouteOverrides();
 
     const days = [];
@@ -1452,11 +1453,8 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
             events = ['Rest (Cardio Only)'];
         } else if (routeOverrides[dateStr]) {
             events = [routeOverrides[dateStr]];
-        } else if (specificScheds[dateStr]) {
-            const sp = specificEventName(specificScheds[dateStr]);
-            events = [sp];
-        } else if (fixedScheds[dayOfWeek] && fixedScheds[dayOfWeek].length) {
-            events = fixedScheds[dayOfWeek].map(scheduleEventName).filter(Boolean);
+        } else {
+            events = seedEventsForDate(dateStr, dayOfWeek, specificScheds, fixedScheds);
         }
 
         days.push({ dateStr, dayOfWeek, events: events.slice(0, 2) });
@@ -1765,6 +1763,57 @@ export function getSpecificEventTime(dateStr, eventName) {
     return raw.time || '';
 }
 
+function specificEntryEvents(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.map(scheduleEventName).filter(Boolean);
+    if (typeof raw === 'object' && Array.isArray(raw.events)) {
+        return raw.events.map(scheduleEventName).filter(Boolean);
+    }
+    const name = specificEventName(raw);
+    return name ? [name] : [];
+}
+
+function isWeekExtraEntry(raw) {
+    return !!(raw && typeof raw === 'object' && raw.note === 'Week extra');
+}
+
+function weekSpecificFingerprint(weekStartISO) {
+    const map = loadSpecificSchedulesMap();
+    const bits = [];
+    for (let i = 0; i < 7; i++) {
+        const ds = addDaysISO(weekStartISO, i);
+        bits.push(ds + ':' + JSON.stringify(map[ds] ?? null));
+    }
+    return bits.join('|');
+}
+
+/**
+ * Seed a day from repeating locks plus optional one-off / Sunday extras.
+ * Week extras merge onto locks when a slot is free; Rest extras cancel the day.
+ * Calendar / spontaneous entries still replace the whole day.
+ */
+export function seedEventsForDate(dateStr, dayOfWeek, specificScheds, fixedScheds) {
+    const locks = (fixedScheds?.[dayOfWeek] || []).map(scheduleEventName).filter(Boolean);
+    const raw = specificScheds?.[dateStr];
+    const extras = specificEntryEvents(raw);
+    if (!extras.length) return locks.slice();
+
+    if (!isWeekExtraEntry(raw)) return extras.slice(0, 2);
+
+    const extra = extras[0];
+    if (isRestEvent(extra)) return [extra];
+    if (locks.some(isRestEvent)) return extras.slice(0, 2);
+    if (locks.some((e) => e === extra || sameSportEvent(e, extra))) return locks.slice();
+
+    const merged = locks.slice();
+    const check = canAddScheduleEvent(merged, extra);
+    if (check.ok) {
+        merged.push(extra);
+        return merged.slice(0, 2);
+    }
+    return extras.slice(0, 2);
+}
+
 /** True if any fixed-schedule entry that day is Morning. */
 export function dayHasFixedMorningEvent(dayOfWeek) {
     const list = loadFixedSchedules()[dayOfWeek] || [];
@@ -2005,13 +2054,7 @@ export function resolveDayEvents(options) {
     if (routeOverrides[dateStr]) {
         return [routeOverrides[dateStr]];
     }
-    if (specificScheds[dateStr]) {
-        const sp = specificEventName(specificScheds[dateStr]);
-        // Calendar uses Match; normalize to Game for rules
-        events = [sp];
-    } else if (fixedScheds[dayOfWeek] && fixedScheds[dayOfWeek].length) {
-        events = fixedScheds[dayOfWeek].map(scheduleEventName).filter(Boolean);
-    }
+    events = seedEventsForDate(dateStr, dayOfWeek, specificScheds, fixedScheds);
 
     const hasGame = events.some(isGameEvent);
     const hasPractice = events.some(isPracticeEvent);
