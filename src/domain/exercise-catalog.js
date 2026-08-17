@@ -784,6 +784,115 @@ export const EXERCISE_CATALOG = {
         muscle_group: 'lats', ppl: 'Pull', bodyweight: true, primary: ['Lats', 'Rear delt'], secondary: ['Biceps'] })
 };
 
+/**
+ * Filming-template teaching points (red codes).
+ * T = tight grip (not knees over toes). O = knees over toes.
+ * A = lumbar + neck + knee angle + knees over toes (excludes tight grip / elbow / shoulders).
+ */
+const TP_CODE_LABELS = {
+    L: 'Neutral lumbar spine',
+    N: 'Neck angle',
+    K: 'Knee angle',
+    T: 'Tight grip',
+    O: 'Knees over toes',
+    E: 'Elbow angle',
+    S: 'Shoulders down',
+    G: 'Tight grip'
+};
+
+const TP_A_LABELS = [
+    'Neutral lumbar spine',
+    'Neck angle',
+    'Knee angle',
+    'Knees over toes'
+];
+
+const EXERCISE_TEACHING_POINT_TOKENS = {
+    'Deadlift': ['LNKT'],
+    'Sumo Deadlift': ['LNKT'],
+    'Romanian Deadlift': ['LNT'],
+    'Rack Deadlift': ['LNT'],
+    'Single Leg Deadlift': ['LNT'],
+    'Squat': ['A'],
+    'Sumo Squat': ['A'],
+    'Front Squat': ['LK'],
+    'Goblet Squat': ['LKO'],
+    'Split Squat': ['A', 'Back foot position (not too wide)'],
+    'Lunge': ['A'],
+    'Walk Lunge': ['A'],
+    'Bulgarian Squat': ['A', 'Back foot position (on bench)'],
+    'Pistol Squat': ['A', 'Fixed knee'],
+    'Leg Extension': ['Pivot in line with the knee', 'Toes directly up'],
+    'Seated Hamstring Curl': ['Pivot in line with the knee', 'Toes directly up'],
+    'Lying Hamstring Curl': ['Pivot in line with the knee'],
+    'Hyperextension': ['L'],
+    'Bench Press': ['ETS'],
+    'Close Grip Bench Press': ['ETS'],
+    'Decline Bench Press': ['ETS'],
+    'Dip': ['TS'],
+    'Press-up': ['ES'],
+    'Close Grip Press-up': ['ES'],
+    'Machine Bench Press': ['ES'],
+    'Lat Machine Pull': ['T'],
+    'Lat Machine Chin-up': ['T'],
+    'Lat Machine Close Grip': ['T'],
+    'Lat Machine Single Pull': ['T'],
+    'Low Pulley Wide Grip': ['T'],
+    'Low Pulley Close Grip': ['T'],
+    'Chin Up': ['T'],
+    'Pull Up': ['T'],
+    'Neutral Pull Up': ['T'],
+    'Underhand Barbell Row': ['TLN', 'Bar path'],
+    'Overhand Barbell Row': ['TLN', 'Bar path'],
+    'Dumbbell Row': ['TLN', 'Bar path'],
+    'Neutral Cable Row': ['TL'],
+    'Overhand Cable Row': ['TL'],
+    'Underhand Cable Row': ['TL'],
+    'Barbell Military Press': ['ET'],
+    'Seated Dumbbell Shoulder Press': ['ET'],
+    'Seated Dumbbell Screw Press': ['ET'],
+    'Machine Overhead Press': ['E'],
+    'Incline Bench Press': ['ET'],
+    'Incline Press-up': ['ES'],
+    'Lateral Raise': ['Lead with the pinky'],
+    'Lying 30 Degree Single Lateral Raise': ['Lead with the pinky'],
+    'Cable Lateral Raise (Single)': ['Lead with the pinky'],
+    'Cable Lateral Raise (Double)': ['Lead with the pinky'],
+    'Lateral Rotation': ['Elbow fixed'],
+    'Cable French Press': ['Elbow high'],
+    'Single Overhead Seated French Press': ['Elbow high'],
+    'Reverse Dips': ['S', 'Back close to bench']
+};
+
+export function expandTeachingPoints(tokens) {
+    if (!Array.isArray(tokens) || !tokens.length) return [];
+    const out = [];
+    for (const raw of tokens) {
+        const token = String(raw || '').trim();
+        if (!token) continue;
+        if (token === 'A') {
+            out.push(...TP_A_LABELS);
+            continue;
+        }
+        if (/^[A-Z]+$/.test(token)) {
+            for (const ch of token) {
+                const label = TP_CODE_LABELS[ch];
+                if (label) out.push(label);
+            }
+            continue;
+        }
+        out.push(token);
+    }
+    return out;
+}
+
+/** Expanded teaching-point labels for a catalog lift. null if the name is not in the catalog. */
+export function getExerciseTeachingPoints(name) {
+    const meta = getExerciseMeta(name);
+    if (!meta) return null;
+    return expandTeachingPoints(EXERCISE_TEACHING_POINT_TOKENS[meta.name] || []);
+}
+
 /** Strength core slot still uses these (logic unchanged); mapped to catalog names. */
 export const STRENGTH_CORE_NAMES = {
     sidesit: 'Side-sit on Hyperextension Bench',

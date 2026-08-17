@@ -5,6 +5,7 @@ import {
     formatMuscleList,
     getExerciseMeta,
     getExerciseSessionLabel,
+    getExerciseTeachingPoints,
     resolveCatalogName,
     EXERCISE_CATALOG
 } from '../domain/exercise-catalog.js';
@@ -568,10 +569,16 @@ export function openExerciseDetail(id) {
             ${label}
         </div>`;
 
-    const teachingPoints = [1, 2, 3].map((n) => `
+    const escapeTp = (str) => String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const tpLabels = getExerciseTeachingPoints(displayName) || [];
+    const teachingPoints = tpLabels.map((label) => `
         <button type="button" class="detail-metric-row" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:10px; padding:12px; color:inherit;" onclick="this.nextElementSibling?.classList.toggle('hidden')">
             <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
-                <span class="hud-label" style="margin:0;">Teaching point ${n}</span>
+                <span class="hud-label" style="margin:0;">${escapeTp(label)}</span>
                 <span style="font-family:'Roboto Mono'; font-size:10px; color:var(--text-stealth);">Video</span>
             </div>
         </button>

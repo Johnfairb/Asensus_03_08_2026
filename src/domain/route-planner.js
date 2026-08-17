@@ -28,6 +28,7 @@ import { configureJournalModal } from '../ui/drive.js';
 import { buildDiaryEntryFromForm } from '../ui/diary-ui.js';
 import { loadDayJournal, loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveMatchJournalEntry, savePracticeJournalEntry, deleteMatchJournalEntry, deletePracticeJournalEntry } from '../ui/journey.js';
 import { canProgramPower, isPowerEvent, POWER_EVENT } from './power-engine.js';
+import { getExerciseTeachingPoints } from './exercise-catalog.js';
 import {
     getSportWeeklyQuotas,
     isGameEvent,
@@ -2914,19 +2915,16 @@ export function selectTeachingPointVideo(index) {
 
 /** Pressable teaching points for the form-video modal (label + clip URL). */
 export function getTeachingPoints(title) {
+    const catalogPoints = getExerciseTeachingPoints(title);
+    if (catalogPoints) {
+        return catalogPoints.map((label) => teachingPoint(label));
+    }
     const t = String(title || '').toLowerCase();
     if (t.includes('insulin') || t.includes('berg')) {
         return [
             teachingPoint('Prioritise protein and fibre at every meal.'),
             teachingPoint('Cut liquid sugar and ultra-processed snacks this week.'),
             teachingPoint('Walk 10 minutes after your largest carbohydrate meal.')
-        ];
-    }
-    if (t.includes('squat')) {
-        return [
-            teachingPoint('Brace before you unlock the hips — ribs down, floor through mid-foot.'),
-            teachingPoint('Control the eccentric; depth only as far as a neutral spine allows.'),
-            teachingPoint('Drive up without letting the knees cave or heels lift.')
         ];
     }
     if (t.includes('sleep')) {
@@ -2943,20 +2941,6 @@ export function getTeachingPoints(title) {
             teachingPoint('Use sunlight early and finish intense training before late evening.')
         ];
     }
-    if (t.includes('bench') || t.includes('press')) {
-        return [
-            teachingPoint('Plant feet, pinch scapulae, slight arch — bar over wrists and elbows.'),
-            teachingPoint('Touch lightly to the chest; no bounce.'),
-            teachingPoint('Press up and slightly back to the start position.')
-        ];
-    }
-    if (t.includes('deadlift')) {
-        return [
-            teachingPoint('Bar over mid-foot, shins vertical, lats on before you pull.'),
-            teachingPoint('Push the floor away — hinge, don’t yank with the low back.'),
-            teachingPoint('Lock out tall without hyperextending the lumbar spine.')
-        ];
-    }
     if (t.includes('band') || t.includes('pull-apart') || t.includes('face pull')) {
         return [
             teachingPoint('Light tension — own the end range without shrugging.'),
@@ -2964,11 +2948,7 @@ export function getTeachingPoints(title) {
             teachingPoint('Breathing stays easy; this is prehab, not a max set.')
         ];
     }
-    return [
-        teachingPoint('Keep the core braced and spine neutral.'),
-        teachingPoint('Control the eccentric — no bouncing or dumping the load.'),
-        teachingPoint('Stop the set when form breaks, even if reps remain.')
-    ];
+    return [];
 }
 
 /** @deprecated Prefer getTeachingPoints — returns label strings for older callers. */
