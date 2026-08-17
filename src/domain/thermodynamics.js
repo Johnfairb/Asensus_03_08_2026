@@ -176,6 +176,9 @@ export async function onAppBecameVisible() {
     if (!pulled) return;
     try { generateFutureTimeline(); } catch (e) { /* ignore */ }
     try { getTodayFocus(); } catch (e) { /* ignore */ }
+    try {
+        if (typeof window.updateDomainBars === 'function') window.updateDomainBars();
+    } catch (e) { /* ignore */ }
 }
 
 export function applyUserConfigToDom() {

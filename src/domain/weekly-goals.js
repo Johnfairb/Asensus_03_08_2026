@@ -1,7 +1,7 @@
 /**
  * Weekly Exercise goals (Mon–Sun) + Asensus points.
  */
-import { getMondayISO, dateToISO, addDaysISO, getPlannedDayEvents, isLactateEvent, isSteadyCardio, isLiftingEvent, isStrengthEvent, isPracticeEvent, isGameEvent, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind } from './route-planner.js';
+import { getMondayISO, dateToISO, addDaysISO, getPlannedDayEvents, isLactateEvent, isSteadyCardio, isLiftingEvent, isStrengthEvent, isPracticeEvent, isGameEvent, loadWorkoutSessionSnapshots, loadLoggedSessionsMap, countLoggedWorkoutCredits, normalizeLoggedSessionKind } from './route-planner.js';
 
 const POINTS_KEY = 'ascensus_points_total';
 const WEEK_AWARD_KEY = 'ascensus_points_week_awarded';
@@ -136,9 +136,49 @@ function steadyMinutes(snap) {
     (snap?.items || []).forEach(it => {
         (it.sets || []).forEach(s => {
             if (Number(s.time_minutes) > mins) mins = Number(s.time_minutes);
+            const sec = Number(s.duration_sec) || 0;
+            if (sec > 0 && (sec / 60) > mins) mins = sec / 60;
         });
     });
     return mins;
+}
+
+function itemLooksLikeLactate(it) {
+    if (!it) return false;
+    if (it.isLactateHit || (it.sets || []).some(s => s && s.isLactateHit)) return true;
+    return /lactate|sprint|interval|hit\s*class/i.test(String(it.exercise?.name || it.name || ''));
+}
+
+function itemLooksLikeSteady(it) {
+    if (!it || itemLooksLikeLactate(it)) return false;
+    if (it.isSteadyCardio) return true;
+    const name = String(it.exercise?.name || it.name || '');
+    if (/steady/i.test(name)) return true;
+    return String(it.exercise?.domain || '').toLowerCase() === 'cardio';
+}
+
+function snapHasCompletedCardioWork(snap) {
+    if (steadyMinutes(snap) > 0) return true;
+    return (snap?.items || []).some(it => (it.sets || []).some(s => {
+        if (!s) return false;
+        if (Number(s.distance_km) > 0) return true;
+        if (Number(s.time_minutes) > 0 || Number(s.duration_sec) > 0) return true;
+        return !!s.completed && itemLooksLikeSteady(it);
+    }));
+}
+
+/** True when this log is a completed Zone-2 / steady session (kind or items). */
+function sessionCountsAsAerobic(snap) {
+    if (!snap) return false;
+    const kind = String(snap.kind || '');
+    const creditKind = normalizeLoggedSessionKind(kind);
+    if (creditKind === 'Lactate' || isLactateEvent(kind)) return false;
+    const items = snap.items || [];
+    if (items.some(itemLooksLikeLactate) && !items.some(itemLooksLikeSteady)) return false;
+    const kindSaysSteady = creditKind === 'Cardio (Steady)' || isSteadyCardio(kind) || /steady/i.test(kind);
+    const itemsSaySteady = items.some(itemLooksLikeSteady);
+    if (!kindSaysSteady && !itemsSaySteady) return false;
+    return snapHasCompletedCardioWork(snap) || items.some(it => (it.sets || []).some(s => s && s.completed));
 }
 
 /**
@@ -161,30 +201,52 @@ export function computeWeeklyGoalScores(weekStartISO = getMondayISO(new Date()))
         });
     });
 
-    let anaerobic = 0;
-    let aerobic = 0;
+    // Same Steady / Lactate credits as the week plan (logged session, not a 40+ min timer).
+    const weekCredits = countLoggedWorkoutCredits(weekStartISO);
+    const loggedMap = loadLoggedSessionsMap();
+    const aerobicIds = new Set();
+
+    let anaerobic = weekCredits.lactate || 0;
+    let aerobic = weekCredits.steady || 0;
     let stretchDone = 0;
     let warmupDone = 0;
     let strengthFracSum = 0;
     let strengthSessionCount = 0;
 
     days.forEach(iso => {
+        const dayList = Array.isArray(loggedMap[iso]) ? loggedMap[iso] : [];
+        dayList.forEach((entry) => {
+            const id = entry?.sessionId;
+            if (id && normalizeLoggedSessionKind(entry?.kind || entry) === 'Cardio (Steady)') {
+                aerobicIds.add(id);
+            }
+        });
+
         const daySnaps = sessionsForDate(snaps, iso);
         daySnaps.forEach(snap => {
             const kind = String(snap.kind || '');
             const creditKind = normalizeLoggedSessionKind(kind);
+            const snapId = snap.id || snap.sessionId || null;
+
             if (creditKind === 'Lactate' || isLactateEvent(kind) || /lactate|hit/i.test(kind)) {
-                const f = lactateBlockFraction(snap);
-                if (f >= 0.5) anaerobic += f;
-                else if (snap.isHitClass) anaerobic += 1;
+                // Credits already counted this kind; only add leftover HIT snapshots with no credit id
+                if (!snapId && (lactateBlockFraction(snap) >= 0.5 || snap.isHitClass)) {
+                    anaerobic += 1;
+                }
             }
             // Practice/match with diary RPE ≥ 7 counts as anaerobic
             if (isPracticeEvent(kind) || isGameEvent(kind) || /practice/i.test(kind) || /match|game/i.test(kind)) {
                 const rpe = Number(snap.rpe);
                 if (Number.isFinite(rpe) && rpe >= 7) anaerobic += 1;
             }
-            if (creditKind === 'Cardio (Steady)' || isSteadyCardio(kind) || /steady/i.test(kind)) {
-                if (steadyMinutes(snap) > 40) aerobic += 1;
+            if (sessionCountsAsAerobic(snap)) {
+                // Cardio (Steady) is already in weekCredits.steady
+                if (creditKind === 'Cardio (Steady)') {
+                    if (snapId) aerobicIds.add(snapId);
+                } else if (!snapId || !aerobicIds.has(snapId)) {
+                    if (snapId) aerobicIds.add(snapId);
+                    aerobic += 1;
+                }
             }
             if (sessionHasCompletedStretch(snap)) stretchDone += 1;
             if (sessionHasCompletedWarmup(snap)) warmupDone += 1;
@@ -253,7 +315,19 @@ export function renderWeeklyExerciseGoals() {
         const bar = document.getElementById('bar-' + id);
         const txt = document.getElementById('hud-txt-' + id);
         if (labelEl) labelEl.textContent = label;
-        if (bar) bar.style.width = `${Math.round((s.pct || 0) * 100)}%`;
+        if (bar) {
+            const pct = Math.round((s.pct || 0) * 100);
+            bar.style.width = `${pct}%`;
+            bar.classList.remove('under', 'in-range', 'over', 'over-target');
+            if (pct > 0) {
+                if ((s.pct || 0) >= 0.999) {
+                    bar.classList.add('in-range');
+                    bar.style.setProperty('--in-range-t', '1');
+                } else {
+                    bar.classList.add('under');
+                }
+            }
+        }
         if (txt) txt.textContent = ''; // no numbers per spec
     });
 

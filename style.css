@@ -303,6 +303,10 @@ h2 {
     z-index: 2;
     overflow: hidden;
 }
+/* Weekly Exercise goals only set width — they still need a visible fill. */
+#drive-panel-goals .progress-bar-fill {
+    background-color: var(--fill-under);
+}
 .macro-bar-track .progress-bar-fill::after {
     display: none;
 }

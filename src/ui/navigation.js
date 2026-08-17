@@ -126,6 +126,9 @@ export function switchTab(element, tabId, title) {
             .then((pulled) => {
                 if (pulled) {
                     try { getTodayFocus(); } catch (e) { console.warn(e); }
+                    try {
+                        if (typeof window.updateDomainBars === 'function') window.updateDomainBars();
+                    } catch (e) { /* ignore */ }
                 }
             })
             .catch(() => {});
