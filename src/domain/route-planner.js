@@ -2207,7 +2207,7 @@ export function generateFutureTimeline() {
         const safeDay = String(dayName).replace(/'/g, "\\'");
         let sleepLine = '';
         try {
-            const sleepH = getTonightSleepTargetHours(futureDate);
+            const sleepH = getPlanTonightSleepHours(futureDate, dayEvents);
             if (sleepH > 0) {
                 sleepLine = `<div style="margin-top:8px; font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono',monospace;">Tonight's sleep · ${Number(sleepH).toFixed(1)} h</div>`;
             }
@@ -2277,31 +2277,43 @@ function buildMacroGoalBarsHtml(macros, forDate = new Date()) {
     return html;
 }
 
-/** Tonight's sleep target for a plan day (logged the following morning). */
-function buildPlanSleepTargetHtml(forDate = new Date()) {
+/** Rough RPE for planned sessions so sleep can be estimated before anything is logged. */
+function estimatePlannedEventsRpe(events) {
+    let plannedRpe = 0;
+    (events || []).forEach((ev) => {
+        const s = String(ev || '');
+        if (/^rest$/i.test(s)) return;
+        if (isStrengthEvent(s) || /hypertrophy|gym|full body/i.test(s)) plannedRpe += 5;
+        else if (isLactateEvent(s)) plannedRpe += 7;
+        else if (isPracticeEvent(s) || isGameEvent(s)) plannedRpe += 7;
+        else if (isSteadyCardio(s)) plannedRpe += 2;
+        else if (s && !/^rest\b/i.test(s)) plannedRpe += 5;
+    });
+    return plannedRpe;
+}
+
+/**
+ * Tonight's sleep hours for a plan day.
+ * Uses logged workout load when present, otherwise (or if higher) the planned-session estimate.
+ */
+function getPlanTonightSleepHours(forDate = new Date(), events) {
     let hours = 8.5;
     try {
         hours = getTonightSleepTargetHours(forDate) || 8.5;
-        // Before sessions are logged, estimate from planned events so Plan → Food is useful
-        const events = getPlannedDayEvents(forDate) || [];
-        let plannedRpe = 0;
-        events.forEach((ev) => {
-            const s = String(ev || '');
-            if (/^rest$/i.test(s)) return;
-            if (isStrengthEvent(s) || /hypertrophy|gym|full body/i.test(s)) plannedRpe += 5;
-            else if (isLactateEvent(s)) plannedRpe += 7;
-            else if (isPracticeEvent(s) || isGameEvent(s)) plannedRpe += 7;
-            else if (isSteadyCardio(s)) plannedRpe += 2;
-            else if (s && !/^rest\b/i.test(s)) plannedRpe += 5;
-        });
+        const plannedRpe = estimatePlannedEventsRpe(events || getPlannedDayEvents(forDate));
         if (plannedRpe > 0) {
             const fromPlan = sleepHoursFromTotalRpe(plannedRpe);
-            // Prefer the higher of logged load vs planned estimate
             if (fromPlan > hours) hours = fromPlan;
         }
     } catch (e) {
         hours = 8.5;
     }
+    return hours;
+}
+
+/** Tonight's sleep target for a plan day (logged the following morning). */
+function buildPlanSleepTargetHtml(forDate = new Date()) {
+    const hours = getPlanTonightSleepHours(forDate);
     const label = Number(hours).toFixed(1);
     return `<div style="margin-bottom:16px; padding:12px 14px; border:1px solid rgba(212,175,55,0.28); border-radius:10px; background:rgba(212,175,55,0.06);">
         <div style="font-size:9px; color:var(--gold-accent); font-family:'Roboto Mono',monospace; font-weight:800; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">Tonight's sleep target</div>
