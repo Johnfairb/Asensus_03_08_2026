@@ -27,6 +27,18 @@ import { getTonightSleepTargetHours, sleepHoursFromTotalRpe } from './sleep-rpe.
 import { configureJournalModal } from '../ui/drive.js';
 import { buildDiaryEntryFromForm } from '../ui/diary-ui.js';
 import { loadDayJournal, loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveMatchJournalEntry, savePracticeJournalEntry, deleteMatchJournalEntry, deletePracticeJournalEntry } from '../ui/journey.js';
+import { canProgramPower, isPowerEvent, POWER_EVENT } from './power-engine.js';
+import {
+    getSportWeeklyQuotas,
+    isGameEvent,
+    isPracticeEvent,
+    isSportEvent,
+    populateSportSelects,
+    sameSportEvent as catalogSameSportEvent,
+    sportEventLabel
+} from './sports-matrix.js';
+
+export { isPowerEvent, POWER_EVENT, isGameEvent, isPracticeEvent, isSportEvent };
 
 // ==========================================
 // 14. UNIFIED ROUTE FORECAST & PLAN VIEWER
@@ -38,8 +50,6 @@ export const LIFTING_EVENT_TYPES = [
     'Hypertrophy / Upper', 'Hypertrophy / Lower', 'Hypertrophy / Full Body',
     'Full Body / Power', 'Auxiliary', 'Cardio', 'Cardio (Steady)', 'Lactate'
 ];
-export function isGameEvent(e) { return e === 'Game' || e === 'Match'; }
-export function isPracticeEvent(e) { return e === 'Practice'; }
 export function isRestEvent(e) { return e === 'Rest' || e === 'Rest (Cardio Only)' || e === 'Cannot Workout'; }
 export function isSteadyCardio(e) { return e === 'Cardio' || e === 'Cardio (Steady)'; }
 export function isLactateEvent(e) { return e === 'Lactate' || e === 'Cardio (Lactate)'; }
@@ -62,7 +72,7 @@ export function canShareWithPractice(focus) {
     if (!focus || isGameEvent(focus) || isRestEvent(focus)) return false;
     // Lactate may follow practice on the same day (afternoon slot)
     return isLactateEvent(focus) || isStrengthEvent(focus) || isAuxEvent(focus)
-        || isSteadyCardio(focus) || focus === 'Full Body / Power';
+        || isSteadyCardio(focus) || isPowerEvent(focus);
 }
 
 export function invalidateWeekPlanCache() { store._weekPlanCache = { key: '', plan: null }; }
@@ -125,7 +135,8 @@ const COMPLETED_PLAN_SLOTS_KEY = 'ascensus_completed_plan_slots';
 export const WORKOUT_TYPE_OPTIONS = [
     { kind: 'Cardio (Steady)', label: 'Steady State', blurb: 'Zone 2 aerobic base' },
     { kind: 'Lactate', label: 'Lactate/HIT', blurb: '~45 min · 10 min HIT block' },
-    { kind: 'Full Body / Strength', label: 'Gym Workout', blurb: 'Strength / lifting session' }
+    { kind: 'Full Body / Strength', label: 'Gym Workout', blurb: 'Strength / lifting session' },
+    { kind: 'Full Body / Power', label: 'Power', blurb: 'Plyometrics · maximal effort · 3 min rest' }
 ];
 
 export function loadLoggedSessionsMap() {
@@ -159,7 +170,8 @@ export function normalizeLoggedSessionKind(kind) {
     if (isSteadyCardio(kind)) return 'Cardio (Steady)';
     if (isLactateEvent(kind)) return 'Lactate';
     if (isAuxEvent(kind)) return 'Auxiliary';
-    if (isStrengthEvent(kind) || kind === 'Gym' || kind === 'Gym Workout' || kind === 'Full Body / Power') {
+    if (isPowerEvent(kind)) return 'Full Body / Power';
+    if (isStrengthEvent(kind) || kind === 'Gym' || kind === 'Gym Workout') {
         return 'Full Body / Strength';
     }
     return null;
@@ -175,6 +187,7 @@ function bumpCreditKind(out, kind) {
     const k = normalizeLoggedSessionKind(kind);
     if (k === 'Cardio (Steady)') out.steady++;
     else if (k === 'Lactate') out.lactate++;
+    else if (k === 'Full Body / Power') out.power++;
     else if (k === 'Full Body / Strength') out.strength++;
     return k;
 }
@@ -199,7 +212,7 @@ function forEachCreditOnDate(dateIso, fn) {
 
 /** Count logged Steady / Lactate / Gym sessions that already count for this week. */
 export function countLoggedWorkoutCredits(weekStartISO) {
-    const out = { steady: 0, lactate: 0, strength: 0 };
+    const out = { steady: 0, lactate: 0, strength: 0, power: 0 };
     const seen = new Set();
     const weekEnd = addDaysISO(weekStartISO, 6);
     for (let i = 0; i < 7; i++) {
@@ -211,9 +224,9 @@ export function countLoggedWorkoutCredits(weekStartISO) {
                 tokens.forEach((t) => seen.add(t));
                 return;
             }
-            const before = out.steady + out.lactate + out.strength;
+            const before = out.steady + out.lactate + out.strength + out.power;
             const normalized = bumpCreditKind(out, kind);
-            if (!normalized || out.steady + out.lactate + out.strength === before) return;
+            if (!normalized || out.steady + out.lactate + out.strength + out.power === before) return;
             if (tokens.length) tokens.forEach((t) => seen.add(t));
             else seen.add(`${ds}:${normalized}:${before}`);
         });
@@ -246,6 +259,15 @@ export function dateHasCompletedLiftCredit(dateStr) {
     let hit = false;
     forEachCreditOnDate(dateStr, (kind) => {
         if (normalizeLoggedSessionKind(kind) === 'Full Body / Strength') hit = true;
+    });
+    return hit;
+}
+
+export function dateHasCompletedPowerCredit(dateStr) {
+    if (!dateStr) return false;
+    let hit = false;
+    forEachCreditOnDate(dateStr, (kind) => {
+        if (normalizeLoggedSessionKind(kind) === 'Full Body / Power') hit = true;
     });
     return hit;
 }
@@ -493,6 +515,11 @@ export function canAcceptGPS(day, focus) {
     if (day.events.some(isPracticeEvent) && !canShareWithPractice(focus)) return false;
     // Never two of the same session type on one day
     if (isStrengthEvent(focus) && dayHasStrength(day.events)) return false;
+    if (isPowerEvent(focus) && day.events.some(isPowerEvent)) return false;
+    if (isPowerEvent(focus) && dayHasStrength(day.events)) return false;
+    if (isStrengthEvent(focus) && day.events.some(isPowerEvent)) return false;
+    if (isPowerEvent(focus) && day.events.some(isLactateEvent)) return false;
+    if (isLactateEvent(focus) && day.events.some(isPowerEvent)) return false;
     if (isAuxEvent(focus) && day.events.some(isAuxEvent)) return false;
     if (isLactateEvent(focus) && day.events.some(isLactateEvent)) return false;
     if (isSteadyCardio(focus) && day.events.some(isSteadyCardio)) return false;
@@ -689,9 +716,9 @@ export function persistWeekStrengthTail(days) {
 }
 
 /** Apply Strength A/B labels. Dates already sticky for this week keep their letter. */
-export function enforceStrengthABAlternation(days, startLetter = 'A') {
+export function enforceStrengthABAlternation(days, startLetter = 'A', { pinSticky = true } = {}) {
     const weekStart = days[0] && days[0].dateStr;
-    const sticky = weekStart ? loadStrengthWeekSticky(weekStart) : { sessions: [] };
+    const sticky = (pinSticky && weekStart) ? loadStrengthWeekSticky(weekStart) : { sessions: [] };
     const byDate = Object.create(null);
     (sticky.sessions || []).forEach((s) => {
         if (s && s.dateStr && (s.letter === 'A' || s.letter === 'B')) byDate[s.dateStr] = s.letter;
@@ -708,6 +735,67 @@ export function enforceStrengthABAlternation(days, startLetter = 'A') {
     }
 }
 
+function indexCombinations(arr, k) {
+    if (k <= 0) return [[]];
+    if (k > arr.length) return [];
+    const out = [];
+    const rec = (start, acc) => {
+        if (acc.length === k) {
+            out.push(acc.slice());
+            return;
+        }
+        for (let i = start; i < arr.length; i++) {
+            acc.push(arr[i]);
+            rec(i + 1, acc);
+            acc.pop();
+        }
+    };
+    rec(0, []);
+    return out;
+}
+
+function countStrengthTriples(indices) {
+    const set = new Set(indices);
+    let n = 0;
+    for (let i = 0; i <= 4; i++) {
+        if (set.has(i) && set.has(i + 1) && set.has(i + 2)) n++;
+    }
+    return n;
+}
+
+function strengthPackSpacing(indices) {
+    if (indices.length <= 1) return 50;
+    const sorted = [...indices].sort((a, b) => a - b);
+    let minDist = 99;
+    let gapSum = 0;
+    for (let i = 1; i < sorted.length; i++) {
+        const d = sorted[i] - sorted[i - 1];
+        minDist = Math.min(minDist, d);
+        gapSum += d;
+    }
+    return minDist * 12 + gapSum + (sorted[sorted.length - 1] - sorted[0]);
+}
+
+/** Pick `target` strength days. Prefer no 3-in-a-row, then sticky dates, then spacing. */
+function chooseStrengthDayIndexes(available, target, stickySet) {
+    const n = Math.min(target, available.length);
+    if (n <= 0) return [];
+    if (n >= available.length) return available.slice();
+    let best = null;
+    let bestScore = -Infinity;
+    indexCombinations(available, n).forEach((combo) => {
+        const triples = countStrengthTriples(combo);
+        let stickyKept = 0;
+        combo.forEach((i) => { if (stickySet.has(i)) stickyKept++; });
+        const score = (-triples * 10000) + (stickyKept * 100) + strengthPackSpacing(combo);
+        if (score > bestScore) {
+            bestScore = score;
+            best = combo;
+        }
+    });
+    return best || available.slice(0, n);
+}
+
 export function placeStrengthSessions(days, count) {
     const target = Math.min(4, Math.max(0, parseInt(count, 10) || 0));
     const weekStartISO = days[0] ? days[0].dateStr : null;
@@ -715,78 +803,38 @@ export function placeStrengthSessions(days, count) {
     const sticky = weekStartISO ? loadStrengthWeekSticky(weekStartISO) : { sessions: [] };
     const stickyDates = (sticky.sessions || []).map((s) => s.dateStr).filter(Boolean);
 
-    // Collect existing strength A/B day indexes (e.g. from fixed schedules)
-    let strengthIdx = [];
+    const available = [];
+    const stickySet = new Set();
     for (let i = 0; i < days.length; i++) {
-        if (!((days[i].events || []).some(isStrengthABEvent))) continue;
-        if (dateHasCompletedLiftCredit(days[i].dateStr)) {
+        const has = (days[i].events || []).some(isStrengthABEvent);
+        if (has && dateHasCompletedLiftCredit(days[i].dateStr)) {
             const sIdx = days[i].events.findIndex(isStrengthABEvent);
             if (sIdx >= 0) days[i].events.splice(sIdx, 1);
             continue;
         }
-        strengthIdx.push(i);
-    }
-
-    // Re-apply this week's sticky dates so a cache rebuild cannot move Session A/B.
-    // Skip days already logged — otherwise a completed session stays on the plan
-    // and a replacement is placed elsewhere (an extra gym day).
-    stickyDates.forEach((dateStr) => {
-        const i = days.findIndex((d) => d.dateStr === dateStr);
-        if (i < 0 || strengthIdx.includes(i)) return;
-        if (dateHasCompletedLiftCredit(dateStr)) return;
-        if ((days[i].events || []).some(isGameEvent)) return;
-        if ((days[i].events || []).some(isRestEvent)) return;
-        const letter = sticky.sessions.find((s) => s.dateStr === dateStr)?.letter;
-        const label = strengthLabelForLetter(letter === 'B' ? 'B' : 'A');
-        if (pushGPS(days[i], label)) strengthIdx.push(i);
-    });
-    strengthIdx.sort((a, b) => a - b);
-
-    // Trim extras when gym willingness dropped — drop non-sticky days first
-    while (strengthIdx.length > target) {
-        let dropPos = -1;
-        for (let k = strengthIdx.length - 1; k >= 0; k--) {
-            const ds = days[strengthIdx[k]].dateStr;
-            if (!stickyDates.includes(ds)) { dropPos = k; break; }
+        if (has || canAcceptGPS(days[i], 'Full Body / Strength A')) {
+            available.push(i);
+            if (stickyDates.includes(days[i].dateStr)) stickySet.add(i);
         }
-        if (dropPos < 0) dropPos = strengthIdx.length - 1;
-        const i = strengthIdx.splice(dropPos, 1)[0];
-        const sIdx = days[i].events.findIndex(isStrengthABEvent);
-        if (sIdx >= 0) days[i].events.splice(sIdx, 1);
-        if (days[i].events.length === 0) days[i].events = [];
     }
 
-    // Add sessions until we hit the willingness-based target, spaced across the week
-    while (strengthIdx.length < target) {
-        let best = -1;
-        let bestScore = -Infinity;
-        for (let pass = 0; pass < 2 && best < 0; pass++) {
-            const allowAdjacent = pass === 1;
-            best = -1;
-            bestScore = -Infinity;
-            for (let i = 0; i < 7; i++) {
-                if (strengthIdx.includes(i)) continue;
-                const probe = 'Full Body / Strength A';
-                let s = scoreDayForPlacement(days, i, probe, { allowAdjacent });
-                if (s === -Infinity) continue;
-                // Reward distance from other strength days
-                let minDist = 99;
-                strengthIdx.forEach(idx => { minDist = Math.min(minDist, Math.abs(idx - i)); });
-                s += (minDist < 99 ? minDist * 8 : 40);
-                if (s > bestScore) { bestScore = s; best = i; }
-            }
-            if (bestScore === -Infinity) best = -1;
+    const chosen = chooseStrengthDayIndexes(available, target, stickySet);
+    const chosenSet = new Set(chosen);
+    for (let i = 0; i < days.length; i++) {
+        const sIdx = (days[i].events || []).findIndex(isStrengthABEvent);
+        if (chosenSet.has(i)) {
+            if (sIdx < 0) pushGPS(days[i], 'Full Body / Strength A');
+        } else if (sIdx >= 0) {
+            days[i].events.splice(sIdx, 1);
+            if (!days[i].events.length) days[i].events = [];
         }
-        if (best < 0) break;
-        if (!pushGPS(days[best], 'Full Body / Strength A')) break;
-        strengthIdx.push(best);
-        strengthIdx.sort((a, b) => a - b);
     }
 
-    // Chronological A/B/A/B labels — sticky dates keep their letter
-    enforceStrengthABAlternation(days, startLetter);
+    const chosenDates = chosen.map((i) => days[i].dateStr).sort().join('|');
+    const stickyKey = [...stickyDates].sort().join('|');
+    enforceStrengthABAlternation(days, startLetter, { pinSticky: chosenDates === stickyKey && !!chosenDates });
     persistWeekStrengthTail(days);
-    return strengthIdx.length;
+    return chosen.length;
 }
 
 /**
@@ -965,7 +1013,7 @@ export function ensureWeeklySoftRestDay(days) {
     for (let i = days.length - 1; i >= 0; i--) {
         const d = days[i];
         if (d.events.some(isGameEvent) || d.events.some(isPracticeEvent)) continue;
-        if (d.events.some(isStrengthEvent)) continue;
+        if (d.events.some(isStrengthEvent) || d.events.some(isPowerEvent)) continue;
         const removable = d.events.every(e => isAuxEvent(e) || isLactateEvent(e) || isSteadyCardio(e) || isRestEvent(e));
         if (removable) {
             d.events = ['Rest'];
@@ -981,6 +1029,7 @@ export function dedupeHardSessionsPerDay(days) {
         let seenLactate = false;
         let seenStrength = false;
         let seenSteady = false;
+        let seenPower = false;
         day.events = (day.events || []).filter(e => {
             if (isAuxEvent(e)) {
                 if (seenAux) return false;
@@ -988,6 +1037,9 @@ export function dedupeHardSessionsPerDay(days) {
             } else if (isLactateEvent(e)) {
                 if (seenLactate) return false;
                 seenLactate = true;
+            } else if (isPowerEvent(e)) {
+                if (seenPower) return false;
+                seenPower = true;
             } else if (isStrengthEvent(e)) {
                 if (seenStrength) return false;
                 seenStrength = true;
@@ -1227,6 +1279,108 @@ export function ensureSteadySessions(days, quota = 2) {
     return countEventType(days, isSteadyCardio);
 }
 
+function stripPowerEvents(days) {
+    (days || []).forEach((day) => {
+        day.events = (day.events || []).filter((e) => !isPowerEvent(e));
+        if (!day.events.length) day.events = [];
+    });
+}
+
+function dayIsRestish(day) {
+    const ev = day?.events || [];
+    if (!ev.length) return true;
+    return ev.every((e) => isRestEvent(e));
+}
+
+function dayAfterLactate(days, i) {
+    return i > 0 && (days[i - 1].events || []).some(isLactateEvent);
+}
+
+function dayAfterPractice(days, i) {
+    return i > 0 && (days[i - 1].events || []).some(isPracticeEvent);
+}
+
+function canHostPower(days, i, { allowAfterPractice = false } = {}) {
+    if (i < 0 || i >= days.length) return false;
+    const ev = days[i].events || [];
+    if (ev.some(isPowerEvent)) return true;
+    if (ev.some(isGameEvent)) return false;
+    if (dayAfterLactate(days, i)) return false;
+    if (!allowAfterPractice && dayAfterPractice(days, i)) return false;
+    if (ev.some(isStrengthEvent) || ev.some(isLactateEvent)) return false;
+    const live = ev.filter((e) => !isRestEvent(e));
+    if (live.some(isPracticeEvent)) return live.length < 2;
+    if (live.length >= 2) return false;
+    return true;
+}
+
+function commitPowerOnDay(days, i) {
+    if (i < 0 || i >= days.length) return false;
+    const ev = (days[i].events || []).filter((e) => !isRestEvent(e) && !isPowerEvent(e));
+    if (ev.some(isGameEvent) || ev.some(isStrengthEvent) || ev.some(isLactateEvent)) return false;
+    if (ev.some(isPracticeEvent)) {
+        days[i].events = [POWER_EVENT, ...ev].slice(0, 2);
+        return true;
+    }
+    if (!ev.length) {
+        days[i].events = [POWER_EVENT];
+        return true;
+    }
+    if (ev.length < 2) {
+        days[i].events = [POWER_EVENT, ...ev].slice(0, 2);
+        return true;
+    }
+    return false;
+}
+
+function tryPlacePowerAt(days, i, opts = {}) {
+    if (!canHostPower(days, i, opts)) return false;
+    if ((days[i].events || []).some(isPowerEvent)) return true;
+    return commitPowerOnDay(days, i);
+}
+
+function placePowerEarliestAfterRest(days, opts = {}) {
+    for (let i = 1; i < days.length; i++) {
+        if (!dayIsRestish(days[i - 1]) && !isQualifyingRestDay(days[i - 1].events)) continue;
+        if (tryPlacePowerAt(days, i, opts)) return true;
+    }
+    return false;
+}
+
+function placePowerAnyLegal(days, opts = {}) {
+    for (let i = 0; i < days.length; i++) {
+        if (tryPlacePowerAt(days, i, opts)) return true;
+    }
+    return false;
+}
+
+/**
+ * One power session / week: day before match, else first day after a rest day.
+ * Never the day after lactate. Assume practice counts as lactate unless no other slot exists.
+ */
+export function placePowerSessions(days, quota = 1) {
+    const target = Math.max(0, Number(quota) || 0);
+    stripPowerEvents(days);
+    if (target <= 0) return 0;
+    if (countEventType(days, isPowerEvent) >= target) return countEventType(days, isPowerEvent);
+
+    const matchIdx = days.findIndex((d) => (d.events || []).some(isGameEvent));
+    const strict = { allowAfterPractice: false };
+    const relaxed = { allowAfterPractice: true };
+
+    if (matchIdx > 0 && tryPlacePowerAt(days, matchIdx - 1, strict)) {
+        return countEventType(days, isPowerEvent);
+    }
+    if (placePowerEarliestAfterRest(days, strict)) return countEventType(days, isPowerEvent);
+    if (matchIdx > 0 && tryPlacePowerAt(days, matchIdx - 1, relaxed)) {
+        return countEventType(days, isPowerEvent);
+    }
+    if (placePowerEarliestAfterRest(days, relaxed)) return countEventType(days, isPowerEvent);
+    if (placePowerAnyLegal(days, strict)) return countEventType(days, isPowerEvent);
+    placePowerAnyLegal(days, relaxed);
+    return countEventType(days, isPowerEvent);
+}
+
 export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
     const ignoreLoggedCredits = !!opts.ignoreLoggedCredits;
     const prefs = getGymPlanPrefs();
@@ -1234,10 +1388,15 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
     const hypertrophyMode = isHypertrophyPhase();
     const hybridMode = !!(prefs.hybrid);
     const loggedCredits = ignoreLoggedCredits
-        ? { steady: 0, lactate: 0, strength: 0 }
+        ? { steady: 0, lactate: 0, strength: 0, power: 0 }
         : countLoggedWorkoutCredits(weekStartISO);
-    const lactateQuota = Math.max(0, 2 - countPracticeLactateCredits(weekStartISO) - (loggedCredits.lactate || 0));
-    const steadyQuota = Math.max(0, 2 - (loggedCredits.steady || 0));
+    const sportQuotas = getSportWeeklyQuotas();
+    const lactateQuota = Math.max(0, sportQuotas.lactate - countPracticeLactateCredits(weekStartISO) - (loggedCredits.lactate || 0));
+    const steadyQuota = Math.max(0, sportQuotas.steady - (loggedCredits.steady || 0));
+    const powerEligible = sportQuotas.power > 0 && canProgramPower();
+    const powerTarget = powerEligible
+        ? Math.max(0, sportQuotas.power - (loggedCredits.power || 0))
+        : 0;
     const strengthTarget = hybridMode
         ? Math.max(0, (prefs.strengthCount || 0) - Math.min(loggedCredits.strength || 0, prefs.strengthCount || 0))
         : hypertrophyMode
@@ -1247,8 +1406,9 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
         ? Math.max(0, (hypPrefs.sessionCount || 0) - (loggedCredits.strength || 0))
         : 0;
     const cacheKey = [
-        'v7-strength-hybrid',
+        'v10-sport-energy',
         weekStartISO,
+        store.userConfig?.sport || '',
         ignoreLoggedCredits ? 'full' : 'net',
         hypertrophyMode ? 1 : 0,
         hybridMode ? 1 : 0,
@@ -1258,6 +1418,7 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
         prefs.maxTime,
         prefs.strengthCount,
         prefs.hypertrophyCount || 0,
+        prefs.powerCount || 0,
         prefs.auxCount,
         prefs.attachMode,
         prefs.separateAuxDays,
@@ -1265,9 +1426,11 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
         steadyQuota,
         strengthTarget,
         gymTargetPureHyp,
+        powerTarget,
         loggedCredits.steady || 0,
         loggedCredits.lactate || 0,
         loggedCredits.strength || 0,
+        loggedCredits.power || 0,
         isGuidanceOff('timetabling') ? 1 : 0
     ].join('|');
 
@@ -1291,7 +1454,7 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
             events = [routeOverrides[dateStr]];
         } else if (specificScheds[dateStr]) {
             const sp = specificEventName(specificScheds[dateStr]);
-            events = [sp === 'Match' ? 'Game' : sp];
+            events = [sp];
         } else if (fixedScheds[dayOfWeek] && fixedScheds[dayOfWeek].length) {
             events = fixedScheds[dayOfWeek].map(scheduleEventName).filter(Boolean);
         }
@@ -1308,7 +1471,10 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
     const timetablingOff = isGuidanceOff('timetabling');
 
     if (!timetablingOff) {
-        // 1) Gym sessions — hypertrophy, strength A/B, or hybrid mix
+        // 1) Power first so it can claim the day before a match
+        if (powerTarget > 0) placePowerSessions(days, powerTarget);
+
+        // 2) Gym sessions — hypertrophy, strength A/B, or hybrid mix
         if (hypertrophyMode) {
             placeHypertrophySessions(days, gymTargetPureHyp);
         } else if (hybridMode) {
@@ -1369,6 +1535,11 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
 
     if (!ignoreLoggedCredits) {
         days.forEach((day) => {
+            if (dateHasCompletedPowerCredit(day.dateStr)) {
+                const next = (day.events || []).filter((e) => !isPowerEvent(e));
+                day.events = next.length ? next : ['Rest'];
+                if (!day.events.length) day.events = ['Rest'];
+            }
             if (!dateHasCompletedLiftCredit(day.dateStr)) return;
             const next = (day.events || []).filter((e) => normalizeLoggedSessionKind(e) !== 'Full Body / Strength');
             day.events = next.length ? next : (day.events.some(isRestEvent) ? day.events.filter(isRestEvent) : ['Rest']);
@@ -1570,6 +1741,30 @@ export function getFixedEventTime(dayOfWeek, eventName) {
     return scheduleEventTime(hit) || '';
 }
 
+function loadSpecificSchedulesMap() {
+    try {
+        if (store.specificSchedules && typeof store.specificSchedules === 'object') return store.specificSchedules;
+    } catch (e) { /* ignore */ }
+    try {
+        return JSON.parse(localStorage.getItem('ascensus_specific_schedules') || '{}') || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function sameSportEvent(a, b) {
+    return catalogSameSportEvent(a, b);
+}
+
+export function getSpecificEventTime(dateStr, eventName) {
+    if (!dateStr || !eventName) return '';
+    const raw = loadSpecificSchedulesMap()[dateStr];
+    if (!raw || typeof raw !== 'object') return '';
+    const name = specificEventName(raw);
+    if (!name || !sameSportEvent(name, eventName)) return '';
+    return raw.time || '';
+}
+
 /** True if any fixed-schedule entry that day is Morning. */
 export function dayHasFixedMorningEvent(dayOfWeek) {
     const list = loadFixedSchedules()[dayOfWeek] || [];
@@ -1584,9 +1779,10 @@ export function resolveSessionTimeOfDay(dateObj, eventName) {
     if (!eventName || isRestEvent(eventName)) return 'All Day';
     const dow = dateObj instanceof Date ? dateObj.getDay() : new Date(dateObj).getDay();
     if (isPracticeEvent(eventName) || isGameEvent(eventName)) {
-        return getFixedEventTime(dow, eventName) || 'Afternoon';
+        const dateStr = dateObj instanceof Date ? dateToISO(dateObj) : String(dateObj || '').slice(0, 10);
+        return getSpecificEventTime(dateStr, eventName) || getFixedEventTime(dow, eventName) || 'Afternoon';
     }
-    if (isStrengthEvent(eventName) || isStrengthFocus(eventName)) {
+    if (isStrengthEvent(eventName) || isStrengthFocus(eventName) || isPowerEvent(eventName)) {
         return dayHasFixedMorningEvent(dow) ? 'Afternoon' : 'Morning';
     }
     const fixed = getFixedEventTime(dow, eventName);
@@ -1610,10 +1806,13 @@ export function assignPairedSessionSlots(dateObj, dayEvents) {
 
     const preferred = pair.map(ev => {
         if (isPracticeEvent(ev) || isGameEvent(ev)) {
+            const dateStr = dateObj instanceof Date ? dateToISO(dateObj) : String(dateObj || '').slice(0, 10);
+            const st = getSpecificEventTime(dateStr, ev);
+            if (st) return String(st);
             const ft = getFixedEventTime(dow, ev);
             if (ft) return String(ft);
         }
-        if (isStrengthEvent(ev) || isStrengthFocus(ev)) {
+        if (isStrengthEvent(ev) || isStrengthFocus(ev) || isPowerEvent(ev)) {
             return dayHasFixedMorningEvent(dow) ? 'Afternoon' : 'Morning';
         }
         const ft = getFixedEventTime(dow, ev);
@@ -1637,11 +1836,15 @@ export function assignPairedSessionSlots(dateObj, dayEvents) {
         // Lactate follows Practice on the same day
         const practiceIdx = pair.findIndex(isPracticeEvent);
         const lactateIdx = pair.findIndex(isLactateEvent);
-        if (practiceIdx >= 0 && lactateIdx >= 0) {
+        const powerIdx = pair.findIndex(isPowerEvent);
+        if (practiceIdx >= 0 && powerIdx >= 0) {
+            morningIdx = powerIdx;
+            afternoonIdx = practiceIdx;
+        } else if (practiceIdx >= 0 && lactateIdx >= 0) {
             morningIdx = practiceIdx;
             afternoonIdx = lactateIdx;
         } else {
-            const strengthIdx = pair.findIndex(e => isStrengthEvent(e) || isStrengthFocus(e));
+            const strengthIdx = pair.findIndex(e => isStrengthEvent(e) || isStrengthFocus(e) || isPowerEvent(e));
             morningIdx = strengthIdx >= 0 ? strengthIdx : 0;
             afternoonIdx = morningIdx === 0 ? 1 : 0;
         }
@@ -1705,12 +1908,13 @@ export function toggleSchedTimeVisibility() {
     const ev = document.getElementById('sched-event')?.value;
     const timeEl = document.getElementById('sched-time');
     if (!timeEl) return;
-    timeEl.style.display = (ev === 'Rest') ? 'none' : '';
+    timeEl.style.display = (ev === 'Rest' || ev === 'None') ? 'none' : '';
 }
 
 export function openFixedScheduleModal() {
     const modal = document.getElementById('schedule-modal');
     if (!modal) return;
+    try { populateSportSelects(); } catch (e) { /* ignore */ }
     modal.classList.remove('hidden');
     toggleSchedTimeVisibility();
     renderFixedSchedules();
@@ -1770,13 +1974,14 @@ export function renderFixedSchedules() {
             const time = scheduleEventTime(ev);
             const safeEv = String(name).replace(/'/g, "\\'");
             const timeBit = time ? ` · ${time}` : '';
+            const label = sportEventLabel(name) || name;
             html += `<div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); padding:12px; border-radius:8px; font-size:12px;">
-                <span style="color:var(--text-main); font-weight:bold;">${days[d]}: <span style="color:var(--gold-accent);">${name}${timeBit}</span></span>
+                <span style="color:var(--text-main); font-weight:bold;">${days[d]}: <span style="color:var(--gold-accent);">${label}${timeBit}</span></span>
                 <button onclick="deleteFixedSchedule('${d}', '${safeEv}')" style="background:none; border:none; color:var(--text-stealth); font-size:18px; cursor:pointer;">&times;</button>
             </div>`;
         });
     }
-    list.innerHTML = html || `<div style="font-size:11px; color:var(--text-muted); padding:8px 0;">No locks yet. Add Practice or Match above.</div>`;
+    list.innerHTML = html || `<div style="font-size:11px; color:var(--text-muted); padding:8px 0;">No locks yet. Add a sport event or Rest above.</div>`;
 }
 
 /** Resolve a day's event list: sport overrides + optional GPS lift (max 2). */
@@ -1803,7 +2008,7 @@ export function resolveDayEvents(options) {
     if (specificScheds[dateStr]) {
         const sp = specificEventName(specificScheds[dateStr]);
         // Calendar uses Match; normalize to Game for rules
-        events = [sp === 'Match' ? 'Game' : sp];
+        events = [sp];
     } else if (fixedScheds[dayOfWeek] && fixedScheds[dayOfWeek].length) {
         events = fixedScheds[dayOfWeek].map(scheduleEventName).filter(Boolean);
     }
@@ -1840,12 +2045,14 @@ export function prettyFocusName(focus) {
     if (focus === 'Full Body / Strength A' || /Strength\s*A/i.test(focus)) return 'Strength Session A';
     if (focus === 'Full Body / Strength B' || /Strength\s*B/i.test(focus)) return 'Strength Session B';
     if (focus === 'Full Body / Strength') return 'Strength Session';
+    if (isPowerEvent(focus)) return 'Power';
     if (isSteadyCardio(focus)) return 'Steady Cardio';
     if (isLactateEvent(focus)) return 'Lactate/HIT';
     if (isAuxEvent(focus)) {
         const bandOn = !!(typeof getGymPlanPrefs === 'function' ? getGymPlanPrefs().band : store.userConfig.bandAuxiliary);
         return bandOn ? 'Band Auxiliary' : 'Auxiliary';
     }
+    if (isSportEvent(focus)) return sportEventLabel(focus);
     return focus;
 }
 
@@ -1860,6 +2067,7 @@ export function normalizeFocusName(focus) {
     if (focus.includes('Strength Session A') || focus === 'Full Body / Strength A') return 'Full Body / Strength A';
     if (focus.includes('Strength Session B') || focus === 'Full Body / Strength B') return 'Full Body / Strength B';
     if (focus.includes('Strength Session') || focus === 'Full Body / Strength') return 'Full Body / Strength A';
+    if (focus === 'Power' || /Full Body \/ Power/i.test(focus)) return 'Full Body / Power';
     // Multi-event label e.g. "Practice + Strength Session A"
     const parts = focus.split(/\s*\+\s*/);
     if (parts.length > 1) {
@@ -1875,7 +2083,8 @@ export function formatEventsLabel(events) {
 
 export function pickPrimaryFocus(events) {
     if (!events || !events.length) return 'Rest';
-    if (events.some(isGameEvent)) return 'Game';
+    const matchEv = events.find(isGameEvent);
+    if (matchEv) return matchEv;
     if (events.includes('Rest (Cardio Only)')) return 'Rest (Cardio Only)';
     if (events.some(isRestEvent)) return 'Rest';
     const strength = events.find(isStrengthEvent);
@@ -1884,7 +2093,8 @@ export function pickPrimaryFocus(events) {
     if (lactate) return lactate;
     const lift = events.find(isLiftingEvent);
     if (lift) return lift;
-    if (events.some(isPracticeEvent)) return 'Practice';
+    const practiceEv = events.find(isPracticeEvent);
+    if (practiceEv) return practiceEv;
     return events[0];
 }
 

@@ -5,7 +5,7 @@ import { resolveSessionRpe } from '../domain/sleep-rpe.js';
 import { calculateLiveFitnessScores, generateDailyExerciseLog, getSeasonPhase, getTodayFocus, getWeeklyCoachTip, getWorkoutSessionAdvice, isGuidanceOff } from '../domain/fitness-hud.js';
 import { applyInjuryPainFollowUpFromJournal, injuryAreaLabel, needsInjuryPainFollowUp } from '../domain/periodization.js';
 import { HIT_TYPE_OPTIONS, resolveHitClassRecovery } from '../domain/lactate-engine.js';
-import { commitMatchSession, commitPracticeSession, dateToISO, generateFutureTimeline, getWorkoutSessionSnapshot, invalidateWeekPlanCache, isAuxEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isSteadyCardio, isStrengthEvent, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, setRouteOverride, addDaysISO } from '../domain/route-planner.js';
+import { commitMatchSession, commitPracticeSession, dateToISO, generateFutureTimeline, getWorkoutSessionSnapshot, invalidateWeekPlanCache, isAuxEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, setRouteOverride, addDaysISO, isPowerEvent } from '../domain/route-planner.js';
 import { lactateSessionRpeBarHtml, openLactateHitPicker, shouldPromptLactateHitTypes } from './lactate-ui.js';
 
 const HIT_TYPE_LABELS_RE = new RegExp(
@@ -14,6 +14,8 @@ const HIT_TYPE_LABELS_RE = new RegExp(
 );
 import { saveSettings } from '../domain/thermodynamics.js';
 import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, canSupersetPair, createSupersetFromIndices, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
+import { populateSportSelects } from '../domain/sports-matrix.js';
+import { applyPowerExerciseToItem } from '../domain/power-engine.js';
 import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase, sessionAppliesMuscleLockout } from '../domain/hypertrophy-engine.js';
 import {
     allowsWeightInput,
@@ -28,7 +30,7 @@ import {
 import { switchCableEquipment } from './equipment-ui.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
-import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart } from '../domain/periodization-logs.js';
+import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, lastCompletedWorkingWeight } from '../domain/periodization-logs.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry, idbPutJournalMedia } from './journey.js';
@@ -36,6 +38,7 @@ import { calculateTDEE } from '../domain/thermodynamics.js';
 import { notifyRestTimerDone, ensureNotificationPermission } from './notifications.js';
 import {
     holdAudioAlive,
+    playPrepareBeepSound,
     playRestAlarmSound,
     pokeAudioAlive,
     releaseAllAudioHolds,
@@ -49,6 +52,7 @@ import {
     isPlannedTimedStretchItem,
     remainingStretchStepSeconds,
     resetStretchAudioHold,
+    stretchStepHeading,
     startStretchTimer,
     stretchSetBaseName,
     stretchSetLabel,
@@ -348,9 +352,11 @@ export function renderWorkoutLog() {
                 ? `dismissPlannedStretchFromLog(${exIdx})`
                 : `removeFoodFromActiveLog(${exIdx})`);
 
+        html += workoutReorderGapHtml(exIdx);
         html += `<div class="workout-card" style="padding: 16px;" data-ex-idx="${exIdx}"
             draggable="${!item.isWarmupGroup && !item.isStretchGroup && !isLactateHit && !item.isSportSessionBlock ? 'true' : 'false'}"
             ondragstart="workoutCardDragStart(event, ${exIdx})"
+            ondragend="workoutCardDragEnd(event)"
             ondragover="workoutCardDragOver(event, ${exIdx})"
             ondragleave="workoutCardDragLeave(event)"
             ondrop="workoutCardDrop(event, ${exIdx})"
@@ -376,6 +382,8 @@ export function renderWorkoutLog() {
             ${restSlot}
         </div>`;
     });
+
+    html += workoutReorderGapHtml((store.activeLog.items || []).length);
 
     if (filter === 'todo' && todoCount === 0) {
         html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px;">All exercises logged. Switch to Logged to review.</div>`;
@@ -404,14 +412,34 @@ export function setWorkoutLogFilter(filter) {
     renderWorkoutLog();
 }
 
-/** Drag an exercise card onto another to create a merged superset. */
+/** Drag an exercise card onto another to create a merged superset. Drop in a gap to reorder. */
+function clearWorkoutDragState() {
+    document.body.classList.remove('workout-reordering');
+    document.querySelectorAll('.superset-dragging').forEach(el => el.classList.remove('superset-dragging'));
+    document.querySelectorAll('.superset-drop-target').forEach(el => el.classList.remove('superset-drop-target'));
+    document.querySelectorAll('.workout-reorder-gap.is-target').forEach(el => el.classList.remove('is-target'));
+}
+
+function workoutReorderGapHtml(insertBeforeIdx) {
+    return `<div class="workout-reorder-gap" data-insert-before="${insertBeforeIdx}"
+        ondragover="workoutReorderGapOver(event)"
+        ondragleave="workoutReorderGapLeave(event)"
+        ondrop="workoutReorderGapDrop(event, ${insertBeforeIdx})"></div>`;
+}
+
 export function workoutCardDragStart(event, exIdx) {
     window._supersetDragIdx = exIdx;
+    document.body.classList.add('workout-reordering');
     try {
         event.dataTransfer.setData('text/plain', String(exIdx));
         event.dataTransfer.effectAllowed = 'move';
     } catch (e) { /* ignore */ }
     event.currentTarget?.classList?.add('superset-dragging');
+}
+
+export function workoutCardDragEnd() {
+    clearWorkoutDragState();
+    window._supersetDragIdx = null;
 }
 
 export function workoutCardDragOver(event, exIdx) {
@@ -436,14 +464,63 @@ export function workoutCardDrop(event, targetIdx) {
         if (raw !== '' && raw != null) from = Number(raw);
     } catch (e) { /* ignore */ }
     window._supersetDragIdx = null;
+    clearWorkoutDragState();
     if (from == null || Number.isNaN(from) || from === targetIdx) return;
     const items = store.activeLog?.items || [];
     if (!canSupersetPair(items[from], items[targetIdx])) {
-        alert('Those exercises cannot be supersetted. Drag one lifting exercise onto another.');
+        alert('Those exercises cannot be supersetted. Drag one lifting exercise onto another, or drop into a gap to reorder.');
         return;
     }
     // Dropped exercise becomes A; target becomes B (order: dragged first)
     createSupersetFromIndices(from, targetIdx);
+}
+
+export function workoutReorderGapOver(event) {
+    const from = window._supersetDragIdx;
+    if (from == null) return;
+    event.preventDefault();
+    try { event.dataTransfer.dropEffect = 'move'; } catch (e) { /* ignore */ }
+    event.currentTarget?.classList?.add('is-target');
+}
+
+export function workoutReorderGapLeave(event) {
+    event.currentTarget?.classList?.remove('is-target');
+}
+
+export function workoutReorderGapDrop(event, insertBeforeIdx) {
+    event.preventDefault();
+    event.stopPropagation();
+    let from = window._supersetDragIdx;
+    try {
+        const raw = event.dataTransfer.getData('text/plain');
+        if (raw !== '' && raw != null) from = Number(raw);
+    } catch (e) { /* ignore */ }
+    window._supersetDragIdx = null;
+    clearWorkoutDragState();
+    if (from == null || Number.isNaN(from)) return;
+    reorderWorkoutItem(from, insertBeforeIdx);
+}
+
+function reorderWorkoutItem(fromIdx, insertBeforeIdx) {
+    const items = store.activeLog?.items;
+    if (!Array.isArray(items) || !items[fromIdx]) return;
+    let dest = Number(insertBeforeIdx);
+    if (!Number.isFinite(dest)) return;
+    dest = Math.max(0, Math.min(items.length, dest));
+    if (fromIdx === dest || fromIdx + 1 === dest) return;
+    const [moved] = items.splice(fromIdx, 1);
+    if (fromIdx < dest) dest -= 1;
+    items.splice(dest, 0, moved);
+    if (window.currentModalExIdx === fromIdx) window.currentModalExIdx = dest;
+    else if (window.currentModalExIdx != null) {
+        const cur = window.currentModalExIdx;
+        if (fromIdx < cur && dest >= cur) window.currentModalExIdx = cur - 1;
+        else if (fromIdx > cur && dest <= cur) window.currentModalExIdx = cur + 1;
+    }
+    renderWorkoutLog();
+    if (window._workoutSessionConfirmed) {
+        try { saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() }); } catch (e) { /* ignore */ }
+    }
 }
 
 /** Mobile: tap ⠿ on one exercise, then ⠿ on another to pair. */
@@ -500,6 +577,63 @@ export function updateCoreChildWeight(exIdx, setIdx, childIdx, value) {
     if (!child) return;
     const n = parseFloat(value);
     child.weight = Number.isFinite(n) && n > 0 ? n : 0;
+    persistCoreExerciseLoad(child.name, child.weight);
+}
+
+function persistUserConfigMaps() {
+    try { localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig)); } catch (e) { /* ignore */ }
+}
+
+function persistWorkingWeight(exName, kg) {
+    const name = String(exName || '').trim();
+    const w = Number(kg);
+    if (!name || !Number.isFinite(w) || w < 0) return;
+    if (!store.userConfig.exerciseWorkingWeights || typeof store.userConfig.exerciseWorkingWeights !== 'object') {
+        store.userConfig.exerciseWorkingWeights = {};
+    }
+    store.userConfig.exerciseWorkingWeights[name] = w;
+    persistUserConfigMaps();
+}
+
+function persistCoreExerciseLoad(exName, kg) {
+    const name = String(exName || '').trim();
+    if (!name) return;
+    if (!store.userConfig.coreExerciseLoads || typeof store.userConfig.coreExerciseLoads !== 'object') {
+        store.userConfig.coreExerciseLoads = {};
+    }
+    const w = Number(kg);
+    if (Number.isFinite(w) && w > 0) store.userConfig.coreExerciseLoads[name] = w;
+    persistUserConfigMaps();
+}
+
+function persistSessionLoads(items) {
+    (items || []).forEach((item) => {
+        if (!item) return;
+        if (item.isCoreBlock) {
+            (item.sets || []).forEach((set) => {
+                (set?.children || []).forEach((ch) => {
+                    if (ch?.name && Number(ch.weight) > 0) persistCoreExerciseLoad(ch.name, ch.weight);
+                });
+            });
+            return;
+        }
+        if (item.isWarmupGroup || item.isStretchGroup || item.isSportSessionBlock || item.isLactateHit) return;
+        if (item.isSuperset && Array.isArray(item.sides)) {
+            item.sides.forEach((side) => {
+                const name = side?.exercise?.name;
+                const last = [...(item.sets || [])]
+                    .filter(s => s && s.side === side.key && s.completed && !s.isWarmup && !s.isText && !s.isDropSet)
+                    .pop();
+                if (name && last && Number(last.weight) > 0) persistWorkingWeight(name, last.weight);
+            });
+            return;
+        }
+        const last = [...(item.sets || [])]
+            .filter(s => s && s.completed && !s.isWarmup && !s.isText && !s.isLactateHit && !s.isDropSet)
+            .pop();
+        const name = item.exercise?.name || item.name;
+        if (name && last && Number(last.weight) > 0) persistWorkingWeight(name, last.weight);
+    });
 }
 
 /** Show/hide the list of individual stretch parts (collapsed by default). */
@@ -788,6 +922,13 @@ export function isLactateHitLogItem(item) {
     return (item.sets || []).some(s => s && s.isLactateHit);
 }
 
+export function isPowerLogItem(item) {
+    if (!item) return false;
+    if (item.isWarmupGroup || item.isStretchGroup || item.isSportSessionBlock) return false;
+    if (item.isPower || item.hideRir) return true;
+    return String(item.exercise?.domain || '').toLowerCase() === 'power';
+}
+
 function formatDurationSecLabel(sec) {
     const n = Math.max(0, Math.round(Number(sec) || 0));
     if (n % 60 === 0) return `${n / 60}m`;
@@ -907,19 +1048,33 @@ function expireDraftRests() {
     const draft = loadWorkoutDraft();
     if (!draft?.items) return false;
     let expired = false;
+    let prepared = false;
     draft.items.forEach((item) => {
         (item.sets || []).forEach((set) => {
             if (!set?.locked) return;
-            if (remainingRestSecondsFromSet(set) > 0) return;
+            const left = remainingRestSecondsFromSet(set);
+            if (left > 0) {
+                if (!set.lockDurationSec && left > 0) set.lockDurationSec = left;
+                const total = Number(set.lockDurationSec) || 0;
+                if (!set.lockPrepareFired && total > 30 && left <= 30) {
+                    set.lockPrepareFired = true;
+                    prepared = true;
+                    try { playPrepareBeepSound(); } catch (e) { /* ignore */ }
+                    if (navigator.vibrate) navigator.vibrate(40);
+                }
+                return;
+            }
             set.locked = false;
             set.lockTimeLeft = 0;
             delete set.lockEndsAt;
             delete set.lockAlarmFired;
+            delete set.lockPrepareFired;
+            delete set.lockDurationSec;
             expired = true;
         });
     });
+    if (expired || prepared) writeWorkoutDraft(draft);
     if (!expired) return false;
-    writeWorkoutDraft(draft);
     playRestAlarm();
     if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
     return true;
@@ -997,7 +1152,21 @@ function unlockRestSilent(setObj, exIdx, setIdx) {
     setObj.lockTimeLeft = 0;
     delete setObj.lockEndsAt;
     delete setObj.lockAlarmFired;
+    delete setObj.lockPrepareFired;
+    delete setObj.lockDurationSec;
     syncGlobalRestBanners();
+}
+
+function firePrepareCue(setObj) {
+    if (!setObj || setObj.lockPrepareFired || !setObj.locked) return false;
+    const left = remainingRestSeconds(setObj);
+    if (!setObj.lockDurationSec && left > 0) setObj.lockDurationSec = left;
+    const total = Number(setObj.lockDurationSec) || 0;
+    if (!(total > 30) || !(left <= 30) || !(left > 0)) return false;
+    setObj.lockPrepareFired = true;
+    try { playPrepareBeepSound(); } catch (e) { /* ignore */ }
+    if (navigator.vibrate) navigator.vibrate(40);
+    return true;
 }
 
 function finishRestNaturally(exIdx, setIdx, setHint) {
@@ -1030,7 +1199,10 @@ function armRestTicker(exIdx, setIdx, target) {
         }
         const left = remainingRestSeconds(live);
         live.lockTimeLeft = left;
-        if (live.locked) updateRestCountdownDom(exIdx, setIdx, left);
+        if (live.locked) {
+            firePrepareCue(live);
+            updateRestCountdownDom(exIdx, setIdx, left);
+        }
         if (left <= 0) finishRestNaturally(exIdx, setIdx, live);
     };
     store.restIntervals[`${exIdx}-${setIdx}`] = setInterval(tick, 250);
@@ -1052,6 +1224,9 @@ export function restartRestTimersFromState() {
             if (!set || !set.locked) return;
             if (!set.lockEndsAt && Number(set.lockTimeLeft) > 0) {
                 set.lockEndsAt = Date.now() + Math.round(Number(set.lockTimeLeft)) * 1000;
+            }
+            if (!set.lockDurationSec && Number(set.lockTimeLeft) > 0) {
+                set.lockDurationSec = Number(set.lockTimeLeft);
             }
             const left = remainingRestSeconds(set);
             set.lockTimeLeft = left;
@@ -1079,7 +1254,9 @@ function startRestOnSet(exIdx, setIdx, restSec) {
     const duration = Math.round(restSec);
     target.lockEndsAt = Date.now() + duration * 1000;
     target.lockTimeLeft = duration;
+    target.lockDurationSec = duration;
     delete target.lockAlarmFired;
+    delete target.lockPrepareFired;
     try { unlockAudio(); } catch (e) { /* ignore */ }
     try { ensureNotificationPermission(); } catch (e) { /* ignore */ }
     holdSetRestAudio(target);
@@ -1327,24 +1504,47 @@ export function populateSwapDropdown(exIdx) {
             ? `Swap for equivalent (${slot})`
             : 'Swap for equivalent (same slot)';
     }
-    select.innerHTML = `<option value="">Keep: ${item.exercise.name}</option>` +
-        equivalents.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+    const currentId = item.exercise?.id != null ? String(item.exercise.id) : '';
+    select.innerHTML = `<option value="">Keep: ${String(item.exercise?.name || 'exercise').replace(/</g, '&lt;')}</option>` +
+        equivalents.map(e => {
+            const selected = currentId && String(e.id) === currentId ? ' selected' : '';
+            return `<option value="${String(e.id).replace(/"/g, '&quot;')}"${selected}>${String(e.name || '').replace(/</g, '&lt;')}</option>`;
+        }).join('');
 }
 
 export function swapExerciseInLog(newId) {
-    if (!newId || window.currentModalExIdx === null || window.currentModalExIdx === undefined) return;
+    if (newId == null || newId === '' || window.currentModalExIdx === null || window.currentModalExIdx === undefined) return;
     const exIdx = window.currentModalExIdx;
-    const newEx = store.globalExerciseDB.find(e => e.id == newId);
+    const newEx = store.globalExerciseDB.find(e => String(e.id) === String(newId));
     if (!newEx) return;
 
     const item = store.activeLog.items[exIdx];
+    if (!item) return;
     const oldName = item?.exercise?.name;
+    if (String(item.exercise?.id) === String(newEx.id) || String(oldName || '').toLowerCase() === String(newEx.name || '').toLowerCase()) {
+        return;
+    }
     const slotLabel = resolveItemSlotLabel(item);
-    const oldSets = item.sets;
+    const oldSets = item.sets || [];
+    const workSets = oldSets.filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
+    const workWeight = Number(workSets.find(s => Number(s.weight) > 0)?.weight)
+        || lastCompletedWorkingWeight(
+            (store.globalGroupedHistory && Object.values(store.globalGroupedHistory).flatMap(d => d?.items || [])) || [],
+            newEx.name
+        )
+        || 0;
+
     store.activeLog.items[exIdx].exercise = newEx;
-    store.activeLog.items[exIdx].sets = oldSets.map(s => ({ ...s, completed: false, locked: false }));
     if (slotLabel && !store.activeLog.items[exIdx].slotLabel) {
         store.activeLog.items[exIdx].slotLabel = slotLabel;
+    }
+    store.activeLog.items[exIdx].needsWeightFind = false;
+    if (isPowerLogItem(item) || String(newEx.domain || '').toLowerCase() === 'power') {
+        applyPowerExerciseToItem(store.activeLog.items[exIdx], newEx.name);
+        store.activeLog.items[exIdx].exercise = newEx;
+    } else {
+        store.activeLog.items[exIdx].sets = oldSets.map(s => ({ ...s, completed: false, locked: false }));
+        maybeRebuildLiftWarmups(store.activeLog.items[exIdx], workWeight);
     }
 
     // Mid-month swap updates the locked monthly plan for this session type
@@ -1366,6 +1566,10 @@ export function swapExerciseInLog(newId) {
     drawModalExerciseChart(newEx.name, false);
     populateSwapDropdown(exIdx);
     populateCardioTypePicker(exIdx);
+    renderWorkoutLog();
+    if (window._workoutSessionConfirmed) {
+        try { saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() }); } catch (e) { /* ignore */ }
+    }
     if (navigator.vibrate) navigator.vibrate(40);
 }
 
@@ -1764,7 +1968,7 @@ export function renderExerciseSets() {
             const left = remainingStretchStepSeconds(item);
             if (timerRunning && step) {
                 html += `<div style="margin-bottom:14px; padding:16px; border-radius:12px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
-                    <div id="stretch-timer-label-${exIdx}" style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">${step.kind === 'gap' ? 'Rest · next up' : `Hold · ${String(step.label).replace(/</g, '&lt;')}`}</div>
+                    <div id="stretch-timer-label-${exIdx}" style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">${String(stretchStepHeading(step)).replace(/</g, '&lt;')}</div>
                     <div id="stretch-timer-countdown-${exIdx}" style="font-size:36px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono'; line-height:1;">${left}s</div>
                     <div style="font-size:10px; color:var(--text-stealth); margin-top:8px; font-family:'Roboto Mono';">Runs in background if you leave this screen</div>
                 </div>`;
@@ -1932,7 +2136,7 @@ export function renderExerciseSets() {
         return;
     }
 
-    html += `<div class="set-header" style="margin-top:20px;"><div style="width:25px;">SET</div><div style="flex:1;text-align:center;">${isCardio ? 'KM' : (showWeight ? 'KG' : '—')}</div><div style="flex:1;text-align:center;">${isCardio ? 'MINS' : 'REPS'}</div><div style="flex:1;text-align:center; color:var(--text-muted);">RIR</div><div style="width:48px;"></div></div>`;
+    html += `<div class="set-header" style="margin-top:20px;"><div style="width:25px;">SET</div><div style="flex:1;text-align:center;">${isCardio ? 'KM' : (showWeight ? 'KG' : '—')}</div><div style="flex:1;text-align:center;">${isCardio ? 'MINS' : 'REPS'}</div><div style="flex:1;text-align:center; color:var(--text-muted);">${isPowerLogItem(item) ? '—' : 'RIR'}</div><div style="width:48px;"></div></div>`;
     
     item.sets.forEach((set, setIdx) => {
         let borderClass = 'prog-same';
@@ -1955,8 +2159,8 @@ export function renderExerciseSets() {
         let inputGroupHtml = '';
         if (set.isText) {
             inputGroupHtml = `<div style="flex:1; text-align:center; color:var(--gold-accent); font-size:12px; font-weight:bold; align-self:center;">${set.reps}</div>`;
-        } else if (set.isWarmup) {
-            // Warmups: weight + reps only (no RIR)
+        } else if (set.isWarmup || isPowerLogItem(item)) {
+            // Warmups and power work sets: weight + reps only (no RIR)
             inputGroupHtml = `
                 ${weightCell}
                 <input type="number" class="set-input" value="${isCardio ? (set.time_minutes||0) : (set.reps||0)}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, '${isCardio?'time_minutes':'reps'}', this.value)">
@@ -2274,6 +2478,10 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
                 renderExerciseSets();
             }
         }
+        const persistName = item.isSuperset
+            ? ((item.sides || []).find(s => s.key === setObj.side)?.exercise?.name || item.exercise?.name || '')
+            : (item.exercise?.name || item.name || '');
+        persistWorkingWeight(persistName, num);
     }
     if (field === 'reps' && setObj && !setObj.isWarmup && !setObj.isText) {
         const exName = item.isSuperset
@@ -2313,6 +2521,7 @@ function maybeIncreaseLoadAfterEasyRir(exIdx, setIdx) {
     const setObj = item?.sets?.[setIdx];
     if (!item || !setObj || !setObj.completed) return false;
     if (setObj.isWarmup || setObj.isText || setObj.isDropSet || setObj.isLactateHit) return false;
+    if (isPowerLogItem(item)) return false;
     if (setObj._easyRirProgressed) return false;
     if (loggedSetRir(setObj) < 5) return false;
 
@@ -2423,10 +2632,10 @@ export function toggleSetComplete(exIdx, setIdx) {
             }
         }
     } else if (setObj.completed && !skipRest && item.sets[setIdx + 1]) {
-        let baseRest = setObj.restTime || 120;
+        let baseRest = setObj.restTime != null ? Number(setObj.restTime) : 120;
 
-        // Warmups: use prescribed rest only (no RIR)
-        if (!setObj.isWarmup) {
+        // Warmups and power: use prescribed rest only (no RIR)
+        if (!setObj.isWarmup && !isPowerLogItem(item)) {
             let loggedRIR = parseFloat(setObj.rpe);
             if (!Number.isFinite(loggedRIR)) loggedRIR = 0;
 
@@ -2441,7 +2650,7 @@ export function toggleSetComplete(exIdx, setIdx) {
             }
         }
 
-        startRestOnSet(exIdx, setIdx + 1, baseRest);
+        if (baseRest > 0) startRestOnSet(exIdx, setIdx + 1, baseRest);
     } else if (!setObj.completed) {
         if (item.sets[setIdx + 1]) {
             unlockRestSilent(item.sets[setIdx + 1], exIdx, setIdx + 1);
@@ -2485,6 +2694,8 @@ export function overrideRest(exIdx, setIdx, seconds) {
         } else {
             setObj.lockEndsAt = newEnds;
             setObj.lockTimeLeft = Math.ceil((newEnds - now) / 1000);
+            setObj.lockDurationSec = setObj.lockTimeLeft;
+            if (setObj.lockTimeLeft > 30) delete setObj.lockPrepareFired;
         }
     }
 
@@ -2616,7 +2827,8 @@ export function beginManualWorkoutSession(kind, opts = {}) {
     }
 
     // Gym / lifting: ask for compound vs isolation rest (or custom = no timers)
-    const isGymManual = !isSteadyCardio(normalized) && !isLactateEvent(normalized);
+    const isPowerManual = isPowerEvent(normalized);
+    const isGymManual = !isSteadyCardio(normalized) && !isLactateEvent(normalized) && !isPowerManual;
     if (isGymManual && !opts.afterRestPrefs) {
         openManualGymRestModal(normalized);
         return;
@@ -2625,8 +2837,8 @@ export function beginManualWorkoutSession(kind, opts = {}) {
         store.manualGymRest = null;
     }
 
-    // Steady / Lactate should use the same GPS template + log UI as a planned day
-    const usePlanTemplate = isSteadyCardio(normalized) || isLactateEvent(normalized);
+    // Steady / Lactate / Power use the GPS template + log UI
+    const usePlanTemplate = isSteadyCardio(normalized) || isLactateEvent(normalized) || isPowerManual;
     window.manualWorkoutMode = !usePlanTemplate;
 
     const buttonElement = window._pendingManualWorkoutBtn;
@@ -2718,7 +2930,7 @@ export function resolveActiveSessionKind() {
     const fromManual = window.manualSessionKind || null;
     if (fromManual) return fromManual;
     const focus = document.getElementById('today-focus')?.value || '';
-    const fromFocus = (focus && focus !== 'Rest' && focus !== 'Practice' && focus !== 'Game' && focus !== 'Match')
+    const fromFocus = (focus && focus !== 'Rest' && !isPracticeEvent(focus) && !isGameEvent(focus))
         ? focus
         : null;
     if (fromFocus) return fromFocus;
@@ -2971,11 +3183,11 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
             const input = document.getElementById('today-focus');
             if (input) input.value = String(eventFocus).trim();
         }
-        if (focus === 'Game' || focus === 'Match' || isPracticeEvent(focus) || focus === 'Practice') {
+        if (isGameEvent(focus) || isPracticeEvent(focus)) {
             // Practice / match run as a timed workout (warmup → session → stretch); diary after Complete log
             const input = document.getElementById('today-focus');
-            if (input) input.value = focus === 'Game' ? 'Match' : focus;
-            window.manualSessionKind = (focus === 'Game' || focus === 'Match') ? 'Match' : 'Practice';
+            if (input) input.value = focus;
+            window.manualSessionKind = isGameEvent(focus) ? 'Match' : 'Practice';
         } else if (focus === 'Rest' || focus === 'Rest (Cardio Only)') {
             if (isSteadyCardio(eventFocus) || eventFocus === 'Cardio (Steady)') {
                 const input = document.getElementById('today-focus');
@@ -3440,16 +3652,15 @@ export async function submitLog() {
             }
             return;
         }
-        const isPracticeOrMatch = isPracticeEvent(focus) || focus === 'Practice'
-            || focus === 'Game' || focus === 'Match'
+        const isPracticeOrMatch = isPracticeEvent(focus) || isGameEvent(focus)
             || window.manualSessionKind === 'Practice' || window.manualSessionKind === 'Match';
         if (isPracticeOrMatch) {
-            const matchMode = focus === 'Game' || focus === 'Match' || window.manualSessionKind === 'Match';
+            const matchMode = isGameEvent(focus) || window.manualSessionKind === 'Match';
             window.journalMode = matchMode ? 'match' : 'practice';
             configureJournalModal(window.journalMode);
             const eyebrow = document.getElementById('journal-modal-eyebrow');
             const title = document.getElementById('journal-modal-title');
-            if (eyebrow) eyebrow.innerText = matchMode ? 'Match Complete' : 'Practice Complete';
+            if (eyebrow) eyebrow.innerText = `${prettyWorkoutTypeLabel(focus)} Complete`;
             if (title) title.innerText = 'THE BRAIN DUMP';
             ['journal-rpe','journal-athletic','journal-mental','journal-notes','journal-match-perf','journal-injury-pain'].forEach(id => {
                 const el = document.getElementById(id);
@@ -3727,7 +3938,7 @@ export async function commitWorkoutSession() {
         let completedSets = (item.sets || []).filter(s => s.completed && !s.isText);
         if (completedSets.length > 0) {
             let finalSet = completedSets[completedSets.length - 1];
-            if (finalSet.rpe > 2 && !isCardio && !item.isLactateHit && finalSet.weight > 0) {
+            if (finalSet.rpe > 2 && !isCardio && !item.isLactateHit && !isPowerLogItem(item) && finalSet.weight > 0) {
                 alert(`RIR Auto-Progression: ${item.exercise.name} felt easy (RIR > 2). +2.5kg applied for next session.`);
             }
         }
@@ -3777,6 +3988,8 @@ export async function commitWorkoutSession() {
             }
         });
     });
+
+    persistSessionLoads(sessionItemsSnapshot);
 
     if (!logsToSave.length) {
         // Lactate/HIT: still persist diary + session snapshot when intervals were checked
@@ -4279,6 +4492,7 @@ export function openSpontaneousEventModal() {
         }
         sel.innerHTML = html;
     }
+    try { populateSportSelects(); } catch (e) { /* ignore */ }
     document.getElementById('spontaneous-event-modal')?.classList.remove('hidden');
 }
 
@@ -4292,9 +4506,7 @@ export async function submitSpontaneousEvent() {
     const dayIso = document.getElementById('spontaneous-day')?.value || dateToISO(new Date());
     if (!type) return alert('Choose an event type.');
 
-    // Calendar / specific schedule uses Match; route planner maps Match → Game
     let scheduleVal = type;
-    if (type === 'Game') scheduleVal = 'Match';
 
     try {
         if (!store.specificSchedules || typeof store.specificSchedules !== 'object') {
@@ -4306,7 +4518,7 @@ export async function submitSpontaneousEvent() {
         document.getElementById('spontaneous-event-modal')?.classList.add('hidden');
         try { generateFutureTimeline(); } catch (e) { /* ignore */ }
         try { getTodayFocus(); } catch (e) { /* ignore */ }
-        const pretty = prettyWorkoutTypeLabel(type === 'Game' ? 'Game' : type);
+        const pretty = prettyWorkoutTypeLabel(type);
         const when = new Date(dayIso + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
         alert(`${pretty} added to Route for ${when}.\nLog it from Exercise when done — RPE>8 triggers rest; practice RPE>6 counts as lactate.`);
     } catch (e) {

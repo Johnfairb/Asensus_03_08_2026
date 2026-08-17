@@ -43,7 +43,7 @@ export const GUIDANCE_TOPICS = [
     {
         id: 'rir',
         label: 'RIR',
-        body: 'This is the reps in reserve — the number of additional reps you could have done after you finished the set.'
+        body: 'Reps in reserve (RIR) is how many more reps you could have completed after the set. 0 RIR means you failed on the last rep. 1 RIR means you would have failed on the next rep. For strength work, aim for about 2 RIR. For hypertrophy, 0 or 1 RIR is ideal.'
     }
 ];
 

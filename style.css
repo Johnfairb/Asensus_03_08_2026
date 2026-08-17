@@ -936,6 +936,22 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .workout-card.superset-drop-target { border-color: var(--gold-accent); box-shadow: 0 0 0 1px rgba(212,175,55,0.35); }
 .workout-card.superset-selected { border-color: var(--gold-accent); }
 .workout-card.superset-dragging { opacity: 0.55; }
+.workout-reorder-gap {
+    height: 6px;
+    margin: -6px 0 14px;
+    border-radius: 6px;
+    transition: height 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+body.workout-reordering .workout-reorder-gap {
+    height: 22px;
+    margin: 0 0 12px;
+    border: 1px dashed var(--border-highlight);
+    background: rgba(255,255,255,0.02);
+}
+.workout-reorder-gap.is-target {
+    background: rgba(212,175,55,0.18);
+    border-color: var(--gold-accent);
+}
 .workout-title { font-size: 16px; font-weight: 800; margin-bottom: 4px; color: #fff; }
 .workout-subtitle { font-size: 10px; color: var(--text-muted); margin-bottom: 16px; font-weight: 700; letter-spacing: 0.4px; font-family: 'Roboto Mono', monospace; }
 .set-header { display: flex; font-size: 11px; color: #7a7a7a; font-weight: 800; margin-bottom: 10px; padding: 0 4px; }

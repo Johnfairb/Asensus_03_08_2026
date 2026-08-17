@@ -625,21 +625,26 @@ export function drawMacroChart() {
 }
 
 export function checkSundayForecast() {
-    const today = new Date();
-    const lastForecast = localStorage.getItem('last_sunday_forecast');
-    if (today.getDay() === 0 && lastForecast !== today.toDateString()) {
+    import('../domain/sunday-forecast.js').then((sunday) => {
+        const today = new Date();
+        if (!sunday.shouldShowSundayForecast(today)) {
+            if (needsCycleDecisions()) {
+                import('./workout-cycle-ui.js').then((m) => m.maybeOpenWorkoutCycleModal()).catch(() => {});
+            }
+            return;
+        }
         document.getElementById('sunday-weight').value = store.userConfig.weight;
         document.getElementById('sunday-budget').value = store.userConfig.budget;
         if (store.userConfig.dependentAthlete) {
             document.getElementById('dependent-athlete-warning').style.display = 'block';
             document.getElementById('sunday-budget-container').style.display = 'none';
         }
-        
+
         const pantryContainer = document.getElementById('sunday-pantry-list');
         let auditHtml = '';
         let hasStock = false;
         store.globalFoodDB.forEach(f => {
-            if(f.stock_g && f.stock_g > 0) {
+            if (f.stock_g && f.stock_g > 0) {
                 hasStock = true;
                 let unit = f._category === 'LIQUID' || f._cleanName.toLowerCase().includes('oil') ? 'ml' : 'g';
                 auditHtml += `
@@ -652,14 +657,16 @@ export function checkSundayForecast() {
                 </label>`;
             }
         });
-        
-        if(!hasStock) auditHtml = '<div style="font-size:11px; color:var(--text-stealth); text-align:center;">Pantry is empty. Starting fresh.</div>';
-        pantryContainer.innerHTML = auditHtml;
 
+        if (!hasStock) auditHtml = '<div style="font-size:11px; color:var(--text-stealth); text-align:center;">Pantry is empty. Starting fresh.</div>';
+        pantryContainer.innerHTML = auditHtml;
+        sunday.populateSundayWeekEvents(today);
         document.getElementById('sunday-forecast-modal').classList.remove('hidden');
-    } else if (needsCycleDecisions()) {
-        import('./workout-cycle-ui.js').then((m) => m.maybeOpenWorkoutCycleModal()).catch(() => {});
-    }
+    }).catch(() => {
+        if (needsCycleDecisions()) {
+            import('./workout-cycle-ui.js').then((m) => m.maybeOpenWorkoutCycleModal()).catch(() => {});
+        }
+    });
 }
 setTimeout(checkSundayForecast, 1500);
 
@@ -691,7 +698,17 @@ export async function executeSundayForecast() {
     
     store.userConfig.tdeePenalty = 0; 
     localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig));
-    localStorage.setItem('last_sunday_forecast', new Date().toDateString());
+    try {
+        const sunday = await import('../domain/sunday-forecast.js');
+        sunday.saveSundayWeekEvents();
+        sunday.markSundayForecastComplete();
+        try {
+            const { getTodayFocus } = await import('../domain/fitness-hud.js');
+            getTodayFocus();
+        } catch (e) { /* ignore */ }
+    } catch (e) {
+        localStorage.setItem('last_sunday_forecast', new Date().toDateString());
+    }
     
     calculateTDEE();
     document.getElementById('sunday-forecast-modal').classList.add('hidden');

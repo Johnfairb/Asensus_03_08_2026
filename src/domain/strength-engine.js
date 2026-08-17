@@ -1,13 +1,14 @@
 import { store } from '../state/store.js';
 import { buildWeeklyTrainingPlan, getMondayISO, isStrengthEvent } from './route-planner.js';
-import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, SPORT_MATRIX } from './sports-matrix.js';
+import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, getSportData } from './sports-matrix.js';
 import { HYPERTROPHY_POOLS, avoidLockedMuscleOnItems, isExerciseMuscleLocked, isHypertrophyPhase } from './hypertrophy-engine.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
-import { buildStrengthMetaMap, EXERCISE_CATALOG } from './exercise-catalog.js';
+import { buildStrengthMetaMap, EXERCISE_CATALOG, isUnilateralCompound } from './exercise-catalog.js';
 import { pickCoreExercisesForLevel } from './core-programming.js';
-import { skipsWeightProgression } from './load-increments.js';
+import { increaseLoadOneStep, skipsWeightProgression } from './load-increments.js';
 import { loadExercises } from '../ui/fuel.js';
 import { getBillingMonthKey } from './billing-month.js';
+import { weeklyPowerGymSlots } from './power-engine.js';
 
 // --- STRENGTH ENGINE: compounds A/B, isolations, core circuits, monthly rotation ---
 // Compound exercise lists come from HYPERTROPHY_POOLS (uniform pick; no weightings).
@@ -112,7 +113,9 @@ const ISO_POOL_BY_MUSCLE = {
     front_delt: 'front_delt_isolation',
     rear_delt: 'rear_delt_isolation',
     pec: 'pec_isolation',
-    mid_trap: 'mid_trap_isolation'
+    mid_trap: 'mid_trap_isolation',
+    rotator_cuff: 'rotator_cuff_isolation',
+    glute_medius: 'abductor_isolation'
 };
 
 /** Map sport flags → isolation muscle keys (distinct). */
@@ -120,12 +123,16 @@ export function sportPrimaryIsolationMuscles(sportData) {
     const s = sportData || {};
     const out = [];
     const add = (k) => { if (k && !out.includes(k)) out.push(k); };
-    if (s.quad || s.knee) add('quad');
+    if (s.quad) add('quad');
     if (s.ham) add('hamstring');
     if (s.groin) add('groin');
-    if (s.calf || s.ankle) add('calf');
-    if (s.shoulder) add('side_delt');
-    if (s.elbow || s.arm_imbalance) add('bicep');
+    if (s.calf) add('calf');
+    if (s.front_delt) add('front_delt');
+    if (s.rotator_cuff) add('rotator_cuff');
+    if (s.tricep) add('tricep');
+    if (s.bicep) add('bicep');
+    if (s.pec) add('pec');
+    if (s.glute_medius) add('glute_medius');
     if (s.lower_back) add('mid_trap');
     return out;
 }
@@ -272,8 +279,8 @@ function buildFreshMonthPlan(sportData) {
     const coreSession = A.length === 3 ? 'A' : 'B';
 
     const overrides = {
-        shoulderRisk: !!(sportData && sportData.shoulder),
-        armImbalance: !!(sportData && sportData.arm_imbalance),
+        shoulderRisk: !!(sportData && (sportData.rotator_cuff || sportData.front_delt)),
+        armImbalance: !!(sportData && (sportData.bicep || sportData.tricep || sportData.arm_imbalance)),
         noPullups: store.userConfig.canDoPullups === 'No'
     };
 
@@ -352,7 +359,7 @@ export function loadStrengthMonthPlan(sportData) {
     let plan = null;
     try { plan = JSON.parse(localStorage.getItem(MONTH_PLAN_KEY) || 'null'); } catch (e) { plan = null; }
     if (!plan || plan.month !== month || !Array.isArray(plan.sessionA) || !Array.isArray(plan.sessionB)) {
-        plan = buildFreshMonthPlan(sportData || SPORT_MATRIX[store.userConfig.sport] || SPORT_MATRIX.None);
+        plan = buildFreshMonthPlan(sportData || getSportData());
         plan.month = month;
         saveStrengthMonthPlan(plan);
         return plan;
@@ -364,10 +371,10 @@ export function loadStrengthMonthPlan(sportData) {
  * Re-roll compounds + isolations for one strength session (A or B) while keeping the other.
  */
 export function rebuildStrengthSessionInPlan(plan, session, sportData) {
-    const sport = sportData || SPORT_MATRIX[store.userConfig.sport] || SPORT_MATRIX.None;
+    const sport = sportData || getSportData();
     const overrides = {
-        shoulderRisk: !!(sport && sport.shoulder),
-        armImbalance: !!(sport && sport.arm_imbalance),
+        shoulderRisk: !!(sport && (sport.rotator_cuff || sport.front_delt)),
+        armImbalance: !!(sport && (sport.bicep || sport.tricep || sport.arm_imbalance)),
         noPullups: store.userConfig.canDoPullups === 'No'
     };
     const next = JSON.parse(JSON.stringify(plan || loadStrengthMonthPlan(sport)));
@@ -478,7 +485,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
                         isStrengthIsolation: !!it.isStrengthIsolation,
                         role: it.role || (it.isIsolation ? 'isolation' : 'compound'),
                         targetReps: it.isIsolation ? 8 : 5,
-                        restSec: it.isIsolation ? 120 : 240
+                        restSec: it.isIsolation ? 120 : (isUnilateralCompound(name) ? 200 : 240)
                     };
                 });
             // Re-attach core block if present in locked items
@@ -515,7 +522,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
                     isStrengthCompound: !it.isIsolation,
                     role: it.isIsolation ? 'isolation' : 'compound',
                     targetReps: it.isIsolation ? 8 : 5,
-                    restSec: it.isIsolation ? 120 : 240
+                    restSec: it.isIsolation ? 120 : (isUnilateralCompound(name) ? 200 : 240)
                 };
             }).filter(Boolean);
             return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items: avoidLockedMuscleOnItems(items), source: 'custom' };
@@ -556,7 +563,8 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
             setsOverride: compoundSets,
             isIsolation: false,
             isStrengthCompound: true,
-            role: 'compound'
+            role: 'compound',
+            restSec: isUnilateralCompound(name) ? 200 : 240
         });
     });
 
@@ -680,17 +688,9 @@ export function progressStrengthIsolationWeight(exName, hist, currentWeight, equ
     const allInRange = reps.every(r => r >= 6 && r <= 10);
     if (!firstOk || !allInRange) return { weight: currentWeight, note: '' };
 
-    const step = typeof equipmentRound === 'function'
-        ? null
-        : 2.5;
-    let next = Number(currentWeight) || 0;
-    if (typeof equipmentRound === 'function') {
-        next = equipmentRound(next + 2.5);
-    } else {
-        next = Math.round((next + step) * 2) / 2;
-    }
+    const next = increaseLoadOneStep(Number(currentWeight) || 0, exName);
     return {
-        weight: next,
+        weight: typeof equipmentRound === 'function' ? equipmentRound(next) : next,
         note: 'AUTO-PROGRESSION: Isolation — first set ≥8 and all sets 6–10. Load increased.'
     };
 }
@@ -725,16 +725,20 @@ export function getGymPlanPrefs() {
     const maxTime = parseInt(maxTimeRaw, 10) || 90;
     const timeTier = getStrengthTimeTier(maxTime);
 
+    let powerCount = 0;
+    try { powerCount = weeklyPowerGymSlots() ? 1 : 0; } catch (e) { powerCount = 0; }
+    const liftDays = Math.max(0, willingness - powerCount);
+
     let strengthCount = 0;
     let hypertrophyCount = 0;
     let auxCount = 0;
 
     if (hypertrophy) {
         strengthCount = 0;
-        hypertrophyCount = willingness;
+        hypertrophyCount = liftDays;
         auxCount = 0;
     } else if (hybrid) {
-        const split = readHybridSplit(willingness);
+        const split = readHybridSplit(liftDays);
         strengthCount = split.strengthDays;
         hypertrophyCount = split.hypertrophyDays;
         willingness = split.total;
@@ -742,8 +746,8 @@ export function getGymPlanPrefs() {
         store.userConfig.hybridStrengthDays = strengthCount;
         store.userConfig.hybridHypertrophyDays = hypertrophyCount;
     } else if (strengthPhase) {
-        // All gym days are strength; no aux
-        strengthCount = willingness;
+        // Remaining gym days are strength; no aux (power already took a slot when eligible)
+        strengthCount = liftDays;
         hypertrophyCount = 0;
         auxCount = 0;
     } else {
@@ -751,7 +755,7 @@ export function getGymPlanPrefs() {
         const MAX_AUX_PER_WEEK = 2;
         if (band) {
             auxCount = MAX_AUX_PER_WEEK;
-            strengthCount = Math.min(4, willingness);
+            strengthCount = Math.min(4, liftDays);
         } else {
             const table = {
                 1: { s: 1, a: 0 },
@@ -761,7 +765,7 @@ export function getGymPlanPrefs() {
                 5: { s: 3, a: 2 },
                 6: { s: 4, a: 2 }
             };
-            const row = table[willingness] || table[4];
+            const row = table[liftDays] || table[Math.min(6, Math.max(1, liftDays))] || table[4];
             strengthCount = row.s;
             auxCount = row.a;
         }
@@ -782,6 +786,7 @@ export function getGymPlanPrefs() {
         band: false,
         maxTime,
         timeTier,
+        powerCount,
         strengthCount,
         hypertrophyCount,
         auxCount,
@@ -824,17 +829,21 @@ export function buildAuxiliaryExerciseList(sportData) {
             isAux: true
         });
     }
-    if (sportData && (sportData.lanky || sportData.knee)) items.push({ name: dict.glute_medius[0], isAux: true });
-    if (sportData && sportData.neck) items.push({ name: dict.neck[0], isAux: true });
-    if (sportData && sportData.groin) items.push({ name: dict.groin[0], isAux: true });
-    if (sportData && sportData.elbow) items.push({ name: dict.elbow[0], isAux: true });
+    if (sportData && sportData.glute_medius) items.push({ name: dict.glute_medius[0], isAux: true });
+    if (sportData && sportData.groin && dict.groin) items.push({ name: dict.groin[0], isAux: true });
+    if (sportData && sportData.rotator_cuff && dict.rotator_cuff) items.push({ name: dict.rotator_cuff[0], isAux: true });
+    if (sportData && sportData.ham && dict.hamstring) items.push({ name: dict.hamstring[0], isAux: true });
+    if (sportData && sportData.quad && dict.quad) items.push({ name: dict.quad[0], isAux: true });
+    if (sportData && sportData.calf && dict.calf) items.push({ name: dict.calf[0], isAux: true });
+    if (sportData && sportData.front_delt && dict.front_delt) items.push({ name: dict.front_delt[0], isAux: true });
+    if (sportData && sportData.tricep && dict.tricep) items.push({ name: dict.tricep[0], isAux: true });
+    if (sportData && sportData.pec && dict.pec) items.push({ name: dict.pec[0], isAux: true });
+    if (sportData && sportData.lat && dict.lat) items.push({ name: dict.lat[0], isAux: true });
+    if (sportData && sportData.bicep && dict.bicep) items.push({ name: dict.bicep[0], isAux: true });
     if (sportData && sportData.lower_back) {
         items.push({ name: band ? 'Band Side Plank Row' : 'Side-sit on Hyperextension Bench', isAux: true });
     }
-    items.push(
-        { name: dict.rotator_cuff[0], isAux: true },
-        { name: dict.core[0], isAux: true }
-    );
+    items.push({ name: dict.core[0], isAux: true });
     items.forEach(it => {
         if (band) {
             it.notes = (it.notes ? it.notes + ' · ' : '') + 'Band auxiliary';
@@ -855,7 +864,7 @@ export function getAttachedAuxForStrengthDay(dateStr, sportData) {
     if (prefs.attachMode === 'none' || auxCap <= 0) return [];
     if (prefs.band && prefs.attachMode === 'none') return [];
 
-    const auxItems = buildAuxiliaryExerciseList(sportData || SPORT_MATRIX['None']);
+    const auxItems = buildAuxiliaryExerciseList(sportData || getSportData());
     const weekStart = getMondayISO(new Date(dateStr + 'T12:00:00'));
     const plan = buildWeeklyTrainingPlan(weekStart);
     const strengthDays = plan.filter(d => (d.events || []).some(isStrengthEvent));

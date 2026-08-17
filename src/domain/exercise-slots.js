@@ -3,8 +3,10 @@
  * Swap-for-equivalent uses exact slot labels, not muscle_group.
  */
 import { HYPERTROPHY_POOLS } from './hypertrophy-engine.js';
+import { getExerciseMeta, resolveCatalogName } from './exercise-catalog.js';
 import { isExerciseBanned } from './bans.js';
 import { store } from '../state/store.js';
+import { equivalentPowerNames, isPowerSlotLabel, powerMovementForName, powerNamesForSlot } from './power-engine.js';
 
 /** Slot label → hypertrophy pool keys (when unilateral/bilateral is specified, one key). */
 export const SLOT_LABEL_POOLS = {
@@ -58,6 +60,10 @@ const ISOLATION_MUSCLE_TO_POOL = {
     calf: 'calf_isolation'
 };
 
+function canonName(name) {
+    return String(resolveCatalogName(name) || name || '').trim().toLowerCase();
+}
+
 function namesFromPoolKeys(keys) {
     const names = [];
     for (const key of keys || []) {
@@ -80,6 +86,10 @@ function titleCaseSlot(s) {
 /** Resolve name list for a programming slot label. */
 export function poolNamesForSlotLabel(slotLabel) {
     if (!slotLabel || typeof slotLabel !== 'string') return [];
+
+    if (isPowerSlotLabel(slotLabel)) {
+        return powerNamesForSlot(slotLabel);
+    }
 
     const normalized = titleCaseSlot(slotLabel);
     if (SLOT_LABEL_POOLS[slotLabel]) {
@@ -119,7 +129,9 @@ export function poolNamesForSlotLabel(slotLabel) {
  */
 export function inferSlotLabelFromExerciseName(name) {
     if (!name) return null;
-    const n = String(name);
+    const powerMov = powerMovementForName(name);
+    if (powerMov?.slot) return powerMov.slot;
+    const n = canonName(name);
 
     const specificOrder = [
         ['Bilateral Posterior', ['posterior_bilateral']],
@@ -146,7 +158,7 @@ export function inferSlotLabelFromExerciseName(name) {
     ];
 
     for (const [label, keys] of specificOrder) {
-        if (namesFromPoolKeys(keys).includes(n)) return label;
+        if (namesFromPoolKeys(keys).some((poolName) => canonName(poolName) === n)) return label;
     }
     return null;
 }
@@ -165,23 +177,46 @@ export function resolveItemSlotLabel(item) {
 export function getEquivalentExercises(item) {
     const slotLabel = resolveItemSlotLabel(item);
     const currentName = item?.exercise?.name || item?.name || '';
-    let names = poolNamesForSlotLabel(slotLabel);
-    if (!names.length && currentName) {
-        const inferred = inferSlotLabelFromExerciseName(currentName);
-        names = poolNamesForSlotLabel(inferred);
+    let names = [];
+    if (isPowerSlotLabel(slotLabel) || powerMovementForName(currentName)) {
+        names = equivalentPowerNames(currentName);
+        if (!names.length && slotLabel) names = powerNamesForSlot(slotLabel, powerMovementForName(currentName)?.band);
+    } else {
+        names = poolNamesForSlotLabel(slotLabel);
+        if (!names.length && currentName) {
+            const inferred = inferSlotLabelFromExerciseName(currentName);
+            names = poolNamesForSlotLabel(inferred);
+        }
     }
-    if (!names.length) return [];
+    const currentCanon = canonName(currentName);
+    const nameSet = new Set(names.map((n) => canonName(n)).filter(Boolean));
 
-    const nameSet = new Set(names.map((n) => String(n).toLowerCase()));
-    const currentLower = String(currentName).toLowerCase();
-    return (store.globalExerciseDB || []).filter((e) => {
+    let matches = (store.globalExerciseDB || []).filter((e) => {
         if (!e || !e.name) return false;
-        const ln = String(e.name).toLowerCase();
-        if (ln === currentLower) return false;
+        const ln = canonName(e.name);
+        if (!ln || ln === currentCanon) return false;
         if (!nameSet.has(ln)) return false;
         if (isExerciseBanned(e.id)) return false;
         return true;
     });
+
+    // Fallback: same catalog muscle group when the slot pool didn't resolve to DB rows
+    if (!matches.length && currentName) {
+        const meta = getExerciseMeta(currentName);
+        const group = String(meta?.muscle_group || item?.exercise?.muscle_group || '').toLowerCase();
+        if (group) {
+            matches = (store.globalExerciseDB || []).filter((e) => {
+                if (!e || !e.name) return false;
+                if (canonName(e.name) === currentCanon) return false;
+                if (isExerciseBanned(e.id)) return false;
+                const em = getExerciseMeta(e.name);
+                const eg = String(em?.muscle_group || e.muscle_group || '').toLowerCase();
+                return eg && eg === group;
+            });
+        }
+    }
+
+    return matches;
 }
 
 /** Pick a random equivalent name from the same slot (for ban auto-replace). */

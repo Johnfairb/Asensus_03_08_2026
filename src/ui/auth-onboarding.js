@@ -6,6 +6,7 @@ import { setMonthAnchorISO, dateToISO } from '../domain/billing-month.js';
 import { ensureCycleStarted } from '../domain/workout-cycle.js';
 import { bootOperatorProfile } from '../services/auth.js';
 import { loadExercises, loadInventory } from './fuel.js';
+import { populateSportSelects } from '../domain/sports-matrix.js';
 
 // --- ELITE ONBOARDING LOGIC ---
 
@@ -17,6 +18,9 @@ export function selectObCard(element, hiddenInputId, value) {
     element.classList.add('active');
     // Set the hidden input value
     document.getElementById(hiddenInputId).value = value;
+    if (hiddenInputId === 'ob-sex') {
+        try { populateSportSelects(); } catch (e) { /* ignore */ }
+    }
 }
 
 export function selectAuthTheme(element, theme) {
@@ -55,6 +59,9 @@ export function nextObStep(stepNumber) {
 
     const body = stepEl?.querySelector('.ob-step-body');
     if (body) body.scrollTop = 0;
+    if (stepNumber === 3) {
+        try { populateSportSelects(); } catch (e) { /* ignore */ }
+    }
 }
 
 export function triggerBootSequence() {
@@ -91,7 +98,7 @@ export async function completeOnboarding() {
         store.userConfig.goal = document.getElementById('ob-goal').value || 'Fat_Loss';
         store.userConfig.diet = document.getElementById('ob-diet').value || 'Standard';
         store.userConfig.shopStyle = document.getElementById('ob-shop-style')?.value || 'Cheap';
-        store.userConfig.sport = document.getElementById('ob-sport').value || 'None';
+        store.userConfig.sport = document.getElementById('ob-sport').value || 'General fitness';
         store.userConfig.injury = document.getElementById('ob-injury').value || 'None';
         store.userConfig.canDoPullups = document.getElementById('ob-bodyweight-test').value || 'Yes';
         

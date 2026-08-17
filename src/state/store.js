@@ -15,11 +15,13 @@ export const store = {
     exerciseIncrements: {},
     /** Seed working weights by exercise name (kg). Used until real logs drive progression. */
     exerciseWorkingWeights: {},
+    /** Last entered optional loads for core-circuit exercises, keyed by name. */
+    coreExerciseLoads: {},
     hybridStrengthDays: 3, hybridHypertrophyDays: 1,
     baselineTargets: { cals: 0, pro: 0, carb: 0, fat: 0 },
     targets: { cals: 0, pro: 0, carb: 0, fat: 0 },
     restStop: false, dependentAthlete: false, tdeePenalty: 0,
-    diet: 'Standard', shopStyle: 'Cheap', injury: 'None', sport: 'None', repairLevel: 4,
+    diet: 'Standard', shopStyle: 'Cheap', injury: 'None', sport: 'General fitness', repairLevel: 4,
     trainingWindow: 'Afternoon', seasonPhase: 'OffSeason_Hypertrophy',
     experience: 'Beginner', coreStrength: null, oneRepMax: { squat: 0, bench: 0, deadlift: 0 }, canDoPullups: 'Yes',
     guidanceOff: { food: false, workout: false, timetabling: false },

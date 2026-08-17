@@ -21,6 +21,7 @@ import { updateLiveDashboard } from '../ui/journey.js';
 import { applyNetworkKillSwitch, hydrateNetworkProfileDom } from '../ui/network.js';
 import { roundUpLoad } from './load-increments.js';
 import { hydrateStretchSettingsDom } from './session-prep.js';
+import { migrateUserSport, populateSportSelects } from './sports-matrix.js';
 
 const DEFAULT_EVENT_RPE = 7;
 
@@ -190,6 +191,9 @@ export function applyUserConfigToDom() {
     if (!store.userConfig.exerciseWorkingWeights || typeof store.userConfig.exerciseWorkingWeights !== 'object') {
         store.userConfig.exerciseWorkingWeights = {};
     }
+    if (!store.userConfig.coreExerciseLoads || typeof store.userConfig.coreExerciseLoads !== 'object') {
+        store.userConfig.coreExerciseLoads = {};
+    }
     setVal('set-weight', store.userConfig.weight);
     setVal('set-target-weight', store.userConfig.targetWeight);
     setVal('set-height', store.userConfig.height);
@@ -198,6 +202,8 @@ export function applyUserConfigToDom() {
     setVal('set-goal', store.userConfig.goal);
     setVal('set-diet', store.userConfig.diet);
     setVal('set-shop-style', store.userConfig.shopStyle || 'Cheap');
+    migrateUserSport();
+    populateSportSelects();
     setVal('set-sport', store.userConfig.sport);
     setVal('set-bf', store.userConfig.bodyFat);
     setVal('set-injury', store.userConfig.injury || 'None');
@@ -389,10 +395,19 @@ export function saveSettings() {
 }
 
 export function handleSportChange() {
-    const sport = document.getElementById('set-sport').value;
-    if (sport === 'Rugby' || sport === 'Football') document.getElementById('set-goal').value = "Muscle_Gain"; 
-    else if (sport === 'Rowing') document.getElementById('set-goal').value = "Maintenance"; 
     saveSettings();
+    try { populateSportSelects(); } catch (e) {}
+    try { invalidateWeekPlanCache(); } catch (e) {}
+    try { generateFutureTimeline(); } catch (e) {}
+}
+
+export function onSexOrSportUiChange() {
+    const sexEl = document.getElementById('set-sex');
+    if (sexEl) store.userConfig.sex = sexEl.value;
+    try { populateSportSelects(); } catch (e) {}
+    saveSettings();
+    try { invalidateWeekPlanCache(); } catch (e) {}
+    try { generateFutureTimeline(); } catch (e) {}
 }
 
 /** BMR: Katch-McArdle when BF% is known and < 20%, otherwise Mifflin–St Jeor. */

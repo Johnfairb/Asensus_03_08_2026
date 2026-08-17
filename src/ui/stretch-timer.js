@@ -6,7 +6,9 @@ import { store } from '../state/store.js';
 import {
     getStretchGapSeconds,
     getStretchHoldSeconds,
+    cooldownStretchSides,
     isUnilateralCooldownStretch,
+    isWristCooldownStretch,
     stretchPartDisplayLabel
 } from '../domain/session-prep.js';
 import { saveWorkoutDraft } from '../domain/workout-draft.js';
@@ -62,23 +64,25 @@ export function ensurePlannedStretchSetsShape(item) {
             set.reps = `Hold ${set.holdSec}s`;
             changed = true;
         }
-        if (isUnilateralCooldownStretch(base) && !set.side) {
+        if (isWristCooldownStretch(base) && /^(left|right)$/i.test(String(set.side || ''))) {
             changed = true;
-            next.push({
-                ...set,
-                side: 'Left',
-                unilateral: true,
-                baseName: base,
-                completed: !!set.completed,
-                _sessionSkipped: !!set._sessionSkipped
-            });
-            next.push({
-                ...set,
-                side: 'Right',
-                unilateral: true,
-                baseName: base,
-                completed: !!set.completed,
-                _sessionSkipped: !!set._sessionSkipped
+            set.side = /^left$/i.test(set.side) ? 'Finger' : 'Palm';
+            set.unilateral = true;
+            next.push(set);
+            return;
+        }
+        const sides = cooldownStretchSides(base);
+        if ((isUnilateralCooldownStretch(base) || isWristCooldownStretch(base)) && !set.side && sides.length > 1) {
+            changed = true;
+            sides.forEach((side) => {
+                next.push({
+                    ...set,
+                    side,
+                    unilateral: true,
+                    baseName: base,
+                    completed: !!set.completed,
+                    _sessionSkipped: !!set._sessionSkipped
+                });
             });
         } else {
             next.push(set);
@@ -93,6 +97,25 @@ export function stretchSetBaseName(set) {
 
 export function stretchSetLabel(set) {
     return stretchPartDisplayLabel(set);
+}
+
+export function stretchStepHeading(step) {
+    if (!step) return '';
+    if (step.kind === 'gap') {
+        const next = step.nextLabel || (step.label && step.label !== 'Between stretches' ? step.label : '');
+        return next ? `Rest · next: ${next}` : 'Rest · next up';
+    }
+    return `Hold · ${step.label}`;
+}
+
+export function stretchStepStatusLine(step, leftSec) {
+    const left = Math.max(0, Number(leftSec) || 0);
+    if (!step) return `${left}s`;
+    if (step.kind === 'gap') {
+        const next = step.nextLabel || (step.label && step.label !== 'Between stretches' ? step.label : '');
+        return next ? `Next: ${next} · ${left}s` : `Next in ${left}s`;
+    }
+    return `${step.label} · ${left}s`;
 }
 
 function activeHoldSets(item) {
@@ -120,7 +143,8 @@ export function buildStretchTimerSteps(item) {
             steps.push({
                 kind: 'gap',
                 setIdx: null,
-                label: 'Between stretches',
+                label: holds[i + 1].label,
+                nextLabel: holds[i + 1].label,
                 durationSec: gap
             });
         }
@@ -165,15 +189,11 @@ function updateStretchCountdownDom(exIdx, item) {
     const left = remainingStretchStepSeconds(item);
     if (el) el.textContent = `${left}s`;
     if (labelEl && step) {
-        labelEl.textContent = step.kind === 'gap'
-            ? `Rest · next up`
-            : `Hold · ${step.label}`;
+        labelEl.textContent = stretchStepHeading(step);
     }
     const cardSub = document.getElementById(`stretch-card-sub-${exIdx}`);
     if (cardSub && step) {
-        cardSub.textContent = step.kind === 'gap'
-            ? `Next in ${left}s`
-            : `${step.label} · ${left}s`;
+        cardSub.textContent = stretchStepStatusLine(step, left);
     }
 }
 
@@ -396,7 +416,7 @@ export function stretchTimerStatusSubtitle(item) {
         const step = currentStretchStep(item);
         const left = remainingStretchStepSeconds(item);
         if (!step) return `${left}s`;
-        return step.kind === 'gap' ? `Next in ${left}s` : `${step.label} · ${left}s`;
+        return stretchStepStatusLine(step, left);
     }
     return 'Tap Log · Start stretching';
 }

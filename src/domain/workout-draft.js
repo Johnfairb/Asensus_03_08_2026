@@ -133,10 +133,10 @@ export function draftMatchesPlanEvent(eventName, draft = loadWorkoutDraft()) {
 
     if (isLactateEvent(draftRaw) && isLactateEvent(eventName)) return true;
     if (isSteadyCardio(draftRaw) && isSteadyCardio(eventName)) return true;
-    if ((isPracticeEvent(draftRaw) || draftRaw === 'Practice')
-        && (isPracticeEvent(eventName) || eventName === 'Practice')) return true;
-    if ((isGameEvent(draftRaw) || draftRaw === 'Match' || draftRaw === 'Game')
-        && (isGameEvent(eventName) || eventName === 'Match' || eventName === 'Game')) return true;
+    if (isPracticeEvent(draftRaw) && isPracticeEvent(eventName) && draftRaw === eventName) return true;
+    if (isGameEvent(draftRaw) && isGameEvent(eventName) && (
+        draftRaw === eventName || ((draftRaw === 'Match' || draftRaw === 'Game') && (eventName === 'Match' || eventName === 'Game'))
+    )) return true;
 
     // Hypertrophy must not collapse into generic strength matching
     if (isHypertrophyEvent(draftRaw) || isHypertrophyEvent(eventName)) {

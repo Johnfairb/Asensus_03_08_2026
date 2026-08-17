@@ -656,7 +656,132 @@ export const EXERCISE_CATALOG = {
     'Standing Cable Rotation': ex({
         loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
     'Seated Cable Rotation': ex({
-        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] })
+        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
+
+    // —— Power / plyometrics (programmed by power-engine; library domain "power") ——
+    'Box Jumps': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Depth Jumps': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Depth Jump to Box Jump': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Low Hurdle Hops': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Calves'], secondary: ['Glute max'] }),
+    'High Hurdle Hops': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Calves'], secondary: ['Glute max'] }),
+    'Knee Jumps': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Knee Jumps to Box Jump': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Lateral Hurdle Jumps': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute medius'], secondary: ['Calves'] }),
+    'Squat Jumps': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Weighted Squat Jumps': ex({
+        loadOptions: ['D'], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', dumbbell: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Weighted Pogos': ex({
+        loadOptions: ['D'], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'calves', ppl: 'Legs', dumbbell: true, primary: ['Calves', 'Quads'], secondary: ['Glute max'] }),
+    'Bilateral Bound': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'hamstrings', ppl: 'Legs', bodyweight: true, primary: ['Glute max', 'Hamstrings'], secondary: ['Calves'] }),
+    'Repeated Bilateral Bounds': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'hamstrings', ppl: 'Legs', bodyweight: true, primary: ['Glute max', 'Hamstrings'], secondary: ['Calves'] }),
+    'Knee Tuck': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Core'], secondary: ['Calves'] }),
+    'Repeated Knee Tuck': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Core'], secondary: ['Calves'] }),
+    'Pogos': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'calves', ppl: 'Legs', bodyweight: true, primary: ['Calves'], secondary: ['Quads'] }),
+    'Single Leg Box Jumps': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Bounds': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'hamstrings', ppl: 'Legs', bodyweight: true, primary: ['Glute max', 'Hamstrings'], secondary: ['Calves'] }),
+    'Single Leg Bounds': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'hamstrings', ppl: 'Legs', bodyweight: true, primary: ['Glute max', 'Hamstrings'], secondary: ['Calves'] }),
+    'Lunge Jumps': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Rapid Lunge Jumps': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Skater Bounds': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'glute', ppl: 'Legs', bodyweight: true, primary: ['Glute medius', 'Glute max'], secondary: ['Calves'] }),
+    'Rapid Skater Bounds': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'glute', ppl: 'Legs', bodyweight: true, primary: ['Glute medius', 'Glute max'], secondary: ['Calves'] }),
+    'Single Leg Pogos': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'calves', ppl: 'Legs', bodyweight: true, primary: ['Calves'], secondary: ['Quads'] }),
+    'Skips for Height': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Calves'], secondary: ['Glute max'] }),
+    'Skips for Distance': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'hamstrings', ppl: 'Legs', bodyweight: true, primary: ['Hamstrings', 'Glute max'], secondary: ['Calves'] }),
+    'Explosive Bulgarian Split Squat': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Single Leg Depth Jump': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'quad', ppl: 'Legs', bodyweight: true, primary: ['Quads', 'Glute max'], secondary: ['Calves'] }),
+    'Med Ball Crunch': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'core', ppl: 'Core', bodyweight: true, primary: ['Core'], secondary: [] }),
+    'Sideways Med Ball Toss': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Unilateral', role: 'compound',
+        muscle_group: 'core', ppl: 'Core', bodyweight: true, primary: ['Core'], secondary: ['Glute medius'] }),
+    'Kneeling Overhead Throw': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'core', ppl: 'Core', bodyweight: true, primary: ['Core'], secondary: ['Front delt'] }),
+    'Standing Overhead Throw': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'core', ppl: 'Core', bodyweight: true, primary: ['Core'], secondary: ['Front delt'] }),
+    'Explosive Push-up': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'pecs', ppl: 'Push', bodyweight: true, primary: ['Pecs', 'Triceps'], secondary: ['Front delt'] }),
+    'Clap Push-up': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'pecs', ppl: 'Push', bodyweight: true, primary: ['Pecs', 'Triceps'], secondary: ['Front delt'] }),
+    'Superman Push-up': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'pecs', ppl: 'Push', bodyweight: true, primary: ['Pecs', 'Triceps'], secondary: ['Front delt', 'Core'] }),
+    'Med Ball Chest Pass': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'pecs', ppl: 'Push', bodyweight: true, primary: ['Pecs', 'Triceps'], secondary: ['Front delt'] }),
+    'Standing Overhead Slam': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'lats', ppl: 'Pull', bodyweight: true, primary: ['Lats', 'Core'], secondary: ['Front delt'] }),
+    'Explosive Pull-up': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'lats', ppl: 'Pull', bodyweight: true, primary: ['Lats'], secondary: ['Biceps'] }),
+    'Rope Slams': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'lats', ppl: 'Pull', bodyweight: true, primary: ['Lats', 'Core'], secondary: ['Front delt'] }),
+    'Clap Pull-up': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'lats', ppl: 'Pull', bodyweight: true, primary: ['Lats'], secondary: ['Biceps'] }),
+    'Explosive Sled Pull': ex({
+        loadOptions: [], domain: 'power', movement: 'plyo', laterality: 'Bilateral', role: 'compound',
+        muscle_group: 'lats', ppl: 'Pull', bodyweight: true, primary: ['Lats', 'Rear delt'], secondary: ['Biceps'] })
 };
 
 /** Strength core slot still uses these (logic unchanged); mapped to catalog names. */
@@ -733,6 +858,18 @@ export function resolveCatalogName(name) {
         'neutral chin ups': 'Neutral Pull Up',
         'lat pulldown': 'Lat Machine Pull',
         'lat pull-down': 'Lat Machine Pull',
+        'superman': 'Superman Push-up',
+        'superman push up': 'Superman Push-up',
+        'superman push-up': 'Superman Push-up',
+        'clap push up': 'Clap Push-up',
+        'clap pushup': 'Clap Push-up',
+        'clap pushups': 'Clap Push-up',
+        'explosive push up': 'Explosive Push-up',
+        'med ball crunch': 'Med Ball Crunch',
+        'sidewards medball toss': 'Sideways Med Ball Toss',
+        'sidewards med ball toss': 'Sideways Med Ball Toss',
+        'clap pull up': 'Clap Pull-up',
+        'explosive pull up': 'Explosive Pull-up',
         'bicep curls': 'Dumbbell Curl',
         'french press': 'Cable French Press',
         'cable french press': 'Cable French Press',
@@ -773,6 +910,12 @@ export function getExerciseMeta(name) {
     const resolved = resolveCatalogName(name);
     if (resolved && EXERCISE_CATALOG[resolved]) return { name: resolved, ...EXERCISE_CATALOG[resolved] };
     return null;
+}
+
+/** Unilateral compounds (strength work rest 200s vs 240s). Isolations stay on isolation rest. */
+export function isUnilateralCompound(name) {
+    const meta = getExerciseMeta(name);
+    return !!(meta && meta.role === 'compound' && String(meta.laterality || '').toLowerCase() === 'unilateral');
 }
 
 /** Push / Pull / Legs (or Core) session label for library display. */

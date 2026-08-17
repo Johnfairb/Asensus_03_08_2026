@@ -19,6 +19,7 @@ import {
     HYPERTROPHY_EVENT_TYPES,
     HYPERTROPHY_DISPLAY_LABELS
 } from './hypertrophy-engine.js';
+import { isPowerEvent } from './power-engine.js';
 
 // Re-export date helpers used by other modules
 export { dateToISO, parseISODate } from './billing-month.js';
@@ -199,6 +200,7 @@ export function getSessionTypesForCurrentProgramme() {
 
 export function sessionTypeIdFromFocus(focus) {
     if (!focus || typeof focus !== 'string') return null;
+    if (isPowerEvent(focus) || /^power$/i.test(focus)) return 'power';
     if (/Strength\s*A/i.test(focus) || (focus.includes('Strength') && !/B/i.test(focus) && !/Hypertrophy/i.test(focus))) {
         if (/Strength\s*B/i.test(focus)) return 'strength_B';
         return 'strength_A';
@@ -262,7 +264,12 @@ export function sessionNeedsExerciseConfirm(sessionTypeId) {
 export function confirmSessionExercises(sessionTypeId, ghostItems) {
     if (!sessionTypeId) return null;
     const plans = loadCyclePlans();
-    const prev = plans[sessionTypeId] || { source: 'generated', family: sessionTypeId.startsWith('strength') ? 'strength' : 'hypertrophy' };
+    const prev = plans[sessionTypeId] || {
+        source: 'generated',
+        family: sessionTypeId === 'power'
+            ? 'power'
+            : (sessionTypeId.startsWith('strength') ? 'strength' : 'hypertrophy')
+    };
     const items = Array.isArray(ghostItems) ? JSON.parse(JSON.stringify(ghostItems)) : [];
 
     const next = {

@@ -15,7 +15,7 @@ import {
     prettyWorkoutTypeLabel
 } from '../domain/route-planner.js';
 import { formatDurationMs, formatExerciseDurationLabel } from './workout-timer.js';
-import { COOLDOWN_STRETCHES, isUnilateralCooldownStretch, stretchPartDisplayLabel } from '../domain/session-prep.js';
+import { COOLDOWN_STRETCHES, cooldownStretchSides, stretchPartDisplayLabel } from '../domain/session-prep.js';
 import { estimateFoodWaterMl, getHydrationLitersForDate, parseFoodLogDetails } from '../lib/food-parse.js';
 import { computeAimBarLayout, formatMacroAimLabel, getMacroRange } from '../lib/macro-range.js';
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from '../domain/meal-planner.js';
@@ -785,12 +785,10 @@ function stretchMuscleLabel(set, index) {
 function cooldownMuscleCatalog(unilateral = true) {
     const out = [];
     COOLDOWN_STRETCHES.forEach((name) => {
-        if (unilateral && isUnilateralCooldownStretch(name)) {
-            out.push({ partName: name, baseName: name, side: 'Left' });
-            out.push({ partName: name, baseName: name, side: 'Right' });
-        } else {
-            out.push({ partName: name, baseName: name, side: null });
-        }
+        const sides = unilateral ? cooldownStretchSides(name) : [null];
+        sides.forEach((side) => {
+            out.push({ partName: name, baseName: name, side });
+        });
     });
     return out;
 }
@@ -1866,6 +1864,7 @@ export function openHistoryWorkoutDetail(exName, dateStr) {
     if (diaryItem) mergeDiaryOntoItems([diaryItem], dateStr, diaryItem.dateIso);
 
     const isStretch = /stretch/i.test(exName || '');
+    const isCore = /core(\s*circuit)?/i.test(exName || '');
     let html = '';
     const timeLabel = formatExerciseDurationLabel(diaryItem);
     if (timeLabel) {
@@ -1882,11 +1881,11 @@ export function openHistoryWorkoutDetail(exName, dateStr) {
                 : `${log.distance_km || 0} km${log.time_minutes ? ` · ${log.time_minutes} min` : ''}`);
         const rowLabel = isStretch
             ? (String(log.notes || '').trim() || 'Stretch')
-            : `Set ${i + 1}`;
+            : (isCore ? `Circuit ${i + 1}` : `Set ${i + 1}`);
         html += `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border-subtle);">
             <div>
                 <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${escapeHtml(rowLabel)}</div>
-                <div style="font-size:13px; color:var(--text-main); font-weight:700; margin-top:4px;">${isStretch ? 'Done' : detail}</div>
+                <div style="font-size:13px; color:var(--text-main); font-weight:700; margin-top:4px;">${isStretch || isCore ? 'Done' : detail}</div>
             </div>
             <button type="button" onclick="deleteHistoryLog('workout_logs', ${log.id})" style="background:none; color:var(--text-stealth); border:none; cursor:pointer; font-size:14px; display:flex; align-items:center;"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
         </div>`;

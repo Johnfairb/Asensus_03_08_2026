@@ -2,8 +2,8 @@ import { store } from '../state/store.js';
 import { excludeBannedExercises } from './bans.js';
 import { PERIODIZATION, getPhaseLoadMultiplier, getSeasonPhase, isGuidanceOff } from './fitness-hud.js';
 import { buildLactateIntervalPlan } from './lactate-engine.js';
-import { dateToISO, getLactateSlotForDate, isLactateEvent, isLiftingEvent, isSteadyCardio, openVideoModal } from './route-planner.js';
-import { SPORT_MATRIX } from './sports-matrix.js';
+import { dateToISO, getLactateSlotForDate, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isSteadyCardio, openVideoModal, prettyFocusName } from './route-planner.js';
+import { getSportData } from './sports-matrix.js';
 import { buildAuxiliaryExerciseList, buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, isStrengthPhase, progressStrengthIsolationWeight } from './strength-engine.js';
 import {
     buildHypertrophyWarmupSets,
@@ -30,14 +30,21 @@ import {
     resolveWarmupBlock,
     buildSportSessionBlock
 } from './session-prep.js';
-import { formatCoreRepLabel } from './exercise-catalog.js';
+import { formatCoreRepLabel, isUnilateralCompound } from './exercise-catalog.js';
 import { hasCoreStrengthRating } from './core-programming.js';
+import {
+    applyPowerExerciseToItem,
+    buildPowerSessionRoutine,
+    buildPowerWarmupAndWorkSets,
+    isPowerEvent,
+    POWER_REST_SEC
+} from './power-engine.js';
 
 import { renderActiveLog } from '../ui/templates.js';
 import { syncExerciseTimer } from '../ui/workout-timer.js';
 import { ensureCycleStarted, ensureCyclePlansForProgramme, sessionTypeIdFromFocus, confirmSessionExercises } from './workout-cycle.js';
 import { getEquivalentExercises, resolveItemSlotLabel } from './exercise-slots.js';
-import { latestPhaseWeight, strengthLoadFromHypertrophy, resolveLogPeriodization } from './periodization-logs.js';
+import { latestPhaseWeight, lastCompletedWorkingWeight, strengthLoadFromHypertrophy, resolveLogPeriodization } from './periodization-logs.js';
 
 // ==========================================
 // 8. ELITE WORKOUT ENGINE (DRIVE TAB)
@@ -45,6 +52,36 @@ import { latestPhaseWeight, strengthLoadFromHypertrophy, resolveLogPeriodization
 
 function emptySetForExercise(ex) {
     return { weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, completed: false };
+}
+
+function mergeLocalWorkoutHistory(remote) {
+    const out = Array.isArray(remote) ? remote.slice() : [];
+    const seen = new Set(out.map((r) => String(r.id)).filter((id) => id && id !== 'undefined'));
+    const grouped = store.globalGroupedHistory || {};
+    Object.values(grouped).forEach((day) => {
+        (day?.items || []).forEach((row) => {
+            if (!row || row.type !== 'workout' || !row.exercise) return;
+            const id = row.id != null ? String(row.id) : '';
+            if (id && seen.has(id)) return;
+            if (id) seen.add(id);
+            out.push(row);
+        });
+    });
+    out.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    return out;
+}
+
+function savedCoreLoad(name) {
+    try {
+        const map = store.userConfig?.coreExerciseLoads || {};
+        const direct = map[name];
+        if (direct != null && Number.isFinite(Number(direct)) && Number(direct) >= 0) return Number(direct);
+        const lower = String(name || '').toLowerCase();
+        for (const [k, v] of Object.entries(map)) {
+            if (String(k).toLowerCase() === lower && Number.isFinite(Number(v)) && Number(v) >= 0) return Number(v);
+        }
+    } catch (e) { /* ignore */ }
+    return 0;
 }
 
 /** Add one or more exercises (by id). Before Confirm workout → ghost; after → active log. */
@@ -66,7 +103,7 @@ export function addExercisesByIds(ids) {
             }
         }
         const isIso = !!(HYPERTROPHY_EXERCISE_META[ex.name]?.role === 'isolation');
-        const restOpts = resolveWarmupRestOptions(isIso);
+        const restOpts = resolveWarmupRestOptions(isIso, ex.name);
         const workRest = restOpts.mode === 'none' ? 0 : restOpts.workRestSec;
         const entry = {
             exercise: ex,
@@ -118,7 +155,10 @@ export function swapGhostExercise(ghostIdx, newId) {
     const newEx = store.globalExerciseDB.find(e => e.id == newId || String(e.id) === String(newId));
     if (!newEx) return;
     item.exercise = newEx;
-    if (item.sets) {
+    if (item.isPower || /power/i.test(item.slotLabel || '')) {
+        applyPowerExerciseToItem(item, newEx.name);
+        item.exercise = newEx;
+    } else if (item.sets) {
         item.sets = item.sets.map(s => ({ ...s, completed: false, locked: false }));
     }
     renderGhostWorkoutFromItems();
@@ -691,7 +731,7 @@ export async function generateWorkoutTemplate() {
     if (isGuidanceOff('workout') && !window._forceGpsTemplateLoad) {
         // Manual Steady / Lactate still gets the planned-style template when the user picks that type
         const forced = window.manualSessionKind || '';
-        const allowForced = isSteadyCardio(forced) || isLactateEvent(forced);
+        const allowForced = isSteadyCardio(forced) || isLactateEvent(forced) || isPowerEvent(forced);
         if (!allowForced) {
             content.innerHTML = "<div style='text-align:center;'><p style='font-size:13px; color:var(--text-muted); font-weight:bold;'>Workout guidance off</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>No session will be generated. Switch Workout back on in Tracker (Settings) to resume programming.</p></div>";
             container.classList.remove('hidden');
@@ -701,8 +741,9 @@ export async function generateWorkoutTemplate() {
         }
     }
 
-    if (focus === 'Game') {
-        content.innerHTML = "<div style='text-align:center;'><p style='font-size:13px; color:#0A84FF; font-weight:bold;'>Match Day — lifting locked.</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Compete. Recover. Rest is auto-scheduled tomorrow.</p></div>";
+    if (isGameEvent(focus)) {
+        const label = prettyFocusName(focus);
+        content.innerHTML = `<div style='text-align:center;'><p style='font-size:13px; color:#0A84FF; font-weight:bold;'>${label} Day — lifting locked.</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Compete. Recover. Rest is auto-scheduled tomorrow if RPE is high.</p></div>`;
         container.classList.remove('hidden'); return;
     }
     if (focus === 'Rest') {
@@ -714,8 +755,9 @@ export async function generateWorkoutTemplate() {
         focus = 'Cardio (Steady)';
         document.getElementById('today-focus').value = 'Cardio (Steady)';
     }
-    if (focus === 'Practice' && !(window.todayRouteEvents || []).some(isLiftingEvent)) {
-        content.innerHTML = "<div style='text-align:center;'><p style='font-size:13px; color:#0A84FF; font-weight:bold;'>Practice Day</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Use Log on the practice card under Exercise Plan to open the brain dump.</p></div>";
+    if (isPracticeEvent(focus) && !(window.todayRouteEvents || []).some(isLiftingEvent)) {
+        const label = prettyFocusName(focus);
+        content.innerHTML = `<div style='text-align:center;'><p style='font-size:13px; color:#0A84FF; font-weight:bold;'>${label} Day</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Use Log on the ${label.toLowerCase()} card under Exercise Plan to open the brain dump.</p></div>`;
         container.classList.remove('hidden'); return;
     }
 
@@ -726,6 +768,7 @@ export async function generateWorkoutTemplate() {
     } catch (e) {
         console.warn('workout_logs history unavailable:', e);
     }
+    hist = mergeLocalWorkoutHistory(hist);
     const logDayKey = (row) => {
         const raw = row && row.created_at;
         if (!raw) return '';
@@ -754,10 +797,10 @@ export async function generateWorkoutTemplate() {
             || { id: 'TMP_'+Date.now(), name: lookup, domain: 'strength', muscle_group: 'custom' };
     };
 
-    let html = ''; let isElite = store.userConfig.sport !== 'None'; let mainRoutine = [];
+    let html = ''; let mainRoutine = [];
     let phaseStr = getSeasonPhase();
     let pData = PERIODIZATION[phaseStr] || PERIODIZATION['OffSeason_Strength'];
-    let sportData = (isElite && SPORT_MATRIX[store.userConfig.sport]) ? SPORT_MATRIX[store.userConfig.sport] : SPORT_MATRIX['None'];
+    let sportData = getSportData();
 
     // 1. MANDATORY WARM-UP BLOCK (skipped for Steady State — the session itself is the aerobic work)
     if (store.userConfig.injury !== 'None' && store.userConfig.repairLevel && store.userConfig.repairLevel < 4) {
@@ -828,14 +871,33 @@ export async function generateWorkoutTemplate() {
         window.currentStrengthTimeTier = built.timeTier;
         // No auxiliary attachment in strength / hybrid
     } 
-    else if (focus === 'Full Body / Power') { 
-        pData = PERIODIZATION['PreSeason_Power']; 
-        mainRoutine = [
-            { name: "Squat Jumps" }, 
-            { name: "Single Leg Broad Jumps" }, // Unilateral Power
-            { name: "Med Ball Throws" },
-            { name: sportData.cardio === 'anaerobic' ? "Side-to-Side Shuffle" : "Clap Pushups" }
-        ]; 
+    else if (isPowerEvent(focus) || focus === 'Full Body / Power') {
+        const { promptPowerFatigueCheck } = await import('../ui/power-fatigue-ui.js');
+        const fatigueResult = await promptPowerFatigueCheck();
+        if (!fatigueResult?.proceed) {
+            content.innerHTML = "<div style='text-align:center;'><p style='font-size:13px; color:var(--gold-accent); font-weight:bold;'>Power skipped</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Plyometrics need you fresh. Do strength, hypertrophy, or rest instead.</p></div>";
+            container.classList.remove('hidden');
+            const lockBtn = document.getElementById('btn-lock-in-route');
+            if (lockBtn) lockBtn.style.display = 'none';
+            return;
+        }
+        pData = {
+            reps: 5,
+            sets: 3,
+            rest_sec: POWER_REST_SEC,
+            notes: 'POWER: Maximal effort on every work set. No RIR. 3 min rest.'
+        };
+        const built = buildPowerSessionRoutine({
+            fatigue: fatigueResult.fatigue,
+            allowUnclassified: true
+        });
+        if (!built.ok || !built.items.length) {
+            content.innerHTML = "<div style='text-align:center;'><p style='font-size:13px; color:var(--text-muted); font-weight:bold;'>Could not build a power session</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Need a classifiable strength level, or try logging power after you have lift data.</p></div>";
+            container.classList.remove('hidden');
+            return;
+        }
+        built.items.forEach((item) => mainRoutine.push(item));
+        window.currentPowerSession = built;
     } 
     else if (focus === 'Auxiliary' && !isHypertrophyPhase(phaseStr) && !isStrengthPhase(phaseStr)) { 
         pData = { reps: 12, sets: 3, rest_sec: 60, notes: "Prehab & Weaknesses. Short rests. Target vulnerable areas." }; 
@@ -1056,7 +1118,7 @@ export async function generateWorkoutTemplate() {
                     children: coreEx.map(n => ({
                         name: n,
                         reps: formatCoreRepLabel(n),
-                        weight: 0,
+                        weight: savedCoreLoad(n),
                         _uiExpanded: false
                     }))
                 });
@@ -1078,7 +1140,29 @@ export async function generateWorkoutTemplate() {
             item = { ...item, name: programmedName, notes: ((item.notes || '') + ` (swapped from bodyweight variant for this month)`).trim() };
         }
         let exObj = getEx(item.name);
-        let latestLog = hist.find(l => l.exercise === exObj.name) || null;
+        if (item.isPower || item.skipHypertrophyWarmup) {
+            if (exObj && !exObj.domain) exObj = { ...exObj, domain: 'power' };
+            else if (exObj) exObj = { ...exObj, domain: exObj.domain || 'power' };
+            const setsArray = buildPowerWarmupAndWorkSets(exObj.name, {
+                slotLabel: item.slotLabel,
+                reps: item.reps,
+                workWeight: item.workWeight,
+                restSec: item.restSec || POWER_REST_SEC
+            });
+            store.currentGhostItems.push({
+                exercise: exObj,
+                note: item.notes || 'Maximal effort — every work-set rep should be as explosive as possible.',
+                sets: setsArray,
+                plannedSets: 3,
+                slotLabel: item.slotLabel || null,
+                powerIntensity: item.powerIntensity || null,
+                isPower: true,
+                hideRir: true,
+                skipHypertrophyWarmup: true
+            });
+            return;
+        }
+        let latestLog = hist.find(l => String(l.exercise || '').toLowerCase() === String(exObj.name || '').toLowerCase()) || null;
         const isCardioEx = ((exObj.domain || '').toLowerCase() === 'cardio');
         const eqType = equipmentForExercise(exObj.name);
         const inStrengthPhase = !useHypertrophy && (phaseStr === 'OffSeason_Strength' || phaseStr === 'OffSeason_Hybrid' || isStrengthPhase(phaseStr));
@@ -1098,18 +1182,19 @@ export async function generateWorkoutTemplate() {
         }
 
         let tWeight;
+        const loggedWorkKg = lastCompletedWorkingWeight(hist, exObj.name);
         if (item.isText) {
             tWeight = 0;
         } else if (inStrengthPhase) {
             tWeight = 0; // filled below from strength log, hypertrophy+15%, or finder
         } else if (phaseStr === 'OffSeason_Adaptation') {
-            if (latestLog && Number(latestLog.weight_kg) > 0 && Number(latestLog.weight_kg) <= calcWeight * 1.15) {
-                tWeight = Number(latestLog.weight_kg);
+            if (loggedWorkKg != null && loggedWorkKg > 0 && loggedWorkKg <= calcWeight * 1.15) {
+                tWeight = loggedWorkKg;
             } else {
                 tWeight = calcWeight;
             }
         } else {
-            tWeight = latestLog ? latestLog.weight_kg : calcWeight;
+            tWeight = loggedWorkKg != null ? loggedWorkKg : calcWeight;
         }
         let tDist = latestLog ? latestLog.distance_km : 0;
         // Steady duration comes from the session timer at log time — don't prefill a fake target
@@ -1159,7 +1244,7 @@ export async function generateWorkoutTemplate() {
                 const hasPhaseHist = latestPhaseWeight(hist, exObj.name, 'strength') != null
                     || latestPhaseWeight(hist, exObj.name, 'hypertrophy') != null;
                 if (!hasPhaseHist && tWeight <= 0) tWeight = savedWorkKg;
-            } else if (!latestLog) {
+            } else if (loggedWorkKg == null) {
                 tWeight = savedWorkKg;
             }
         }
@@ -1272,7 +1357,10 @@ export async function generateWorkoutTemplate() {
                 : (useHypertrophy ? 10 : pData.reps));
         let itemRest = item.isAux ? 60
             : (item.isStrengthIsolation ? (item.restSec || 120)
-                : (useHypertrophy ? 90 : pData.rest_sec));
+                : (useHypertrophy ? 90
+                    : (item.restSec != null
+                        ? item.restSec
+                        : (isUnilateralCompound(exObj.name) ? 200 : (pData.rest_sec || 240)))));
         // Manual gym session: override work rest from session prefs
         if (store.manualGymRest?.active) {
             if (store.manualGymRest.custom) {

@@ -210,13 +210,7 @@
                 </div>
 
                 <label style="margin-top:0;">Sport Specificity</label>
-                <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 15px; gap: 8px;">
-                    <div class="ob-card active" onclick="selectObCard(this, 'ob-sport', 'None')">NONE / HYPERTROPHY</div>
-                    <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Football')">FOOTBALL</div>
-                    <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Basketball')">BASKETBALL</div>
-                    <div class="ob-card" onclick="selectObCard(this, 'ob-sport', 'Rugby')">RUGBY / POWER</div>
-                    <input type="hidden" id="ob-sport" value="None">
-                </div>
+                <select id="ob-sport" class="input-field" style="margin-bottom:15px;"></select>
 
                 <div style="background:var(--bg-surface-elevated); padding:12px; border-radius:8px; border:1px solid var(--border-subtle); margin-bottom:15px;">
                     <label style="margin-top:0;">Injury History (Prehab Injection)</label>
@@ -806,9 +800,7 @@
             </select>
 
             <label>Sport Specificity</label>
-            <select id="set-sport" class="input-field" onchange="handleSportChange()">
-                <option value="None">None (Standard Hypertrophy)</option><option value="Football">Football / Soccer</option><option value="Basketball">Basketball</option><option value="Rugby">Rugby / Power</option><option value="Volleyball">Volleyball</option><option value="Cricket">Cricket</option><option value="Tennis">Tennis</option><option value="Rowing">Rowing / Endurance</option>
-            </select>
+            <select id="set-sport" class="input-field" onchange="handleSportChange()"></select>
             
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <label style="margin:0;">Periodization Phase</label>
@@ -951,7 +943,7 @@
             <label>Body Fat % (Optional)</label>
             <input type="number" id="set-bf" class="input-field">
             <div style="display: flex; gap: 10px;">
-                <div style="flex: 1;"><label>Sex</label><select id="set-sex" class="input-field"><option value="Male">Male</option><option value="Female">Female</option></select></div>
+                <div style="flex: 1;"><label>Sex</label><select id="set-sex" class="input-field" onchange="onSexOrSportUiChange()"><option value="Male">Male</option><option value="Female">Female</option></select></div>
                 <div style="flex: 1;"><label>Goal</label>
                     <select id="set-goal" class="input-field">
                         <option value="Fat_Loss">Fat Loss (Deficit)</option>
@@ -1228,16 +1220,13 @@
                 </div>
                 <button type="button" onclick="closeFixedScheduleModal()" style="background:none; border:none; color:var(--text-stealth); font-size:28px; cursor:pointer; line-height:1;">&times;</button>
             </div>
-            <p style="font-size:11px; color:var(--text-muted); line-height:1.5; margin-bottom:16px;">Set non-negotiable Practice, Match, or Rest days. Add a time of day so the Route shows when you train. Max 2 events per day.</p>
+            <p style="font-size:11px; color:var(--text-muted); line-height:1.5; margin-bottom:16px;">Set non-negotiable sport or Rest days. Add a time of day so the Route shows when you train. Max 2 events per day.</p>
             <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
                 <select id="sched-day" class="input-field" style="margin:0; padding:12px; font-size:13px;">
                     <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
                     <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
                 </select>
                 <select id="sched-event" class="input-field" style="margin:0; padding:12px; font-size:13px;" onchange="toggleSchedTimeVisibility()">
-                    <option value="Practice">Practice</option>
-                    <option value="Game">Game / Match</option>
-                    <option value="Rest">Cannot Workout / Rest</option>
                 </select>
                 <select id="sched-time" class="input-field" style="margin:0; padding:12px; font-size:13px;">
                     <option value="Morning">Morning</option>
@@ -1335,6 +1324,12 @@
                 <div id="sunday-pantry-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom: 20px; max-height: 150px; overflow-y:auto; padding-right:5px;">
                     <!-- Auto populated via JS -->
                 </div>
+            </div>
+
+            <div style="border-top: 1px dashed #333; padding-top: 15px; margin-top: 4px;">
+                <label style="font-family:'Roboto Mono', monospace; color:var(--gold-accent); margin-top:0;">Coming week extras</label>
+                <p style="font-size: 10px; color:var(--text-muted); margin-bottom:10px; font-family:'Roboto Mono', monospace;">Fixed days are locked. Add any extra sport event or Rest for Monday–Sunday. Leave as None to skip.</p>
+                <div id="sunday-week-events-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom: 16px; max-height: 220px; overflow-y:auto; padding-right:5px;"></div>
             </div>
 
             <button class="btn-primary is-primary" style="margin-top:0;" onclick="executeSundayForecast()">Generate 7-day plan</button>
@@ -1572,18 +1567,13 @@
                 <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform: uppercase; letter-spacing: 1px; margin:0; font-size:14px;">Spontaneous Event</h2>
                 <button onclick="document.getElementById('spontaneous-event-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
             </div>
-            <p style="font-size:11px; color:var(--text-muted); line-height:1.45; margin:0 0 14px 0;">Adds an event to your Route for the next 3 days. Log it later from Exercise — RPE&gt;8 triggers rest; Practice/Match RPE&gt;6 counts as a lactate credit.</p>
+            <p style="font-size:11px; color:var(--text-muted); line-height:1.45; margin:0 0 14px 0;">Adds an event to your Route for the next 3 days. Log it later from Exercise — RPE&gt;8 triggers rest; practice-type events with RPE&gt;6 count as a lactate credit.</p>
 
             <label style="margin-top:0;">Day</label>
             <select id="spontaneous-day" class="input-field"></select>
 
             <label>Event Type</label>
             <select id="spontaneous-type" class="input-field">
-                <option value="Game">Match / Game</option>
-                <option value="Practice">Practice</option>
-                <option value="Lactate">Lactate/HIT</option>
-                <option value="Cardio (Steady)">Steady State</option>
-                <option value="Full Body / Strength">Gym / Strength</option>
             </select>
 
             <button class="btn-primary" style="margin-top:10px; background: rgba(212, 175, 55, 0.05); border-color: var(--gold-accent); color: var(--gold-accent);" onclick="submitSpontaneousEvent()">Add to Route</button>
@@ -1632,6 +1622,10 @@
                 <button type="button" onclick="selectWorkoutType('Full Body / Strength')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
                     <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Gym Workout</div>
                     <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">Strength / lifting session — counts toward this week’s gym plan.</div>
+                </button>
+                <button type="button" onclick="selectWorkoutType('Full Body / Power')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Power</div>
+                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">Plyometrics with maximal effort. Always available to log — programmed after 8 weeks of gym sessions.</div>
                 </button>
             </div>
         </div>
@@ -1910,10 +1904,6 @@
             <input type="hidden" id="cal-event-hidden-date">
             <label style="margin-top:0;">Event type</label>
             <select id="cal-event-select" class="input-field">
-                <option value="Match">Match / Game</option>
-                <option value="Practice">Heavy Practice</option>
-                <option value="Rest">Forced Rest Day</option>
-                <option value="None">Clear Event</option>
             </select>
             <label style="margin-top:12px;">Notes / details (optional)</label>
             <input type="text" id="cal-event-note" class="input-field" placeholder="e.g. Away fixture 15:00" style="margin-bottom:0;">

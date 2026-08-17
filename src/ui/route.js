@@ -1,9 +1,10 @@
 import { store } from '../state/store.js';
 import { getTodayFocus } from '../domain/fitness-hud.js';
-import { generateFutureTimeline, invalidateWeekPlanCache, listWeekGpsPlanSessions, prettyWorkoutTypeLabel, isLactateEvent } from '../domain/route-planner.js';
+import { generateFutureTimeline, invalidateWeekPlanCache, isGameEvent, isPracticeEvent, listWeekGpsPlanSessions, prettyWorkoutTypeLabel, isLactateEvent } from '../domain/route-planner.js';
 import { persistUserConfigToCloud } from '../domain/thermodynamics.js';
 import { specificEventName } from '../lib/food-parse.js';
-import { acceptGhostTemplate, loadSavedTemplate, parseTemplateDetails, parseTemplateMeta, renderActiveLog, switchLogType, updateExecutionAuxBlocks, updateSaveTemplateButtonLabel } from './templates.js';
+import { populateSportSelects } from '../domain/sports-matrix.js';
+import { loadSavedTemplate, parseTemplateDetails, parseTemplateMeta, renderActiveLog, switchLogType, updateExecutionAuxBlocks, updateSaveTemplateButtonLabel } from './templates.js';
 import { generateWorkoutTemplate } from '../domain/workout-generator.js';
 
 // ==========================================
@@ -76,8 +77,8 @@ export function renderLongTermCalendar() {
             const note = (store.specificSchedules[dateStr] && typeof store.specificSchedules[dateStr] === 'object')
                 ? (store.specificSchedules[dateStr].note || '')
                 : '';
-            if(event === 'Match') { bg = '#0A84FF22'; border = '1px solid #0A84FF'; color = '#0A84FF'; }
-            else if(event === 'Practice') { bg = '#D4AF3722'; border = '1px solid #D4AF37'; color = '#D4AF37'; }
+            if (isGameEvent(event)) { bg = '#0A84FF22'; border = '1px solid #0A84FF'; color = '#0A84FF'; }
+            else if (isPracticeEvent(event)) { bg = '#D4AF3722'; border = '1px solid #D4AF37'; color = '#D4AF37'; }
             else if(event === 'Rest') { bg = '#FF3B3022'; border = '1px solid #FF3B30'; color = '#FF3B30'; }
             
             if(new Date().toDateString() === fullDate.toDateString()) border = '1px solid var(--gold-accent)';
@@ -97,10 +98,22 @@ export function openCalendarEventModal(dateStr) {
     if (!eventModal) return;
     document.getElementById('cal-event-date').innerText = new Date(dateStr + 'T12:00:00').toLocaleDateString(undefined, {weekday:'long', month:'short', day:'numeric'});
     document.getElementById('cal-event-hidden-date').value = dateStr;
+    try { populateSportSelects(); } catch (e) { /* ignore */ }
     const raw = store.specificSchedules[dateStr];
     const ev = specificEventName(raw) || 'None';
     const note = (raw && typeof raw === 'object') ? (raw.note || '') : '';
-    document.getElementById('cal-event-select').value = ev;
+    const sel = document.getElementById('cal-event-select');
+    if (sel) {
+        const hasVal = [...sel.options].some((o) => o.value === ev);
+        if (!hasVal && ev && ev !== 'None') {
+            const opt = document.createElement('option');
+            opt.value = ev;
+            opt.textContent = ev;
+            sel.appendChild(opt);
+        }
+        if ([...sel.options].some((o) => o.value === ev)) sel.value = ev;
+        else if ((ev === 'Game' || ev === 'Match') && [...sel.options].some((o) => o.value === 'Match')) sel.value = 'Match';
+    }
     const noteEl = document.getElementById('cal-event-note');
     if (noteEl) noteEl.value = note;
     eventModal.classList.remove('hidden');
@@ -343,9 +356,6 @@ export async function selectLoadedGpsSession(slotKey) {
     const finishLoad = async () => {
         try {
             await generateWorkoutTemplate();
-            if ((store.currentGhostItems || []).length) {
-                acceptGhostTemplate();
-            }
         } catch (e) {
             console.warn(e);
             alert('Could not load that planned workout.');

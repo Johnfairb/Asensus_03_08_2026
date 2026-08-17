@@ -31,8 +31,11 @@ export const COOLDOWN_STRETCHES = [
 
 /** Planned cool-down muscles that get separate Left → Right timer steps. */
 export const UNILATERAL_COOLDOWN_STRETCHES = [
-    'Pecs', 'Triceps', 'Hip flexor', 'Glute medius', 'QL', 'Wrists'
+    'Pecs', 'Triceps', 'Hip flexor', 'Glute medius', 'QL'
 ];
+
+/** Wrists use finger / palm holds instead of left / right. */
+export const WRIST_COOLDOWN_SIDES = ['Finger', 'Palm'];
 
 const UNILATERAL_SET = new Set(UNILATERAL_COOLDOWN_STRETCHES.map(s => s.toLowerCase()));
 
@@ -74,6 +77,17 @@ export function loadSessionPrepPrefs() {
 
 export function isUnilateralCooldownStretch(name) {
     return UNILATERAL_SET.has(String(name || '').toLowerCase());
+}
+
+export function isWristCooldownStretch(name) {
+    return /^wrists$/i.test(String(name || '').trim());
+}
+
+/** Side labels for a cool-down muscle, or `[null]` for a single bilateral hold. */
+export function cooldownStretchSides(name) {
+    if (isWristCooldownStretch(name)) return WRIST_COOLDOWN_SIDES.slice();
+    if (isUnilateralCooldownStretch(name)) return ['Left', 'Right'];
+    return [null];
 }
 
 export function getStretchHoldSeconds(muscleName) {
@@ -191,13 +205,13 @@ export function buildStructuredStretchParts() {
         if (isStretchBanned(s)) continue;
         const hold = getStretchHoldSeconds(s);
         const holdLabel = `Hold ${hold}s`;
-        if (isUnilateralCooldownStretch(s)) {
-            parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
-                side: 'Left', baseName: s, holdSec: hold, unilateral: true
-            }));
-            parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
-                side: 'Right', baseName: s, holdSec: hold, unilateral: true
-            }));
+        const sides = cooldownStretchSides(s);
+        if (sides.length > 1 || (sides.length === 1 && sides[0])) {
+            sides.forEach((side) => {
+                parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
+                    side, baseName: s, holdSec: hold, unilateral: true
+                }));
+            });
         } else {
             parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
                 baseName: s, holdSec: hold, unilateral: false

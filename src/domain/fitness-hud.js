@@ -3,8 +3,9 @@ import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from '
 import { getLactateProtocolForSlot } from './lactate-engine.js';
 import { assignPairedSessionSlots, dateToISO, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listLoggedCreditKeysForDate, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, saveWorkoutSessionSnapshots } from './route-planner.js';
 import { loadDayJournal } from '../ui/journey.js';
-import { SPORT_MATRIX } from './sports-matrix.js';
+import { getSportData } from './sports-matrix.js';
 import { buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, resolveStrengthSession } from './strength-engine.js';
+import { buildPowerSessionRoutine, isPowerEvent } from './power-engine.js';
 import {
     getHypertrophySessionRoutine,
     isHypertrophyFocus,
@@ -69,8 +70,8 @@ export function getTodayFocus() {
     if (descEl) {
         if(focus === 'Rest') descEl.innerText = "System recovery. Optional Zone 2 steady is available if you feel good.";
         else if(focus === 'Rest (Cardio Only)') descEl.innerText = "Recovery day — no lifting. Optional Zone 2 steady is available.";
-        else if(focus === 'Game') descEl.innerText = "Match day. Log Match when done — Rest tomorrow only if RPE > 5.";
-        else if(focus === 'Practice') descEl.innerText = "Practice day. Tap LOG PRACTICE below when done.";
+        else if (isGameEvent(focus)) descEl.innerText = `${prettyFocusName(focus)} day. Log it when done — Rest tomorrow only if RPE > 5.`;
+        else if (isPracticeEvent(focus)) descEl.innerText = `${prettyFocusName(focus)} day. Start the session from Plan, then complete the brain dump.`;
         else if (isSteadyCardio(focus)) descEl.innerText = "Steady-state cardio. Zone 2 aerobic work.";
         else if (isLactateEvent(focus)) {
             try {
@@ -96,7 +97,7 @@ export function getTodayFocus() {
         }
         else if (isStrengthFocus(focus) && !isHypertrophyFocus(focus)) {
             const sess = resolveStrengthSession(focus) || 'A';
-            const built = buildStrengthSessionRoutine(focus, SPORT_MATRIX[store.userConfig.sport] || SPORT_MATRIX.None);
+            const built = buildStrengthSessionRoutine(focus, getSportData());
             const compounds = (built.items || []).filter(i => i.isStrengthCompound).length;
             const hasCore = (built.items || []).some(i => i.isCoreBlock);
             descEl.innerText = `Strength Session ${sess} — ${compounds} compounds, 2 isolations`
@@ -150,7 +151,7 @@ export function getWorkoutSessionAdvice(focus) {
     let footerNote = '';
     let showCoachTip = true;
 
-    if (isGuidanceOff('workout') && focus !== 'Rest' && focus !== 'Game' && focus !== 'Practice' && focus !== 'Match') {
+    if (isGuidanceOff('workout') && focus !== 'Rest' && !isGameEvent(focus) && !isPracticeEvent(focus)) {
         footerNote = 'No recommended session. Use Log manual workout in the Log tab, or switch Workout back on in Tracker.';
         showCoachTip = false;
     } else if (focus === 'Rest') {
@@ -159,16 +160,16 @@ export function getWorkoutSessionAdvice(focus) {
     } else if (focus === 'Rest (Cardio Only)') {
         footerNote = 'High-RPE practice recovery. Steady cardio permitted — no lifting.';
         showCoachTip = false;
-    } else if (focus === 'Game' || focus === 'Match') {
-        footerNote = 'No lifting. Log Match below — Rest tomorrow only if Match RPE > 5.';
+    } else if (isGameEvent(focus)) {
+        footerNote = `No lifting. Log ${prettyFocusName(focus)} below — Rest tomorrow only if RPE > 5.`;
         showCoachTip = false;
     } else if (isLactateEvent(focus)) {
         footerNote = 'High-intensity anaerobic work. Not paired with Practice.';
     } else if (isSteadyCardio(focus) || focus === 'Cardio') {
         footerNote = 'Zone 2 aerobic work. Can share a day with Practice.';
-    } else if (focus === 'Practice') {
+    } else if (isPracticeEvent(focus)) {
         const alsoLift = (window.todayRouteEvents || []).some(isLiftingEvent);
-        footerNote = alsoLift ? 'Lifting is also scheduled today.' : 'Use Log practice below when finished to open the brain dump.';
+        footerNote = alsoLift ? 'Lifting is also scheduled today.' : `Use Log on the ${prettyFocusName(focus)} card when finished to open the brain dump.`;
         showCoachTip = false;
     } else {
         footerNote = pData.notes;
@@ -197,8 +198,8 @@ function buildSessionExerciseRowsHtml(exercises) {
 /** Map a planned/logged event to a stable credit key for plan↔log matching. */
 function planEventCreditKey(eventName) {
     if (!eventName || typeof eventName !== 'string') return null;
-    if (isPracticeEvent(eventName) || /^practice$/i.test(eventName)) return 'Practice';
-    if (isGameEvent(eventName) || /^(match|game)$/i.test(eventName)) return 'Match';
+    if (isPracticeEvent(eventName)) return 'Practice';
+    if (isGameEvent(eventName)) return 'Match';
     if (isRestEvent(eventName)) return null;
     const normalized = normalizeLoggedSessionKind(eventName);
     if (normalized) return normalized;
@@ -275,8 +276,7 @@ export function renderWorkoutPreview(focus) {
     if (primary === 'Full Body / Strength' || isStrengthFocus(primary)) {
         try {
             const prefs = getGymPlanPrefs();
-            const isElite = store.userConfig.sport !== 'None';
-            const sportData = (isElite && SPORT_MATRIX[store.userConfig.sport]) ? SPORT_MATRIX[store.userConfig.sport] : SPORT_MATRIX['None'];
+            const sportData = getSportData();
             const built = buildStrengthSessionRoutine(primary, sportData, prefs.setBudget);
             window._strengthPreviewSession = built.session;
         } catch (_) { /* preview session letter is best-effort */ }
@@ -590,10 +590,8 @@ export function generateDailyExerciseLog() {
         const first = rows[0];
         const isSport = first.exercise === 'Practice' || first.exercise === 'Match';
         const isCardio = rows.some(r => Number(r.distance_km) > 0 || (Number(r.time_minutes) > 0 && !(Number(r.weight_kg) > 0) && !(Number(r.reps) > 0)));
-        const isStretch = rows.every(r =>
-            Number(r.time_minutes) > 0 && !(Number(r.weight_kg) > 0) && !(Number(r.reps) > 0) && !(Number(r.distance_km) > 0)
-            && /stretch|mobility|yoga/i.test(r.exercise || '')
-        );
+        const isStretch = rows.every(r => /stretch|mobility|yoga/i.test(r.exercise || ''));
+        const isCore = rows.every(r => /core(\s*circuit)?/i.test(r.exercise || ''));
 
         if (isSport) {
             return `RPE ${first.rpe != null ? first.rpe : '—'}`;
@@ -601,7 +599,10 @@ export function generateDailyExerciseLog() {
         if (isStretch) {
             const durations = rows.map(r => Number(r.time_minutes) || 0).filter(n => n > 0);
             const avg = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
-            return avg > 0 ? `${rows.length}×${avg} min` : `${rows.length} sets`;
+            return avg > 0 ? `${rows.length}×${avg} min` : `${rows.length} holds`;
+        }
+        if (isCore) {
+            return rows.length === 1 ? '1 circuit' : `${rows.length} circuits`;
         }
         if (isCardio) {
             const dist = rows.map(r => Number(r.distance_km) || 0).find(n => n > 0) || 0;
@@ -923,7 +924,7 @@ export function getDayDomainTargets(focus) {
     if (typeof f === 'string' && f.includes('Power')) return { str: 10, pow: 20, spd: 15, crd: 0, end: 5 };
     if (typeof f === 'string' && f.includes('Cardio')) return { str: 0, pow: 0, spd: 10, crd: 45, end: 20 };
     if (f === 'Auxiliary' || isAuxEvent(f)) return { str: 5, pow: 0, spd: 0, crd: 0, end: 20 };
-    if (f === 'Practice' || f === 'Game' || f === 'Match') return { str: 20, pow: 10, spd: 5, crd: 10, end: 15 };
+    if (isPracticeEvent(f) || isGameEvent(f)) return { str: 20, pow: 10, spd: 5, crd: 10, end: 15 };
     return { str: 20, pow: 10, spd: 5, crd: 10, end: 15 };
 }
 
@@ -986,10 +987,9 @@ export function setDailyFitnessTargets(focus) {
 
 /** Exercise rows for a focus (no chrome). Used by Today preview and Plan popup. */
 export function getWorkoutExerciseRows(focus) {
-    let isElite = store.userConfig.sport !== 'None';
-    let sportData = (isElite && SPORT_MATRIX[store.userConfig.sport]) ? SPORT_MATRIX[store.userConfig.sport] : SPORT_MATRIX['None'];
+    let sportData = getSportData();
 
-    if (isGuidanceOff('workout') && focus !== 'Rest' && focus !== 'Game' && focus !== 'Practice' && focus !== 'Match') {
+    if (isGuidanceOff('workout') && focus !== 'Rest' && !isGameEvent(focus) && !isPracticeEvent(focus)) {
         return { sessionType: 'Manual', sessionName: 'Workout guidance off', exercises: [{ name: 'No recommended session' }] };
     }
     if (focus === 'Rest') {
@@ -1012,8 +1012,9 @@ export function getWorkoutExerciseRows(focus) {
             ]
         };
     }
-    if (focus === 'Game' || focus === 'Match') {
-        return { sessionType: 'Match', sessionName: 'Match Day', exercises: [{ name: 'Log match when finished' }] };
+    if (isGameEvent(focus)) {
+        const label = prettyFocusName(focus);
+        return { sessionType: label, sessionName: `${label} Day`, exercises: [{ name: `Log ${label.toLowerCase()} when finished` }] };
     }
     if (isLactateEvent(focus)) {
         const todayIso = dateToISO(new Date());
@@ -1041,8 +1042,9 @@ export function getWorkoutExerciseRows(focus) {
             ]
         };
     }
-    if (focus === 'Practice') {
-        return { sessionType: 'Practice', sessionName: 'Practice Day', exercises: [{ name: 'Log practice when finished' }] };
+    if (isPracticeEvent(focus)) {
+        const label = prettyFocusName(focus);
+        return { sessionType: label, sessionName: `${label} Day`, exercises: [{ name: `Log ${label.toLowerCase()} when finished` }] };
     }
     if (usesHypertrophyProgramming(focus)) {
         const built = getHypertrophySessionRoutine(focus);
@@ -1076,15 +1078,16 @@ export function getWorkoutExerciseRows(focus) {
             exercises: withPhaseReps(exercises)
         };
     }
-    if (focus === 'Full Body / Power') {
+    if (isPowerEvent(focus) || focus === 'Full Body / Power') {
+        const built = buildPowerSessionRoutine({ allowUnclassified: true });
         return {
             sessionType: 'Workout',
             sessionName: 'Power',
-            exercises: withPhaseReps([
-                sportData.unilateral ? 'Single Leg Broad Jumps' : 'Squat Jumps',
-                'Med Ball Throws',
-                sportData.cardio === 'anaerobic' ? 'Side-to-Side Shuffle' : 'Clap Pushups'
-            ].map(n => ({ name: n, sets: PERIODIZATION[getSeasonPhase()]?.sets || 3 })))
+            exercises: withPhaseReps((built.items || []).map((i) => ({
+                name: i.name,
+                sets: i.sets || 3,
+                reps: i.reps
+            })))
         };
     }
     if ((focus === 'Auxiliary' || isAuxEvent(focus)) && !isHypertrophyPhase() && !getGymPlanPrefs().strengthPhase) {
@@ -1466,8 +1469,8 @@ export function showBreakdown(type) {
 
 export const PERIODIZATION = {
     OffSeason_Adaptation: { reps: 50, sets: 1, rest_sec: 60, notes: "ADAPTATION: Target 50 total reps (Min 35 per set). Very light weight — a load you could grind for 50 clean reps. Strengthen tendons." },
-    OffSeason_Hypertrophy: { reps: 10, sets: 3, rest_sec: 90, notes: "HYPERTROPHY: 8-12 reps · ~90s rest (stick to the timer so session length stays accurate). Stop ~1–2 RIR on work sets." },
-    OffSeason_Strength: { reps: 5, sets: 4, rest_sec: 240, notes: "STRENGTH: Stop 2 reps before failure. Heavy, slow eccentric and concentric. NO STRAPS." },
+    OffSeason_Hypertrophy: { reps: 10, sets: 3, rest_sec: 90, notes: "HYPERTROPHY: 8-12 reps · ~90s rest (stick to the timer so session length stays accurate). Stop at 0–1 RIR on work sets." },
+    OffSeason_Strength: { reps: 5, sets: 4, rest_sec: 240, notes: "STRENGTH: Aim for about 2 RIR (stop 2 reps before failure). Heavy, slow eccentric and concentric. NO STRAPS." },
     OffSeason_Hybrid: { reps: 5, sets: 4, rest_sec: 240, notes: "HYBRID: Strength days use strength loading; hypertrophy days use hypertrophy templates." },
     PreSeason_Power: { reps: 3, sets: 3, rest_sec: 240, notes: "POWER: Maximum intent. Explosive concentric. Must be completely fresh." }
 };

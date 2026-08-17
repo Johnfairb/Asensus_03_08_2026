@@ -1,22 +1,57 @@
 /**
  * Per-exercise load increments (PDF 25/07/2026) — mins, steps, warmup rounding.
+ *
+ * Pound stacks (cables / machines / custom) keep min+step in lbs. Each pin is
+ * converted with 2.2 lb per kg, then that kg weight is rounded (1 d.p.).
+ * Rounding the increment in kg drifted at heavier loads.
  */
 import { store } from '../state/store.js';
 import { getExerciseMeta, resolveCatalogName } from './exercise-catalog.js';
 
-/** Converted lb stacks → kg (nearest 1dp for cables; nearest whole for M/C). */
-export const DEFAULT_PROFILES = {
-    B: { code: 'B', label: 'Barbell', min: 10, step: 2.5 },
-    D: { code: 'D', label: 'Dumbbell', min: 1, step: null },
-    Fca: { code: 'Fca', label: 'Functional cable', min: 2.5, step: 0.9 },
-    Cca: { code: 'Cca', label: 'Crossover cable', min: 2.3, step: 2.3 },
-    M: { code: 'M', label: 'Machine', min: 5, step: 7 },
-    C: { code: 'C', label: 'Custom', min: 5, step: 5 },
-    H: { code: 'H', label: 'Halo', min: 5, step: 5, max: 25 },
-    P: { code: 'P', label: 'Plate-loaded', min: 0, step: 1.25 },
-    free: { code: 'free', label: 'Free weight', min: 0, step: 0 },
-    none: { code: 'none', label: 'No weight', min: 0, step: 0 }
+export const LB_PER_KG = 2.2;
+
+/** Legacy kg defaults (increment was converted). Used to ignore stale overrides. */
+const OLD_KG_DEFAULTS = {
+    Fca: { min: 2.5, step: 0.9 },
+    Cca: { min: 2.3, step: 2.3 },
+    M: { min: 5, step: 7 },
+    C: { min: 5, step: 5 }
 };
+
+export const DEFAULT_PROFILES = {
+    B: { code: 'B', label: 'Barbell', unit: 'kg', min: 10, step: 2.5 },
+    D: { code: 'D', label: 'Dumbbell', unit: 'kg', min: 1, step: null },
+    Fca: { code: 'Fca', label: 'Functional cable', unit: 'lb', min: 5, step: 2 },
+    Cca: { code: 'Cca', label: 'Crossover cable', unit: 'lb', min: 5, step: 5 },
+    M: { code: 'M', label: 'Machine', unit: 'lb', min: 10, step: 15 },
+    C: { code: 'C', label: 'Custom', unit: 'lb', min: 10, step: 10 },
+    H: { code: 'H', label: 'Halo', unit: 'kg', min: 5, step: 5, max: 25 },
+    P: { code: 'P', label: 'Plate-loaded', unit: 'kg', min: 0, step: 1.25 },
+    free: { code: 'free', label: 'Free weight', unit: 'kg', min: 0, step: 0 },
+    none: { code: 'none', label: 'No weight', unit: 'kg', min: 0, step: 0 }
+};
+
+export function isLbStackProfile(profileOrCode) {
+    if (profileOrCode && typeof profileOrCode === 'object') {
+        if (profileOrCode.unit) return profileOrCode.unit === 'lb';
+        return isLbStackProfile(profileOrCode.code);
+    }
+    const code = profileOrCode;
+    return code === 'Fca' || code === 'Cca' || code === 'M' || code === 'C';
+}
+
+export function kgFromLbs(lbs) {
+    return (Number(lbs) || 0) / LB_PER_KG;
+}
+
+export function lbsFromKg(kg) {
+    return (Number(kg) || 0) * LB_PER_KG;
+}
+
+/** Round the converted kg weight (not the lb increment). */
+export function roundConvertedKg(kg) {
+    return Math.round((Number(kg) || 0) * 10) / 10;
+}
 
 const LEGACY_TO_CODE = {
     barbell: 'B',
@@ -130,6 +165,14 @@ export function editableIncrementCodes(exName) {
     );
 }
 
+function looksLikeOldKgDefault(code, min, step) {
+    const old = OLD_KG_DEFAULTS[code];
+    if (!old) return false;
+    const minHit = Number.isFinite(min) && Math.abs(min - old.min) < 0.05;
+    const stepHit = Number.isFinite(step) && Math.abs(step - old.step) < 0.05;
+    return minHit || stepHit;
+}
+
 function readUserOverride(exName, code) {
     const resolved = resolveCatalogName(exName) || exName;
     const map = store.userConfig?.exerciseIncrements;
@@ -138,9 +181,19 @@ function readUserOverride(exName, code) {
     if (!row || typeof row !== 'object') return null;
     const o = row[code];
     if (!o || typeof o !== 'object') return null;
-    const min = parseFloat(o.min);
-    const step = parseFloat(o.step);
+    let min = parseFloat(o.min);
+    let step = parseFloat(o.step);
     if (!Number.isFinite(min) && !Number.isFinite(step)) return null;
+
+    const nativeLb = isLbStackProfile(code);
+    const savedUnit = o.unit === 'lb' || o.unit === 'kg' ? o.unit : null;
+    if (nativeLb && savedUnit !== 'lb') {
+        // Pre-fix editor stored kg. Drop old converted defaults; convert custom kg → lbs.
+        if (looksLikeOldKgDefault(code, min, step)) return null;
+        if (Number.isFinite(min)) min = Math.round(min * LB_PER_KG);
+        if (Number.isFinite(step) && step > 0) step = Math.round(step * LB_PER_KG);
+    }
+
     return {
         min: Number.isFinite(min) ? min : undefined,
         step: Number.isFinite(step) && step > 0 ? step : undefined
@@ -239,12 +292,20 @@ export function roundUpLoad(val, equipmentOrProfile = 'barbell', choiceOrOpts = 
         return loose;
     }
 
-    const step = profile.step;
-    let rounded = Math.ceil(v / step - 1e-9) * step;
-    // Avoid float noise (e.g. 0.9 steps)
-    rounded = Math.round(rounded * 1000) / 1000;
-    if (profile.min != null && rounded > 0 && rounded < profile.min) {
-        rounded = profile.min;
+    let rounded;
+    if (isLbStackProfile(profile)) {
+        const minLb = Number(profile.min) || 0;
+        const stepLb = Number(profile.step);
+        const lbs = lbsFromKg(v);
+        const snappedLb = snapLbsUp(lbs, minLb, stepLb);
+        rounded = roundConvertedKg(kgFromLbs(snappedLb));
+    } else {
+        const step = profile.step;
+        rounded = Math.ceil(v / step - 1e-9) * step;
+        rounded = Math.round(rounded * 1000) / 1000;
+        if (profile.min != null && rounded > 0 && rounded < profile.min) {
+            rounded = profile.min;
+        }
     }
     if (profile.max != null && Number.isFinite(Number(profile.max)) && rounded > Number(profile.max)) {
         rounded = Number(profile.max);
@@ -252,12 +313,46 @@ export function roundUpLoad(val, equipmentOrProfile = 'barbell', choiceOrOpts = 
     return rounded;
 }
 
-/** Barbell warmups only: 1st → ceil multiple of 10; 2nd → ceil multiple of 5. */
+function snapLbsUp(lbs, min, step) {
+    const v = Number(lbs) || 0;
+    const m = Number(min) || 0;
+    const s = Number(step) || 0;
+    if (!(s > 0)) return v;
+    if (v <= m + 1e-9) return m;
+    const n = Math.ceil((v - m) / s - 1e-9);
+    return m + n * s;
+}
+
+function snapLbsNearest(lbs, min, step) {
+    const v = Number(lbs) || 0;
+    const m = Number(min) || 0;
+    const s = Number(step) || 0;
+    if (!(s > 0)) return v;
+    if (v <= m) return m;
+    const n = Math.round((v - m) / s);
+    return m + Math.max(0, n) * s;
+}
+
+function addLbIncrements(kg, profile, n = 1) {
+    const minLb = Number(profile.min) || 0;
+    const stepLb = Number(profile.step);
+    if (!(stepLb > 0)) return roundConvertedKg(kg);
+    const nearest = snapLbsNearest(lbsFromKg(kg), minLb, stepLb);
+    const nextLb = Math.max(minLb, nearest + n * stepLb);
+    let out = roundConvertedKg(kgFromLbs(nextLb));
+    if (profile.max != null && Number.isFinite(Number(profile.max)) && out > Number(profile.max)) {
+        out = Number(profile.max);
+    }
+    return out;
+}
+
+/** Barbell warmups only: 1st → ceil multiple of 10, except (10, 15] → 15; 2nd → ceil multiple of 5. */
 export function roundBarbellWarmup(weight, which = 1) {
     const v = Number(weight) || 0;
     if (v <= 0) return 0;
-    const mult = which === 2 ? 5 : 10;
-    return Math.ceil(v / mult - 1e-9) * mult;
+    if (which === 2) return Math.ceil(v / 5 - 1e-9) * 5;
+    if (v > 10 && v <= 15) return 15;
+    return Math.ceil(v / 10 - 1e-9) * 10;
 }
 
 export function applyWarmupRounding(weight, profile, warmupIndex = 1) {
@@ -296,6 +391,13 @@ export function increaseLoadOneStep(weight, exName, choice = null) {
     if (w <= 0) return w;
     if (skipsWeightProgression(exName, choice)) return w;
     const profile = resolveLoadProfile(exName, choice, { weight: w });
+    if (isLbStackProfile(profile)) {
+        const next = addLbIncrements(w, profile, 1);
+        if (profile.max != null && Number.isFinite(Number(profile.max)) && next >= Number(profile.max) && w >= Number(profile.max)) {
+            return w;
+        }
+        return next;
+    }
     const step = Number(profile?.step);
     if (!Number.isFinite(step) || step <= 0) return w;
     return roundUpLoad(w + step, profile);

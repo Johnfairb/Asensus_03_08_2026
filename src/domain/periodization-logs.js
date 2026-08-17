@@ -3,7 +3,7 @@
  */
 import { store } from '../state/store.js';
 import { getSeasonPhase } from './fitness-hud.js';
-import { getExerciseMeta } from './exercise-catalog.js';
+import { getExerciseMeta, resolveCatalogName } from './exercise-catalog.js';
 import {
     BODYWEIGHT_COMPOUNDS,
     equipmentForExercise,
@@ -88,6 +88,48 @@ export function isBodyweightLoadExercise(exName) {
     return !!(meta && meta.bodyweight);
 }
 
+function logDayKey(row) {
+    const raw = row && row.created_at;
+    if (!raw) return '';
+    return String(raw).includes('T') ? String(raw).split('T')[0] : String(raw).slice(0, 10);
+}
+
+function canonExName(name) {
+    return String(resolveCatalogName(name) || name || '').trim().toLowerCase();
+}
+
+export function exerciseLogNamesMatch(a, b) {
+    const ca = canonExName(a);
+    const cb = canonExName(b);
+    return !!ca && ca === cb;
+}
+
+/**
+ * Last completed working-set load from the most recent session for this exercise.
+ * Prefers the highest set number on that day (the set the user finished on).
+ */
+export function lastCompletedWorkingWeight(hist, exName) {
+    const rows = (hist || []).filter((l) => {
+        if (!exerciseLogNamesMatch(l.exercise, exName)) return false;
+        if (l.is_warmup) return false;
+        const w = Number(l.weight_kg);
+        const reps = Number(l.reps);
+        return (Number.isFinite(w) && w > 0) || (Number.isFinite(reps) && reps > 0);
+    });
+    if (!rows.length) return null;
+    const days = [...new Set(rows.map(logDayKey).filter(Boolean))].sort().reverse();
+    const latestDay = days[0];
+    const dayRows = latestDay ? rows.filter((l) => logDayKey(l) === latestDay) : rows;
+    dayRows.sort((a, b) => {
+        const setDiff = (Number(a.sets) || 0) - (Number(b.sets) || 0);
+        if (setDiff) return setDiff;
+        return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+    });
+    const last = dayRows[dayRows.length - 1];
+    const w = Number(last?.weight_kg);
+    return Number.isFinite(w) ? w : null;
+}
+
 /**
  * Strength work load = 15% above hypertrophy equivalent.
  * For bodyweight lifts, bodyweight is included in the total before the +15%, then subtracted back.
@@ -102,9 +144,8 @@ export function strengthLoadFromHypertrophy(hypKg, exName) {
 }
 
 export function latestPhaseWeight(hist, exName, phaseBucket) {
-    const name = String(exName || '').toLowerCase();
     const rows = (hist || []).filter((l) => {
-        if (String(l.exercise || '').toLowerCase() !== name) return false;
+        if (!exerciseLogNamesMatch(l.exercise, exName)) return false;
         if (Number(l.reps) <= 0 && !(Number(l.weight_kg) >= 0)) return false;
         const tag = resolveLogPeriodization(l);
         if (phaseBucket === 'hypertrophy') {
@@ -115,8 +156,5 @@ export function latestPhaseWeight(hist, exName, phaseBucket) {
         }
         return true;
     });
-    if (!rows.length) return null;
-    const sorted = [...rows].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-    const w = Number(sorted[0].weight_kg);
-    return Number.isFinite(w) ? w : null;
+    return lastCompletedWorkingWeight(rows, exName);
 }

@@ -22,6 +22,7 @@ let _unlockInstalled = false;
 let _htmlUnlocked = false;
 let _restWavUrl = null;
 let _stretchWavUrl = null;
+let _prepareWavUrl = null;
 let _silentWavUrl = null;
 
 function pcmWavUrl(samples, sampleRate) {
@@ -87,6 +88,12 @@ function stretchBeepUrl() {
     if (_stretchWavUrl) return _stretchWavUrl;
     _stretchWavUrl = synthTones([{ freq: 880, offset: 0, dur: 0.14 }], { peak: 0.28 });
     return _stretchWavUrl;
+}
+
+function prepareBeepUrl() {
+    if (_prepareWavUrl) return _prepareWavUrl;
+    _prepareWavUrl = synthTones([{ freq: 1244.5, offset: 0, dur: 0.1 }], { peak: 0.32 });
+    return _prepareWavUrl;
 }
 
 function silentUrl() {
@@ -303,6 +310,16 @@ export function playStretchBeepSound() {
         { type: 'sine', peak: 0.28, fallbackUrl: stretchBeepUrl }
     ).catch(() => {
         playHtmlWav(stretchBeepUrl());
+    });
+}
+
+/** Very short cue at 30s remaining — get ready for the next set. */
+export function playPrepareBeepSound() {
+    playSequence(
+        [{ freq: 1244.5, offset: 0, dur: 0.1 }],
+        { type: 'sine', peak: 0.32, fallbackUrl: prepareBeepUrl }
+    ).catch(() => {
+        playHtmlWav(prepareBeepUrl());
     });
 }
 

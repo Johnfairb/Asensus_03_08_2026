@@ -5,12 +5,14 @@ import {
     formatMuscleList,
     getExerciseMeta,
     getExerciseSessionLabel,
-    resolveCatalogName
+    resolveCatalogName,
+    EXERCISE_CATALOG
 } from '../domain/exercise-catalog.js';
 import {
     canEditIncrements,
     DEFAULT_PROFILES,
     editableIncrementCodes,
+    isLbStackProfile,
     optionLabel
 } from '../domain/load-increments.js';
 import { saveExerciseIncrementOverrides } from './equipment-ui.js';
@@ -623,21 +625,24 @@ export function openExerciseDetail(id) {
             const panels = codes.map((code) => {
                 const def = DEFAULT_PROFILES[code] || { min: 0, step: 2.5 };
                 const row = saved[code] || {};
-                const minVal = row.min != null ? row.min : def.min;
-                const stepVal = row.step != null ? row.step : def.step;
+                const lb = isLbStackProfile(code);
+                const unit = lb ? 'lbs' : 'kg';
+                const useSaved = lb ? row.unit === 'lb' : true;
+                const minVal = useSaved && row.min != null ? row.min : def.min;
+                const stepVal = useSaved && row.step != null ? row.step : def.step;
                 return `
                     <div style="padding:10px; border:1px solid var(--border-subtle); border-radius:10px; margin-bottom:8px;">
                         <div class="hud-label" style="margin:0 0 8px 0;">${optionLabel(code)}</div>
-                        <label style="font-size:10px;">Minimum (kg)</label>
-                        <input type="number" step="0.1" class="input-field" id="inc-min-${code}" value="${minVal}" style="margin-bottom:8px;">
-                        <label style="font-size:10px;">Increment (kg)</label>
-                        <input type="number" step="0.1" class="input-field" id="inc-step-${code}" value="${stepVal}">
+                        <label style="font-size:10px;">Minimum (${unit})</label>
+                        <input type="number" step="${lb ? '1' : '0.1'}" class="input-field" id="inc-min-${code}" value="${minVal}" style="margin-bottom:8px;">
+                        <label style="font-size:10px;">Increment (${unit})</label>
+                        <input type="number" step="${lb ? '1' : '0.1'}" class="input-field" id="inc-step-${code}" value="${stepVal}">
                     </div>`;
             }).join('');
             bodyParts.push(`
                 <div class="detail-metric-row">
                     <div class="hud-label" style="margin:0 0 8px 0;">Edit increments</div>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Override min and step for each equipment option. Barbell and dumbbell use Manual / bar defaults.</div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Pound stacks keep min and step in lbs. Each pin is converted to kg at 2.2 lb/kg, then that kg weight is rounded. Barbell and dumbbell use Manual / bar defaults.</div>
                     ${panels}
                     <button type="button" class="btn-primary is-secondary" style="margin:8px 0 0; width:100%;" onclick="saveExerciseIncrementsFromDetail('${String(displayName).replace(/'/g, "\\'")}')">Save increments</button>
                 </div>`);
@@ -716,7 +721,8 @@ export function saveExerciseIncrementsFromDetail(exName) {
         const step = parseFloat(stepEl?.value);
         overrides[code] = {
             min: Number.isFinite(min) ? min : undefined,
-            step: Number.isFinite(step) && step > 0 ? step : undefined
+            step: Number.isFinite(step) && step > 0 ? step : undefined,
+            unit: isLbStackProfile(code) ? 'lb' : 'kg'
         };
     });
     saveExerciseIncrementOverrides(exName, overrides);
@@ -916,6 +922,17 @@ export async function loadExercises() {
         }
     });
     const unique = Object.values(byCanon);
+    Object.entries(EXERCISE_CATALOG || {}).forEach(([name, meta]) => {
+        const key = norm(name);
+        if (byCanon[key]) return;
+        unique.push({
+            id: `catalog:${name}`,
+            name,
+            domain: meta.domain,
+            muscle_group: meta.muscle_group
+        });
+        byCanon[key] = unique[unique.length - 1];
+    });
     store.globalExerciseDB = unique;
     if (typeof updateExerciseDropdowns === "function") updateExerciseDropdowns();
 
