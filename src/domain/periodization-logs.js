@@ -71,7 +71,11 @@ export function resolveLogPeriodization(log) {
     return null;
 }
 
-/** Chart filter: hypertrophy phase → hypertrophy logs only; strength → strength only. Hide untagged. */
+/**
+ * Chart filter by current periodization.
+ * Hypertrophy includes untagged (legacy) logs. Strength prefers tagged strength
+ * rows, but falls back to untagged so graphs are not blank before tagging exists.
+ */
 export function filterLogsForProgressChart(logs) {
     const phase = getSeasonPhase();
     let want = null;
@@ -79,7 +83,15 @@ export function filterLogsForProgressChart(logs) {
     else if (phase === 'OffSeason_Strength') want = 'strength';
     else return logs || [];
 
-    return (logs || []).filter((l) => resolveLogPeriodization(l) === want);
+    const list = logs || [];
+    const taggedWanted = list.filter((l) => resolveLogPeriodization(l) === want);
+    return list.filter((l) => {
+        const tag = resolveLogPeriodization(l);
+        if (tag === want) return true;
+        if (tag) return false;
+        if (want === 'hypertrophy') return true;
+        return taggedWanted.length === 0;
+    });
 }
 
 export function isBodyweightLoadExercise(exName) {

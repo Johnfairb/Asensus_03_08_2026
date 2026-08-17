@@ -13,7 +13,7 @@ const HIT_TYPE_LABELS_RE = new RegExp(
     'i'
 );
 import { saveSettings } from '../domain/thermodynamics.js';
-import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, canSupersetPair, createSupersetFromIndices, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
+import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, canSupersetPair, createSupersetFromIndices, mergeLocalWorkoutHistory, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
 import { populateSportSelects } from '../domain/sports-matrix.js';
 import { applyPowerExerciseToItem } from '../domain/power-engine.js';
 import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase, sessionAppliesMuscleLockout } from '../domain/hypertrophy-engine.js';
@@ -30,7 +30,7 @@ import {
 import { switchCableEquipment } from './equipment-ui.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
-import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, lastCompletedWorkingWeight } from '../domain/periodization-logs.js';
+import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, exerciseLogNamesMatch, lastCompletedWorkingWeight } from '../domain/periodization-logs.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry, idbPutJournalMedia } from './journey.js';
@@ -765,11 +765,11 @@ export function openExerciseSetsModal(exIdx) {
     const chartName = item.isSuperset
         ? (item.sides?.[0]?.exercise?.name || item.exercise.name)
         : item.exercise.name;
+    document.getElementById('exercise-sets-modal').classList.remove('hidden');
     drawModalExerciseChart(
         chartName,
         item.isWarmupGroup || item.isSuperset || isStaticStretchingLogItem(item) || isSteadyCardioLogItem(item) || isLactateHitLogItem(item)
     );
-    document.getElementById('exercise-sets-modal').classList.remove('hidden');
 }
 
 /** True if no warmup set has been completed yet. */
@@ -1343,6 +1343,50 @@ setWorkoutTimerTickHandler(() => {
     updateCardioPaceReadout(exIdx, 0);
 });
 
+function resizeModalExerciseChart() {
+    try { store.modalExerciseChartInstance?.resize(); } catch (e) { /* ignore */ }
+}
+
+function emptyChartAxisLabels(range) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const spanMs = range === 'year'
+        ? 365 * 24 * 60 * 60 * 1000
+        : range === 'all'
+            ? 90 * 24 * 60 * 60 * 1000
+            : 30 * 24 * 60 * 60 * 1000;
+    const start = now.getTime() - spanMs;
+    const ticks = 4;
+    const labels = [];
+    for (let i = 0; i < ticks; i++) {
+        const t = start + (spanMs * i) / (ticks - 1);
+        labels.push(new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+    }
+    return labels;
+}
+
+function groupExerciseLogsByDay(exLogs, isCardio, cutoffMs = 0) {
+    const grouped = exLogs.reduce((acc, log) => {
+        const created = log.created_at;
+        if (!created) return acc;
+        const ms = new Date(created).setHours(0, 0, 0, 0);
+        if (!Number.isFinite(ms)) return acc;
+        if (cutoffMs && ms < cutoffMs) return acc;
+        const val = Number(isCardio ? log.distance_km : log.weight_kg);
+        if (!Number.isFinite(val)) return acc;
+        if (!acc[ms] || val > acc[ms]) acc[ms] = val;
+        return acc;
+    }, {});
+    return Object.keys(grouped).map((ts) => {
+        const dayMs = parseInt(ts, 10);
+        return {
+            ms: dayMs,
+            label: new Date(dayMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+            y: grouped[ts]
+        };
+    }).sort((a, b) => a.ms - b.ms);
+}
+
 export async function drawModalExerciseChart(exerciseName, hideChart = false) {
     const wrap = document.getElementById('sets-modal-progress-wrap');
     const canvas = document.getElementById('sets-modal-exercise-chart');
@@ -1356,11 +1400,23 @@ export async function drawModalExerciseChart(exerciseName, hideChart = false) {
         return;
     }
 
-    wrap.style.display = 'block';
+    const ChartLib = typeof window !== 'undefined' ? window.Chart : undefined;
+    if (typeof ChartLib !== 'function') {
+        console.warn('drawModalExerciseChart: Chart.js not loaded');
+        wrap.style.display = 'none';
+        return;
+    }
+
     try {
-        const { data: workoutData } = await store.supabaseClient.from('workout_logs').select('*').order('created_at', { ascending: true });
-        let actualData = [];
-        let isCardio = false;
+        let workoutData = [];
+        try {
+            const res = await store.supabaseClient.from('workout_logs').select('*').order('created_at', { ascending: true });
+            if (!res.error && Array.isArray(res.data)) workoutData = res.data;
+        } catch (e) {
+            console.warn('drawModalExerciseChart history', e);
+        }
+        workoutData = mergeLocalWorkoutHistory(workoutData);
+
         const rangeEl = document.getElementById('sets-modal-chart-range');
         const range = rangeEl?.value || 'all';
         const now = Date.now();
@@ -1370,76 +1426,63 @@ export async function drawModalExerciseChart(exerciseName, hideChart = false) {
                 ? now - (365 * 24 * 60 * 60 * 1000)
                 : 0;
 
-        if (workoutData) {
-            let exLogs = filterLogsForProgressChart(workoutData.filter(l => l.exercise === exerciseName));
-            if (exLogs.length > 0 && exLogs[0].type === 'cardio') isCardio = true;
+        const matchedLogs = workoutData.filter((l) =>
+            l && !l.is_warmup && exerciseLogNamesMatch(l.exercise, exerciseName)
+        );
+        const exLogs = filterLogsForProgressChart(matchedLogs);
+        const isCardio = exLogs.length > 0 && (
+            exLogs[0].type === 'cardio'
+            || (Number(exLogs[0].distance_km) > 0 && !(Number(exLogs[0].weight_kg) > 0))
+        );
 
-            const grouped = exLogs.reduce((acc, log) => {
-                const ms = new Date(log.created_at).setHours(0, 0, 0, 0);
-                if (cutoffMs && ms < cutoffMs) return acc;
-                const val = isCardio ? log.distance_km : log.weight_kg;
-                if (!acc[ms] || val > acc[ms]) acc[ms] = val;
-                return acc;
-            }, {});
+        let actualData = groupExerciseLogsByDay(exLogs, isCardio, cutoffMs);
 
-            actualData = Object.keys(grouped).map(ts => {
-                const ms = parseInt(ts, 10);
-                return {
-                    ms,
-                    label: new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-                    y: grouped[ts]
-                };
-            }).sort((a, b) => a.ms - b.ms);
-
-            // If user has less history than the selected window, chart is effectively all-time
-            if ((range === 'month' || range === 'year') && actualData.length === 0 && exLogs.length) {
-                const allGrouped = exLogs.reduce((acc, log) => {
-                    const ms = new Date(log.created_at).setHours(0, 0, 0, 0);
-                    const val = isCardio ? log.distance_km : log.weight_kg;
-                    if (!acc[ms] || val > acc[ms]) acc[ms] = val;
-                    return acc;
-                }, {});
-                actualData = Object.keys(allGrouped).map(ts => {
-                    const ms = parseInt(ts, 10);
-                    return {
-                        ms,
-                        label: new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-                        y: allGrouped[ts]
-                    };
-                }).sort((a, b) => a.ms - b.ms);
-            }
+        // If user has less history than the selected window, chart is effectively all-time
+        if ((range === 'month' || range === 'year') && actualData.length === 0 && exLogs.length) {
+            actualData = groupExerciseLogsByDay(exLogs, isCardio, 0);
         }
 
-        if (store.modalExerciseChartInstance) store.modalExerciseChartInstance.destroy();
-
-        if (actualData.length === 0) {
-            wrap.style.display = 'none';
-            return;
+        if (store.modalExerciseChartInstance) {
+            store.modalExerciseChartInstance.destroy();
+            store.modalExerciseChartInstance = null;
         }
+
+        wrap.style.display = 'block';
+        canvas.removeAttribute('width');
+        canvas.removeAttribute('height');
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+
+        const empty = actualData.length === 0;
+        const labels = empty ? emptyChartAxisLabels(range) : actualData.map(d => d.label);
+        const values = empty ? labels.map(() => null) : actualData.map(d => d.y);
 
         const ctx = canvas.getContext('2d');
-        let gradient = ctx.createLinearGradient(0, 0, 0, 140);
+        const gradient = ctx.createLinearGradient(0, 0, 0, 140);
         gradient.addColorStop(0, 'rgba(212, 175, 55, 0.4)');
         gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
-        store.modalExerciseChartInstance = new Chart(ctx, {
+        store.modalExerciseChartInstance = new ChartLib(ctx, {
             type: 'line',
             data: {
-                labels: actualData.map(d => d.label),
+                labels,
                 datasets: [{
                     label: isCardio ? 'Max Distance' : 'Max Weight',
-                    data: actualData.map(d => d.y),
+                    data: values,
                     borderColor: '#D4AF37',
                     backgroundColor: gradient,
                     borderWidth: 2,
                     pointBackgroundColor: '#fff',
-                    fill: true,
-                    tension: 0.3
+                    pointRadius: empty ? 0 : 3,
+                    fill: !empty,
+                    tension: 0.3,
+                    spanGaps: false
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: false,
                 plugins: { legend: { display: false } },
                 scales: {
                     x: {
@@ -1451,6 +1494,8 @@ export async function drawModalExerciseChart(exerciseName, hideChart = false) {
                         grid: { display: false }
                     },
                     y: {
+                        beginAtZero: true,
+                        suggestedMax: empty ? 10 : undefined,
                         ticks: {
                             color: '#888',
                             font: { family: 'Roboto Mono', size: 9 },
@@ -1462,6 +1507,8 @@ export async function drawModalExerciseChart(exerciseName, hideChart = false) {
                 }
             }
         });
+        requestAnimationFrame(resizeModalExerciseChart);
+        setTimeout(resizeModalExerciseChart, 450);
     } catch (e) {
         console.warn('drawModalExerciseChart', e);
         wrap.style.display = 'none';

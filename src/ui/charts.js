@@ -6,7 +6,7 @@ import {
     deleteBodyMetricsForLocalDay,
     upsertTodayWeight
 } from '../domain/body-metrics.js';
-import { filterLogsForProgressChart } from '../domain/periodization-logs.js';
+import { exerciseLogNamesMatch, filterLogsForProgressChart } from '../domain/periodization-logs.js';
 import { needsCycleDecisions } from '../domain/workout-cycle.js';
 
 async function refreshHistoryAfterChartDelete() {
@@ -391,7 +391,7 @@ export async function drawExerciseChart() {
     // Group by day — max weight (or distance) within the selected date range
     if (workoutData) {
         let exLogs = filterLogsForProgressChart(
-            workoutData.filter(l => l.exercise === selectedMetric && inProgressRange(new Date(l.created_at).getTime()))
+            workoutData.filter(l => exerciseLogNamesMatch(l.exercise, selectedMetric) && inProgressRange(new Date(l.created_at).getTime()))
         );
         if (exLogs.length > 0 && exLogs[0].type === 'cardio') isCardio = true;
 

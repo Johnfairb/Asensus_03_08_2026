@@ -54,7 +54,7 @@ function emptySetForExercise(ex) {
     return { weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, completed: false };
 }
 
-function mergeLocalWorkoutHistory(remote) {
+export function mergeLocalWorkoutHistory(remote) {
     const out = Array.isArray(remote) ? remote.slice() : [];
     const seen = new Set(out.map((r) => String(r.id)).filter((id) => id && id !== 'undefined'));
     const grouped = store.globalGroupedHistory || {};
