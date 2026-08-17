@@ -2150,6 +2150,7 @@ export function getDayMacroTargets(focus, dateObj = new Date()) {
 }
 
 function shortDayLabel(i, futureDate) {
+    if (i === 0) return 'Today';
     if (i === 1) return 'Tomorrow';
     return futureDate.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
 }
@@ -2162,7 +2163,7 @@ export function generateFutureTimeline() {
     const numDays = 7;
     const today = new Date();
 
-    for (let i = 1; i <= numDays; i++) {
+    for (let i = 0; i <= numDays; i++) {
         const futureDate = new Date();
         futureDate.setDate(today.getDate() + i);
         const dateStr = dateToISO(futureDate);
