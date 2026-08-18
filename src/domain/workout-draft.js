@@ -192,6 +192,15 @@ export function remainingRestSecondsFromSet(setObj) {
     return Math.max(0, Math.round(Number(setObj.lockTimeLeft) || 0));
 }
 
+function upcomingRestExerciseName(item, set) {
+    if (item?.isSuperset && set?.side && Array.isArray(item.sides)) {
+        const side = item.sides.find(s => s.key === set.side);
+        const n = String(side?.exercise?.name || side?.name || '').trim();
+        if (n) return set.side ? `${set.side} · ${n}` : n;
+    }
+    return String(item?.exercise?.name || item?.name || '').trim();
+}
+
 /** First locked rest that still has time left (live items or a parked draft). */
 export function findActiveRestOnItems(items) {
     const list = items || [];
@@ -203,8 +212,8 @@ export function findActiveRestOnItems(items) {
             if (!set?.locked) continue;
             const left = remainingRestSecondsFromSet(set);
             if (left <= 0) continue;
-            const name = String(item?.exercise?.name || item?.name || '').trim();
-            return { exIdx, setIdx, left, name, set };
+            const name = upcomingRestExerciseName(item, set);
+            return { exIdx, setIdx, left, name, set, item };
         }
     }
     return null;

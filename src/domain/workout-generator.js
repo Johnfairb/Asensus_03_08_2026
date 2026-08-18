@@ -725,7 +725,14 @@ export async function generateWorkoutTemplate() {
         container.classList.remove('hidden');
         return;
     }
-    let focus = document.getElementById('today-focus').value;
+    const forcedKind = String(window.manualSessionKind || '').trim();
+    let focus = (forcedKind && forcedKind !== 'Practice' && forcedKind !== 'Match')
+        ? forcedKind
+        : (document.getElementById('today-focus')?.value || '');
+    if (focus && document.getElementById('today-focus') && document.getElementById('today-focus').value !== focus
+        && (isSteadyCardio(focus) || isLactateEvent(focus) || isPowerEvent(focus))) {
+        document.getElementById('today-focus').value = focus;
+    }
     store.currentGhostItems = [];
 
     if (isGuidanceOff('workout') && !window._forceGpsTemplateLoad) {
@@ -746,7 +753,7 @@ export async function generateWorkoutTemplate() {
         content.innerHTML = `<div style='text-align:center;'><p style='font-size:13px; color:#0A84FF; font-weight:bold;'>${label} Day — lifting locked.</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Compete. Recover. Rest is auto-scheduled tomorrow if RPE is high.</p></div>`;
         container.classList.remove('hidden'); return;
     }
-    if (focus === 'Rest') {
+    if (focus === 'Rest' && !isSteadyCardio(forcedKind) && !isLactateEvent(forcedKind) && !isPowerEvent(forcedKind)) {
         content.innerHTML = "<div style='text-align:center;'><p style='font-size:13px; color:var(--gold-accent); font-weight:bold;'>Rest Day</p><p style='font-size:11px; color:var(--text-muted); margin-top:10px;'>Prioritize sleep and hydration. Optional Zone 2 steady is available from Plan if you feel good.</p></div>";
         container.classList.remove('hidden'); return;
     }

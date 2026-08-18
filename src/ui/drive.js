@@ -46,8 +46,10 @@ import {
     unlockAudio
 } from './audio.js';
 import {
+    catchUpStretchTimersOnItems,
     currentStretchStep,
     ensurePlannedStretchSetsShape,
+    findRunningStretchOnItems,
     getStretchTimerState,
     isPlannedTimedStretchItem,
     remainingStretchStepSeconds,
@@ -895,13 +897,14 @@ export function closeExerciseSetsModal() {
 
 /** Steady Zone-2 style cardio (not sprints / lactate intervals). */
 export function isSteadyCardioLogItem(item) {
-    if (!item?.exercise) return false;
+    if (!item) return false;
     // Lactate/HIT modalities (cycling, rower, elliptical, etc.) are cardio-domain
     // but must keep all interval sets — never collapse to a single steady entry.
     if (item.isLactateHit || (item.sets || []).some(s => s && s.isLactateHit)) return false;
     if (item.isSteadyCardio) return true;
+    if (!item.exercise) return false;
     const domain = (item.exercise.domain || '').toLowerCase();
-    const name = item.exercise.name || '';
+    const name = item.exercise.name || item.name || '';
     if (/steady\s*state\s*cardio/i.test(name)) return true;
     if (domain !== 'cardio') return false;
     if (/sprint|lactate|interval|30s\s*on|hit\s*class|attack\s*bike|skierg|rower|battle\s*rope|elliptical|cycling/i.test(name)) return false;
@@ -996,6 +999,22 @@ function findActiveRest() {
     return findActiveRestOnItems(liveOrDraftRestItems());
 }
 
+function upcomingSetDetail(set) {
+    if (!set) return '';
+    const weight = Number(set.weight) || 0;
+    const repsRaw = set.reps;
+    const repsNum = Number(repsRaw);
+    const hasReps = Number.isFinite(repsNum) && repsNum > 0;
+    if (weight > 0 && hasReps) return `${weight}kg × ${repsNum}`;
+    if (weight > 0 && repsRaw && !hasReps) return `${weight}kg · ${String(repsRaw)}`;
+    if (weight > 0) return `${weight}kg`;
+    if (hasReps) return `${repsNum} reps`;
+    if (repsRaw) return String(repsRaw);
+    const dur = Number(set.duration_sec) || 0;
+    if (dur > 0) return `${dur}s`;
+    return '';
+}
+
 function restBannerInnerHtml(rest, { withControls = false, compact = false } = {}) {
     if (!rest) return '';
     const name = String(rest.name || '').replace(/</g, '&lt;');
@@ -1008,6 +1027,55 @@ function restBannerInnerHtml(rest, { withControls = false, compact = false } = {
     return `<div class="session-rest-timer-label">Rest timer${sub}</div>
         <div data-rest-countdown="${rest.exIdx}-${rest.setIdx}" class="session-rest-timer-count">${rest.left}s</div>
         ${controls}`;
+}
+
+function planSessionTimerInnerHtml({ stretch, rest }) {
+    if (stretch) {
+        const heading = String(stretch.step ? stretchStepHeading(stretch.step) : 'Stretch').replace(/</g, '&lt;');
+        return `<div data-plan-timer-label class="session-rest-timer-label">${heading}</div>
+            <div data-plan-stretch-countdown class="plan-session-timer-count">${stretch.left}s</div>`;
+    }
+    if (rest) {
+        const name = String(rest.name || '').replace(/</g, '&lt;');
+        const heading = name ? `Rest · next: ${name}` : 'Rest · next up';
+        const detail = String(upcomingSetDetail(rest.set) || '').replace(/</g, '&lt;');
+        return `<div data-plan-timer-label class="session-rest-timer-label">${heading}</div>
+            <div data-rest-countdown="${rest.exIdx}-${rest.setIdx}" class="plan-session-timer-count">${rest.left}s</div>
+            ${detail ? `<div class="plan-session-timer-detail">${detail}</div>` : ''}`;
+    }
+    return '';
+}
+
+function fillPlanSessionTimerSlot(el, { stretch, rest }) {
+    if (!el) return;
+    const html = planSessionTimerInnerHtml({ stretch, rest });
+    if (!html) {
+        el.innerHTML = '';
+        el.classList.add('hidden');
+        return;
+    }
+    el.classList.remove('hidden');
+    if (stretch) {
+        const count = el.querySelector('[data-plan-stretch-countdown]');
+        const labelEl = el.querySelector('[data-plan-timer-label]');
+        if (count && labelEl && !el.querySelector('[data-rest-countdown]')) {
+            count.textContent = `${stretch.left}s`;
+            labelEl.textContent = stretch.step ? stretchStepHeading(stretch.step) : 'Stretch';
+            return;
+        }
+    } else if (rest) {
+        const count = el.querySelector(`[data-rest-countdown="${rest.exIdx}-${rest.setIdx}"]`);
+        const labelEl = el.querySelector('[data-plan-timer-label]');
+        if (count) {
+            count.textContent = `${rest.left}s`;
+            if (labelEl) {
+                const name = String(rest.name || '');
+                labelEl.textContent = name ? `Rest · next: ${name}` : 'Rest · next up';
+            }
+            return;
+        }
+    }
+    el.innerHTML = html;
 }
 
 function fillRestSlot(el, rest, opts) {
@@ -1028,11 +1096,26 @@ function fillRestSlot(el, rest, opts) {
 
 /** Keep Plan + workout-list rest banners in sync with the live/draft countdown. */
 export function syncGlobalRestBanners() {
-    const rest = findActiveRest();
+    const items = liveOrDraftRestItems();
+    const live = store.activeLog?.type === 'workout' && (store.activeLog.items || []).length;
+    if (!live && items.length) {
+        try {
+            const changed = catchUpStretchTimersOnItems(items, { refresh: false, persist: false });
+            if (changed) {
+                const draft = loadWorkoutDraft();
+                if (draft) {
+                    draft.items = items;
+                    writeWorkoutDraft(draft);
+                }
+            }
+        } catch (e) { /* ignore */ }
+    }
+    const rest = findActiveRestOnItems(items);
+    const stretch = findRunningStretchOnItems(items);
     fillRestSlot(document.getElementById('workout-header-rest-timer'), rest, { compact: true });
     fillRestSlot(document.getElementById('workout-log-rest-timer'), rest, { withControls: !!store.activeLog?.items?.length });
-    fillRestSlot(document.getElementById('plan-rest-timer-slot'), rest, { withControls: false });
-    ensureDraftRestDisplayTicker();
+    fillPlanSessionTimerSlot(document.getElementById('plan-rest-timer-slot'), { stretch, rest });
+    ensureDraftPlanTimerTicker();
 }
 
 let _draftRestTicker = null;
@@ -1080,33 +1163,56 @@ function expireDraftRests() {
     return true;
 }
 
-function ensureDraftRestDisplayTicker() {
+function ensureDraftPlanTimerTicker() {
     const live = store.activeLog?.type === 'workout' && (store.activeLog.items || []).length;
     if (live) {
         stopDraftRestDisplayTicker();
         return;
     }
-    const rest = findActiveRestOnItems(loadWorkoutDraft()?.items);
-    if (!rest) {
+    const draft = loadWorkoutDraft();
+    const items = draft?.items || [];
+    const rest = findActiveRestOnItems(items);
+    const stretch = findRunningStretchOnItems(items);
+    if (!rest && !stretch) {
         stopDraftRestDisplayTicker();
         return;
     }
     if (_draftRestTicker) return;
     _draftRestTicker = setInterval(() => {
+        const parked = loadWorkoutDraft();
+        const parkedItems = parked?.items || [];
+        let stretchChanged = false;
+        try {
+            stretchChanged = catchUpStretchTimersOnItems(parkedItems, { refresh: false, persist: false });
+        } catch (e) { /* ignore */ }
+        if (stretchChanged && parked) {
+            parked.items = parkedItems;
+            writeWorkoutDraft(parked);
+        }
         if (expireDraftRests()) {
             stopDraftRestDisplayTicker();
             syncGlobalRestBanners();
             try { getTodayFocus(); } catch (e) { /* refresh Plan card */ }
             return;
         }
-        const next = findActiveRestOnItems(loadWorkoutDraft()?.items);
-        if (!next) {
+        const nextRest = findActiveRestOnItems(loadWorkoutDraft()?.items);
+        const nextStretch = findRunningStretchOnItems(loadWorkoutDraft()?.items || parkedItems);
+        if (!nextRest && !nextStretch) {
             stopDraftRestDisplayTicker();
             syncGlobalRestBanners();
+            try { getTodayFocus(); } catch (e) { /* refresh Plan card */ }
             return;
         }
-        updateRestCountdownDom(next.exIdx, next.setIdx, next.left);
+        fillPlanSessionTimerSlot(document.getElementById('plan-rest-timer-slot'), {
+            stretch: nextStretch,
+            rest: nextRest
+        });
+        if (nextRest) updateRestCountdownDom(nextRest.exIdx, nextRest.setIdx, nextRest.left);
     }, 250);
+}
+
+function ensureDraftRestDisplayTicker() {
+    ensureDraftPlanTimerTicker();
 }
 
 function clearRestInterval(exIdx, setIdx) {
@@ -2972,17 +3078,31 @@ export function confirmManualGymRestPrefs() {
 window._beginManualWorkoutSession = beginManualWorkoutSession;
 
 export function resolveActiveSessionKind() {
+    const items = store.activeLog?.items || [];
+    const inferred = inferSessionKindFromItems(items);
     // Prefer the exact planned label (e.g. Hypertrophy / Push, Strength A) — do not
     // collapse to Full Body / Strength here; week-plan credits normalize separately.
     const fromManual = window.manualSessionKind || null;
-    if (fromManual) return fromManual;
+    if (fromManual) {
+        const manualNorm = normalizeLoggedSessionKind(fromManual);
+        if (inferred && inferred !== 'Full Body / Strength'
+            && (manualNorm === 'Full Body / Strength' || fromManual === 'Gym' || fromManual === 'Gym Workout')) {
+            return inferred;
+        }
+        return fromManual;
+    }
     const focus = document.getElementById('today-focus')?.value || '';
     const fromFocus = (focus && focus !== 'Rest' && !isPracticeEvent(focus) && !isGameEvent(focus))
         ? focus
         : null;
-    if (fromFocus) return fromFocus;
-    const items = store.activeLog?.items || [];
-    // Lactate/HIT before generic cardio — HIT modalities use domain "cardio"
+    if (fromFocus) {
+        if (inferred && inferred !== 'Full Body / Strength'
+            && (normalizeLoggedSessionKind(fromFocus) === 'Full Body / Strength' || fromFocus === 'Gym Workout')) {
+            return inferred;
+        }
+        return fromFocus;
+    }
+    if (inferred) return inferred;
     if (items.some(i => i.isLactateHit || (i.sets || []).some(s => s && s.isLactateHit)
         || /lactate|sprint|interval|30s\s*on|attack bike|skier|battle rope|hit\s*class/i.test(i.exercise?.name || ''))) {
         return 'Lactate';
@@ -2992,9 +3112,31 @@ export function resolveActiveSessionKind() {
     if (items.some(i => isStrengthEvent(i.exercise?.name) || (i.exercise?.domain || '').toLowerCase() === 'strength')) {
         return 'Full Body / Strength';
     }
-    // Any completed planned session should still land in Log
-    if (items.length) return 'Full Body / Strength';
+    if (items.length) return inferred || 'Full Body / Strength';
     return 'Full Body / Strength';
+}
+
+function inferSessionKindFromItems(items) {
+    const list = items || [];
+    if (!list.length) return null;
+    if (list.some(i => i.isLactateHit || (i.sets || []).some(s => s && s.isLactateHit)
+        || /lactate|sprint|interval|30s\s*on|hit\s*class/i.test(i.exercise?.name || ''))) {
+        return 'Lactate';
+    }
+    const skip = (i) => !!(i.isWarmupGroup || i.isStretchGroup || i.isCustomStretch || i.isSportSessionBlock
+        || /stretch|warmup/i.test(i.exercise?.name || i.name || ''));
+    const work = list.filter(i => !skip(i));
+    const hasSteady = work.some(i => isSteadyCardioLogItem(i));
+    const hasLift = work.some(i => {
+        const d = (i.exercise?.domain || '').toLowerCase();
+        return d === 'strength' || d === 'power' || d === 'hypertrophy' || i.isPower || isPowerLogItem(i);
+    });
+    if (hasSteady && !hasLift) return 'Cardio (Steady)';
+    if (work.some(i => isPowerLogItem(i)) && !hasSteady) return 'Full Body / Power';
+    if (work.some(i => /auxiliar|prehab|band/i.test(i.exercise?.name || '') || isAuxEvent(i.exercise?.name))) {
+        return 'Auxiliary';
+    }
+    return null;
 }
 
 /**
@@ -3886,10 +4028,21 @@ export async function commitWorkoutSession() {
 
     // Snapshot only exercises/sets the user checked off
     const sessionItemsSnapshot = JSON.parse(JSON.stringify(store.activeLog.items || []))
-        .map(item => ({
-            ...item,
-            sets: (item.sets || []).filter(s => s.completed)
-        }))
+        .map(item => {
+            const sets = (item.sets || []).filter(s => s.completed).map(s => {
+                if (!(item.isStretchGroup || item.isCustomStretch || /stretch/i.test(item.exercise?.name || item.name || ''))) {
+                    return s;
+                }
+                const label = stretchSetLabel(s);
+                const base = stretchSetBaseName(s) || s.partName || s.baseName;
+                return {
+                    ...s,
+                    partName: s.partName || base || (label && !/^stretch/i.test(label) ? label : s.partName),
+                    baseName: s.baseName || base || s.partName
+                };
+            });
+            return { ...item, sets };
+        })
         .filter(item => (item.sets || []).length > 0);
 
     const diaryFields = collectDiaryFieldValues();
@@ -4021,8 +4174,16 @@ export async function commitWorkoutSession() {
                 // Protocol / stretch blocks still need a log row so the session appears in Log
                 workSetNo += 1;
                 const exName = item.exercise?.name || item.name || 'Exercise';
+                const isStretch = !!(item.isStretchGroup || item.isCustomStretch || /stretch/i.test(exName));
+                const muscle = isStretch ? stretchSetLabel(set) : '';
+                const logExercise = (isStretch && muscle
+                    && !/^stretch(ing)?$/i.test(muscle)
+                    && !/^set\s*\d+/i.test(muscle)
+                    && !/^muscle\s*\d+/i.test(muscle))
+                    ? `Stretching · ${muscle}`
+                    : exName;
                 logsToSave.push({
-                    exercise: exName,
+                    exercise: logExercise,
                     sets: workSetNo,
                     reps: 0,
                     weight_kg: 0,

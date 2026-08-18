@@ -52,7 +52,12 @@ export const LIFTING_EVENT_TYPES = [
     'Full Body / Power', 'Auxiliary', 'Cardio', 'Cardio (Steady)', 'Lactate'
 ];
 export function isRestEvent(e) { return e === 'Rest' || e === 'Rest (Cardio Only)' || e === 'Cannot Workout'; }
-export function isSteadyCardio(e) { return e === 'Cardio' || e === 'Cardio (Steady)'; }
+export function isSteadyCardio(e) {
+    if (!e || typeof e !== 'string') return false;
+    if (e === 'Cardio' || e === 'Cardio (Steady)') return true;
+    if (/lactate|hit\s*class/i.test(e)) return false;
+    return /steady(\s*state)?(\s*cardio)?/i.test(e);
+}
 export function isLactateEvent(e) { return e === 'Lactate' || e === 'Cardio (Lactate)'; }
 export function isAuxEvent(e) {
     if (!e || typeof e !== 'string') return false;
@@ -464,6 +469,7 @@ export function prettyWorkoutTypeLabel(kind) {
     if (isHypertrophyEvent(kind)) return prettyFocusName(kind) || kind;
     if (kind === 'Full Body / Strength A' || /Strength\s*A/i.test(kind || '')) return 'Strength Session A';
     if (kind === 'Full Body / Strength B' || /Strength\s*B/i.test(kind || '')) return 'Strength Session B';
+    if (/steady(\s*state)?/i.test(kind || '')) return 'Steady State';
     const normalized = normalizeLoggedSessionKind(kind) || kind;
     if (normalized === 'Cardio (Steady)') return 'Steady State';
     if (normalized === 'Lactate') return 'Lactate/HIT';

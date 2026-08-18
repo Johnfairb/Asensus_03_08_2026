@@ -168,6 +168,23 @@ export function currentStretchStep(item) {
     return t.steps?.[t.stepIndex] || null;
 }
 
+/** First running stretch timer on live or parked items. */
+export function findRunningStretchOnItems(items) {
+    const list = items || [];
+    for (let exIdx = 0; exIdx < list.length; exIdx++) {
+        const item = list[exIdx];
+        const t = getStretchTimerState(item);
+        if (!t?.running) continue;
+        return {
+            exIdx,
+            item,
+            step: currentStretchStep(item),
+            left: remainingStretchStepSeconds(item)
+        };
+    }
+    return null;
+}
+
 function refreshStretchUi(exIdx) {
     try {
         if (window.currentModalExIdx === exIdx && typeof window.renderExerciseSets === 'function') {
@@ -246,8 +263,8 @@ function markStretchSessionFinished(item) {
     } catch (e) { /* ignore */ }
 }
 
-function advanceStretchStep(exIdx) {
-    const item = store.activeLog?.items?.[exIdx];
+function advanceStretchStepOn(items, exIdx, { refresh = true, persist = true } = {}) {
+    const item = items?.[exIdx];
     const t = getStretchTimerState(item);
     if (!item || !t?.running) return;
 
@@ -256,7 +273,7 @@ function advanceStretchStep(exIdx) {
     if (cur?.kind === 'hold' && cur.setIdx != null) {
         completeHoldSet(item, cur.setIdx);
         try {
-            if (window._workoutSessionConfirmed) {
+            if (persist && window._workoutSessionConfirmed) {
                 saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
             }
         } catch (e) { /* ignore */ }
@@ -288,7 +305,7 @@ function advanceStretchStep(exIdx) {
 
     if (nextIndex >= t.steps.length) {
         markStretchSessionFinished(item);
-        refreshStretchUi(exIdx);
+        if (refresh) refreshStretchUi(exIdx);
         return;
     }
 
@@ -296,7 +313,28 @@ function advanceStretchStep(exIdx) {
     t.stepIndex = nextIndex;
     t.stepStartedAt = Date.now();
     t.stepEndsAt = Date.now() + Math.max(1, next.durationSec) * 1000;
-    refreshStretchUi(exIdx);
+    if (refresh) refreshStretchUi(exIdx);
+}
+
+function advanceStretchStep(exIdx) {
+    advanceStretchStepOn(store.activeLog?.items, exIdx);
+}
+
+/** Fast-forward overdue stretch steps on live or parked items. */
+export function catchUpStretchTimersOnItems(items, { refresh = false, persist = false } = {}) {
+    const list = items || [];
+    let changed = false;
+    list.forEach((item, exIdx) => {
+        const t = getStretchTimerState(item);
+        if (!t?.running) return;
+        let guard = 0;
+        while (t.running && Date.now() >= t.stepEndsAt && guard < 200) {
+            advanceStretchStepOn(list, exIdx, { refresh, persist });
+            changed = true;
+            guard += 1;
+        }
+    });
+    return changed;
 }
 
 export function startStretchTimer(exIdx) {
@@ -390,16 +428,10 @@ export function toggleSessionStretchExclude(exIdx, baseName) {
 /** Catch up after tab backgrounding. */
 export function syncStretchTimersFromWallClock() {
     const items = store.activeLog?.items || [];
+    catchUpStretchTimersOnItems(items, { refresh: true, persist: true });
     items.forEach((item, exIdx) => {
         const t = getStretchTimerState(item);
-        if (!t?.running) return;
-        // Fast-forward through any overdue steps
-        let guard = 0;
-        while (t.running && Date.now() >= t.stepEndsAt && guard < 200) {
-            advanceStretchStep(exIdx);
-            guard += 1;
-        }
-        if (t.running) updateStretchCountdownDom(exIdx, item);
+        if (t?.running) updateStretchCountdownDom(exIdx, item);
     });
     if (anyStretchTimerRunning()) {
         holdStretchAudio();

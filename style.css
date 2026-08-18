@@ -633,15 +633,16 @@ h2 {
 
 .grid-diary-star {
     position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
+    left: auto;
+    top: 2px;
+    right: 2px;
+    transform: none;
     color: #0A84FF;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1;
     pointer-events: none;
-    text-shadow: 0 0 6px rgba(10, 132, 255, 0.55);
-    z-index: 2;
+    text-shadow: 0 0 8px rgba(10, 132, 255, 0.85);
+    z-index: 3;
 }
 
 /* ========================================== */
@@ -1011,23 +1012,23 @@ body.workout-reordering .workout-reorder-gap {
 .calendar-day .grid-workout-dot { z-index: 1; }
 .calendar-day .grid-diary-star {
     position: absolute;
-    top: 1px;
-    right: 1px;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: rgba(10, 12, 18, 0.72);
+    top: 2px;
+    right: 2px;
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    background: none;
     color: #0A84FF !important;
-    font-size: 11px;
-    line-height: 14px;
+    font-size: 13px;
+    line-height: 1;
     text-align: center;
-    text-shadow: none;
+    text-shadow: 0 0 8px rgba(10, 132, 255, 0.85);
     z-index: 3;
 }
 
 .grid-yellow { background: rgba(224, 224, 224, 0.05); border-color: rgba(224, 224, 224, 0.2); } /* Perfect (Silver) */
 .grid-orange { background: var(--gold-glow); border-color: var(--gold-accent); } /* Rerouted (Gold) */
-.grid-workout-dot { position: absolute; bottom: 4px; right: 4px; width: 5px; height: 5px; background: #fff; border-radius: 50%; }
+.grid-workout-dot { position: absolute; bottom: 4px; right: 4px; width: 6px; height: 6px; background: var(--gold-accent); border-radius: 50%; box-shadow: 0 0 6px var(--gold-glow); }
 
 .bottom-sheet {
     position: fixed; bottom: 0; left: 50%; transform: translateX(-50%) translateY(100%);
@@ -1330,6 +1331,20 @@ body.workout-reordering .workout-reorder-gap {
     font-weight: 800;
     color: var(--gold-accent);
     font-family: 'Roboto Mono', monospace;
+}
+.plan-session-timer-count {
+    font-size: 36px;
+    font-weight: 800;
+    color: var(--gold-accent);
+    font-family: 'Roboto Mono', monospace;
+    line-height: 1;
+}
+.plan-session-timer-detail {
+    font-size: 11px;
+    color: var(--text-silver);
+    font-family: 'Roboto Mono', monospace;
+    font-weight: 600;
+    margin-top: 8px;
 }
 .workout-timer-label {
     font-size: 10px;
@@ -1713,7 +1728,7 @@ body.light-theme .log-item-input { color: var(--text-main) !important; border-bo
 body.light-theme .active-log-item { border-bottom: 1px solid var(--border-subtle) !important; }
 body.light-theme .workout-title { color: var(--text-main) !important; }
 body.light-theme .set-input { color: var(--text-main) !important; }
-body.light-theme .grid-workout-dot { background: var(--bg-void) !important; }
+body.light-theme .grid-workout-dot { background: var(--gold-accent) !important; }
 
 /* ========================================== */
 /* GLOBAL MODAL VIEWPORT LOCK & BOTTOM SLIDE */

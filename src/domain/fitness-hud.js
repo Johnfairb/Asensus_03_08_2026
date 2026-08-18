@@ -19,7 +19,6 @@ import { computeDomainBarLayout, formatDomainAimLabel, getMacroRange } from '../
 import { getRecommendedSleepHours, getSleepDrivingRpeLoad, getTodaySleepHours, resolveSessionRpe } from './sleep-rpe.js';
 import {
     draftMatchesPlanEvent,
-    findActiveRestOnItems,
     getDraftRunningElapsedMs,
     getDraftSessionLabel,
     loadWorkoutDraft
@@ -249,15 +248,8 @@ function filterUnloggedPlanSlots(slots, creditCounts) {
     });
 }
 
-function planRestTimerSlotHtml(draft) {
-    const rest = findActiveRestOnItems(draft?.items);
-    if (!rest) return `<div id="plan-rest-timer-slot" class="plan-rest-timer hidden"></div>`;
-    const name = String(rest.name || '').replace(/</g, '&lt;');
-    const sub = name ? ` · ${name}` : '';
-    return `<div id="plan-rest-timer-slot" class="plan-rest-timer">
-        <div class="session-rest-timer-label">Rest timer${sub}</div>
-        <div data-rest-countdown="${rest.exIdx}-${rest.setIdx}" class="session-rest-timer-count">${rest.left}s</div>
-    </div>`;
+function planRestTimerSlotHtml() {
+    return `<div id="plan-rest-timer-slot" class="plan-rest-timer hidden"></div>`;
 }
 
 export function renderWorkoutPreview(focus) {

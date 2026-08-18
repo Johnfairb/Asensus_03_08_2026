@@ -12,10 +12,11 @@ import {
     isSteadyCardio,
     listWorkoutSessionsForDate,
     loadWorkoutSessionSnapshots,
+    normalizeLoggedSessionKind,
     prettyWorkoutTypeLabel
 } from '../domain/route-planner.js';
 import { formatDurationMs, formatExerciseDurationLabel } from './workout-timer.js';
-import { COOLDOWN_STRETCHES, cooldownStretchSides, stretchPartDisplayLabel } from '../domain/session-prep.js';
+import { buildStructuredStretchParts, stretchPartDisplayLabel } from '../domain/session-prep.js';
 import { estimateFoodWaterMl, getHydrationLitersForDate, parseFoodLogDetails } from '../lib/food-parse.js';
 import { computeAimBarLayout, formatMacroAimLabel, getMacroRange } from '../lib/macro-range.js';
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from '../domain/meal-planner.js';
@@ -267,17 +268,22 @@ export function renderAdherenceCalendar() {
             dayJournal.type === 'gym' ||
             dayJournal.notes ||
             (dayJournal.media && dayJournal.media.length)
-        )) || !!(gymJournal && (gymJournal.notes || gymJournal.rpe != null || gymJournal.hitTypes?.length || gymJournal.media?.length));
+        )) || !!gymJournal
+            || daySessions.some(s => (s.items || []).some(it =>
+                String(it?.diaryNotes || '').trim() || (Array.isArray(it?.diaryMedia) && it.diaryMedia.length)
+            ));
         const hasWorkout = !!(data && data.hasWorkout) || daySessions.length > 0;
 
         let bgStyle = 'background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle);';
         let markers = '';
+        let goldDay = false;
 
         if (data && data.macros.cals > 0) {
             let calDiff = Math.abs(data.macros.cals - targetCals);
             let overBudget = data.macros.cost > targetCost;
 
             if (calDiff <= 150 && !overBudget && hasWorkout) {
+                goldDay = true;
                 bgStyle = 'background: var(--gold-accent); box-shadow: 0 0 8px var(--gold-glow); border:none;';
             } else if (calDiff <= 300) {
                 bgStyle = 'background: #A0A0A0; border:none;';
@@ -288,8 +294,8 @@ export function renderAdherenceCalendar() {
             bgStyle = 'background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle);';
         }
 
-        if (hasWorkout) {
-            markers += `<div class="grid-workout-dot" style="background: var(--bg-void);"></div>`;
+        if (hasWorkout && !goldDay) {
+            markers += `<div class="grid-workout-dot" title="Workout"></div>`;
         }
 
         if (hasDiary) {
@@ -775,6 +781,10 @@ function mergeDiaryOntoItems(items, dateStr, iso) {
 function stretchMuscleLabel(set, index) {
     const raw = stretchPartDisplayLabel(set);
     if (raw && !/^set\s*\d+/i.test(raw) && !/^stretch(ing)?$/i.test(raw) && !/^muscle\s*\d+/i.test(raw)) return raw;
+    const parsed = parseStretchPartFields(set);
+    if (parsed.partName) {
+        return parsed.side ? `${parsed.partName} · ${parsed.side}` : parsed.partName;
+    }
     const base = String(set?.baseName || set?.partName || set?.name || '').trim();
     if (base && !/^set\s*\d+/i.test(base) && !/^stretch(ing)?$/i.test(base) && !/^muscle\s*\d+/i.test(base)) {
         return set?.side ? `${base} · ${set.side}` : base;
@@ -782,63 +792,132 @@ function stretchMuscleLabel(set, index) {
     return `Muscle ${index + 1}`;
 }
 
+function parseStretchPartFields(setOrName) {
+    if (setOrName && typeof setOrName === 'object') {
+        const partName = String(setOrName.partName || setOrName.baseName || '').trim();
+        const side = setOrName.side || null;
+        if (partName && !/^stretch(ing)?$/i.test(partName) && !/^set\s*\d+/i.test(partName) && !/^muscle\s*\d+/i.test(partName)) {
+            return { partName, baseName: setOrName.baseName || partName, side };
+        }
+        const fromReps = parseStretchLogSuffix(setOrName.reps);
+        if (fromReps.partName) return fromReps;
+        return parseStretchLogSuffix(setOrName.name || '');
+    }
+    return parseStretchLogSuffix(setOrName);
+}
+
+function parseStretchLogSuffix(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return { partName: null, baseName: null, side: null };
+    let rest = text;
+    const prefixed = rest.match(/^stretch(ing)?(?:\s*[·—–:-]\s*|\s+)(.+)$/i);
+    if (prefixed) rest = prefixed[2].trim();
+    else if (/^stretch(ing)?$/i.test(rest) || /^set\s*\d+/i.test(rest) || /^muscle\s*\d+/i.test(rest) || /^hold\s+\d+/i.test(rest)) {
+        return { partName: null, baseName: null, side: null };
+    }
+    const sideM = rest.match(/^(.*?)\s*[·—–-]\s*(Left|Right|Finger|Palm)$/i);
+    if (sideM && sideM[1].trim()) {
+        const partName = sideM[1].trim();
+        const sideRaw = sideM[2];
+        const side = sideRaw.charAt(0).toUpperCase() + sideRaw.slice(1).toLowerCase();
+        const sideNorm = /finger/i.test(side) ? 'Finger' : (/palm/i.test(side) ? 'Palm' : side);
+        return { partName, baseName: partName, side: sideNorm };
+    }
+    if (rest && !/^stretch(ing)?$/i.test(rest) && !/^set\s*\d+/i.test(rest) && !/^muscle\s*\d+/i.test(rest)) {
+        return { partName: rest, baseName: rest, side: null };
+    }
+    return { partName: null, baseName: null, side: null };
+}
+
 function cooldownMuscleCatalog(unilateral = true) {
+    const parts = buildStructuredStretchParts() || [];
+    if (unilateral) {
+        return parts.map(p => ({
+            partName: p.baseName || p.name,
+            baseName: p.baseName || p.name,
+            side: p.side || null
+        }));
+    }
+    const seen = new Set();
     const out = [];
-    COOLDOWN_STRETCHES.forEach((name) => {
-        const sides = unilateral ? cooldownStretchSides(name) : [null];
-        sides.forEach((side) => {
-            out.push({ partName: name, baseName: name, side });
-        });
+    parts.forEach(p => {
+        const name = p.baseName || p.name;
+        const key = String(name || '').toLowerCase();
+        if (!name || seen.has(key)) return;
+        seen.add(key);
+        out.push({ partName: name, baseName: name, side: null });
     });
     return out;
 }
 
 function stretchSetLooksUnnamed(set) {
-    const label = stretchPartDisplayLabel(set);
+    const label = stretchMuscleLabel(set, 0);
     return !label || /^set\s*\d+/i.test(label) || /^stretch(ing)?$/i.test(label) || /^muscle\s*\d+/i.test(label);
+}
+
+function applyStretchPartToSet(set, part) {
+    if (!set || !part) return;
+    if (part.partName) set.partName = part.partName;
+    if (part.baseName) set.baseName = part.baseName;
+    if (part.side) set.side = part.side;
 }
 
 function enrichStretchItemLabels(item) {
     if (!isAdherenceStretchItem(item)) return item;
     const sets = item.sets || [];
-    if (!sets.length || !sets.every(stretchSetLooksUnnamed)) return item;
-    const catalog = sets.length === cooldownMuscleCatalog(true).length
-        ? cooldownMuscleCatalog(true)
-        : (sets.length === cooldownMuscleCatalog(false).length ? cooldownMuscleCatalog(false) : null);
-    if (!catalog) return item;
+    sets.forEach((set) => {
+        if (!set || !stretchSetLooksUnnamed(set)) return;
+        const parsed = parseStretchPartFields(set);
+        if (parsed.partName) applyStretchPartToSet(set, parsed);
+    });
+    if (!sets.length) return item;
+    const catalogUni = cooldownMuscleCatalog(true);
+    const catalogBi = cooldownMuscleCatalog(false);
+    const catalog = sets.length === catalogBi.length && sets.length !== catalogUni.length
+        ? catalogBi
+        : catalogUni;
     sets.forEach((set, i) => {
+        if (!set || !stretchSetLooksUnnamed(set)) return;
         const part = catalog[i];
-        if (!part || !set) return;
-        set.partName = part.partName;
-        set.baseName = part.baseName;
-        if (part.side) set.side = part.side;
+        if (part) applyStretchPartToSet(set, part);
     });
     return item;
 }
 
+function isStretchLogName(exName) {
+    return /stretch/i.test(String(exName || ''));
+}
+
 function itemsFromWorkoutLogs(logs = []) {
     const byEx = (logs || []).reduce((acc, log) => {
-        const key = log.exercise || 'Exercise';
+        const rawName = log.exercise || 'Exercise';
+        const key = isStretchLogName(rawName) ? '__stretching__' : rawName;
         if (!acc[key]) acc[key] = [];
         acc[key].push(log);
         return acc;
     }, {});
-    return Object.keys(byEx).map((exName) => {
-        const rows = byEx[exName].slice().sort((a, b) => (Number(a.sets) || 0) - (Number(b.sets) || 0));
-        const stretch = /stretch/i.test(exName);
+    return Object.keys(byEx).map((exKey) => {
+        const rows = byEx[exKey].slice().sort((a, b) => (Number(a.sets) || 0) - (Number(b.sets) || 0));
+        const stretch = exKey === '__stretching__' || isStretchLogName(rows[0]?.exercise);
         const item = {
-            exercise: { name: exName, domain: stretch ? 'mobility' : (rows[0]?.type || 'strength') },
-            name: exName,
+            exercise: { name: stretch ? 'Stretching' : (exKey === '__stretching__' ? 'Stretching' : exKey), domain: stretch ? 'mobility' : (rows[0]?.type || 'strength') },
+            name: stretch ? 'Stretching' : exKey,
             isStretchGroup: stretch,
-            sets: rows.map((log) => ({
-                completed: true,
-                weight: Number(log.weight_kg) || 0,
-                reps: log.reps,
-                distance_km: Number(log.distance_km) || 0,
-                time_minutes: Number(log.time_minutes) || 0,
-                rpe: log.rpe,
-                isText: stretch || !(Number(log.weight_kg) > 0) && !(Number(log.reps) > 0) && !(Number(log.distance_km) > 0)
-            }))
+            sets: rows.map((log) => {
+                const parsed = stretch ? parseStretchLogSuffix(log.exercise) : { partName: null, baseName: null, side: null };
+                return {
+                    completed: true,
+                    weight: Number(log.weight_kg) || 0,
+                    reps: log.reps,
+                    distance_km: Number(log.distance_km) || 0,
+                    time_minutes: Number(log.time_minutes) || 0,
+                    rpe: log.rpe,
+                    isText: stretch || !(Number(log.weight_kg) > 0) && !(Number(log.reps) > 0) && !(Number(log.distance_km) > 0),
+                    partName: parsed.partName || undefined,
+                    baseName: parsed.baseName || undefined,
+                    side: parsed.side || undefined
+                };
+            })
         };
         return enrichStretchItemLabels(item);
     });
@@ -854,6 +933,39 @@ function logsForAdherenceSession(snap, dateStr, workoutLogs) {
     return [];
 }
 
+function sessionKindFromAdherenceItems(items) {
+    const list = items || [];
+    if (list.some(it => it?.isLactateHit || (it?.sets || []).some(s => s?.isLactateHit))) return 'Lactate';
+    const skip = (it) => !!(it?.isStretchGroup || it?.isWarmupGroup || it?.isCustomStretch
+        || /stretch|warmup/i.test(it?.exercise?.name || it?.name || ''));
+    const work = list.filter(it => !skip(it));
+    const hasSteady = work.some(it => it?.isSteadyCardio
+        || (it?.exercise?.domain || '').toLowerCase() === 'cardio'
+        || /steady/i.test(it?.exercise?.name || it?.name || ''));
+    const hasLift = work.some(it => {
+        const d = (it?.exercise?.domain || '').toLowerCase();
+        return d === 'strength' || d === 'power' || d === 'hypertrophy' || it?.isPower;
+    });
+    if (hasSteady && !hasLift) return 'Cardio (Steady)';
+    if (work.some(it => it?.isPower || (it?.exercise?.domain || '').toLowerCase() === 'power') && !hasSteady) {
+        return 'Full Body / Power';
+    }
+    return null;
+}
+
+function resolveAdherenceSessionKind(snap) {
+    const kind = snap?.kind;
+    const inferred = sessionKindFromAdherenceItems(snap?.items);
+    const norm = normalizeLoggedSessionKind(kind);
+    if (inferred === 'Cardio (Steady)' && (!kind || kind === 'Workout' || norm === 'Full Body / Strength')) {
+        return 'Cardio (Steady)';
+    }
+    if (inferred && inferred !== 'Full Body / Strength' && (!kind || kind === 'Workout' || norm === 'Full Body / Strength')) {
+        return inferred;
+    }
+    return kind;
+}
+
 function hydrateAdherenceSessionItems(snap, dateStr, workoutLogs) {
     if (!snap) return snap;
     const copy = {
@@ -864,6 +976,7 @@ function hydrateAdherenceSessionItems(snap, dateStr, workoutLogs) {
         copy.items = itemsFromWorkoutLogs(logsForAdherenceSession(snap, dateStr, workoutLogs));
     }
     copy.items.forEach(enrichStretchItemLabels);
+    copy.kind = resolveAdherenceSessionKind(copy);
     mergeDiaryOntoItems(copy.items, dateStr, copy.dateIso);
     if (!window._adherenceDaySessions) window._adherenceDaySessions = {};
     window._adherenceDaySessions[String(copy.id)] = copy;
@@ -873,9 +986,12 @@ function hydrateAdherenceSessionItems(snap, dateStr, workoutLogs) {
 function synthesizeAdherenceSessionFromLogs(dateStr, iso, logs) {
     const items = mergeDiaryOntoItems(itemsFromWorkoutLogs(logs), dateStr, iso);
     const dur = (logs || []).reduce((m, l) => Math.max(m, Number(l.session_duration_min) || 0), 0);
-    const kind = items.some(it => /stretch/i.test(it.name || '') && items.length === 1)
+    const hasStretchOnly = items.length > 0 && items.every(it => /stretch/i.test(it.name || '') || it.isStretchGroup);
+    const inferred = sessionKindFromAdherenceItems(items);
+    const hasCardioLogs = (logs || []).some(l => l.type === 'cardio' || /steady/i.test(l.exercise || ''));
+    const kind = hasStretchOnly
         ? 'Workout'
-        : 'Full Body / Strength';
+        : (inferred || (hasCardioLogs ? 'Cardio (Steady)' : 'Full Body / Strength'));
     const snap = {
         id: `orphan-day-${iso || dateStr}`,
         dateIso: iso,
