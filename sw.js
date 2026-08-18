@@ -1,5 +1,5 @@
 // Ascensus Offline GPS Cache (The Tunnel Protocol)
-const CACHE_NAME = 'ascensus-gps-v46';
+const CACHE_NAME = 'ascensus-gps-v47';
 
 // The critical assets required to render the UI offline
 const ASSETS_TO_CACHE = [
@@ -79,18 +79,49 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
+function isYouTubeHost(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  return h === 'youtu.be'
+    || h === 'youtube.com' || h.endsWith('.youtube.com')
+    || h === 'youtube-nocookie.com' || h.endsWith('.youtube-nocookie.com')
+    || h.endsWith('.googlevideo.com')
+    || h === 'ytimg.com' || h.endsWith('.ytimg.com')
+    || h.endsWith('.ggpht.com');
+}
+
+function shouldCacheResponse(request, response) {
+  if (!response || !response.ok || response.type === 'opaque') return false;
+  let url;
+  try { url = new URL(request.url); } catch { return false; }
+  if (url.origin === self.location.origin) return true;
+  return request.url.startsWith('https://cdn.jsdelivr.net/');
+}
+
 // Fetch Event - Intercept Network Requests
 self.addEventListener('fetch', event => {
   // We only intercept GET requests (HTML, CSS, JS).
   // POST/PUT database syncs (like logging a set) should fail gracefully in the app layer and queue.
   if (event.request.method !== 'GET') return;
 
+  let url;
+  try { url = new URL(event.request.url); } catch { return; }
+
+  // Never proxy YouTube — SW-fetched embeds trigger "sign in to confirm you're not a bot".
+  if (isYouTubeHost(url.hostname)) return;
+
+  const dest = event.request.destination;
+  if (url.origin !== self.location.origin
+      && (dest === 'document' || dest === 'iframe' || dest === 'embed' || dest === 'frame')) {
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then(response => {
-        // If network is active, update the cache silently in the background
-        const resClone = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, resClone));
+        if (shouldCacheResponse(event.request, response)) {
+          const resClone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, resClone));
+        }
         return response;
       })
       .catch(() => {

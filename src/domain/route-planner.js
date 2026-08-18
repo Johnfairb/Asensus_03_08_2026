@@ -2857,16 +2857,77 @@ function teachingPoint(label, videoUrl = TEACHING_POINT_PLACEHOLDER_URL) {
     return { label, videoUrl: videoUrl || TEACHING_POINT_PLACEHOLDER_URL };
 }
 
+function youtubeVideoId(url) {
+    const m = String(url || '').match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i);
+    if (!m || m[1] === 'placeholder') return '';
+    return m[1];
+}
+
+function youtubeWatchUrl(url) {
+    const id = youtubeVideoId(url);
+    return id ? `https://www.youtube.com/watch?v=${id}` : '';
+}
+
+function youtubeEmbedSrc(url) {
+    const id = youtubeVideoId(url);
+    if (!id) return String(url || '');
+    const params = new URLSearchParams({
+        rel: '0',
+        modestbranding: '1',
+        playsinline: '1'
+    });
+    try {
+        if (/^https?:$/i.test(location.protocol) && location.origin && location.origin !== 'null') {
+            params.set('origin', location.origin);
+        }
+    } catch (e) { /* ignore */ }
+    return `https://www.youtube.com/embed/${id}?${params.toString()}`;
+}
+
+function canEmbedYouTube() {
+    try { return /^https?:$/i.test(location.protocol); } catch (e) { return false; }
+}
+
+function youtubePlayerHtml(url, title = '') {
+    const src = escapeVideoModalText(youtubeEmbedSrc(url));
+    const t = escapeVideoModalText(title || 'Form video');
+    return `<iframe width="100%" height="100%" src="${src}" title="${t}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+}
+
+function syncVideoModalWatchLink(url) {
+    const el = document.getElementById('video-modal-open-yt');
+    if (!el) return;
+    const watch = youtubeWatchUrl(url);
+    if (!watch) {
+        el.classList.add('hidden');
+        el.removeAttribute('href');
+        return;
+    }
+    el.href = watch;
+    el.classList.remove('hidden');
+}
+
+function loadVideoModalFrame(frame, url, title) {
+    if (!frame) return;
+    frame.onclick = null;
+    if (!canEmbedYouTube()) {
+        frame.innerHTML = `<div style="padding:16px; text-align:center; line-height:1.45;">YouTube can't play inside this window. Use Open in YouTube below.</div>`;
+        return;
+    }
+    frame.innerHTML = youtubePlayerHtml(url, title);
+}
+
 export function openVideoModal(title, url) {
     document.getElementById('video-modal-title').innerText = title;
     const frame = document.getElementById('video-modal-frame');
     const formUrl = url || TEACHING_POINT_PLACEHOLDER_URL;
     window._videoModalFormUrl = formUrl;
+    window._videoModalTitle = title;
     window._videoModalActiveTp = null;
+    syncVideoModalWatchLink(formUrl);
     frame.innerHTML = 'TAP TO LOAD INTEL';
     frame.onclick = function() {
-        frame.innerHTML = `<iframe width="100%" height="100%" src="${formUrl}" frameborder="0" allowfullscreen></iframe>`;
-        frame.onclick = null;
+        loadVideoModalFrame(frame, formUrl, title);
         window._videoModalActiveTp = null;
         syncTeachingPointActiveState();
     };
@@ -2917,9 +2978,10 @@ export function selectTeachingPointVideo(index) {
         // Toggle off — restore overall form video
         window._videoModalActiveTp = null;
         const formUrl = window._videoModalFormUrl || TEACHING_POINT_PLACEHOLDER_URL;
+        syncVideoModalWatchLink(formUrl);
         frame.innerHTML = 'TAP TO LOAD INTEL';
         frame.onclick = function() {
-            frame.innerHTML = `<iframe width="100%" height="100%" src="${formUrl}" frameborder="0" allowfullscreen></iframe>`;
+            loadVideoModalFrame(frame, formUrl, window._videoModalTitle || '');
             frame.onclick = null;
         };
         syncTeachingPointActiveState();
@@ -2927,8 +2989,8 @@ export function selectTeachingPointVideo(index) {
     }
 
     window._videoModalActiveTp = index;
-    frame.onclick = null;
-    frame.innerHTML = `<iframe width="100%" height="100%" src="${tp.videoUrl}" frameborder="0" allowfullscreen title="${escapeVideoModalText(tp.label)}"></iframe>`;
+    syncVideoModalWatchLink(tp.videoUrl);
+    loadVideoModalFrame(frame, tp.videoUrl, tp.label);
     syncTeachingPointActiveState();
 }
 
@@ -2984,6 +3046,8 @@ export function closeVideoModal() {
     window._videoModalTeachingPoints = null;
     window._videoModalActiveTp = null;
     window._videoModalFormUrl = null;
+    window._videoModalTitle = null;
+    syncVideoModalWatchLink('');
     document.getElementById('video-modal').classList.add('hidden');
 }
 
