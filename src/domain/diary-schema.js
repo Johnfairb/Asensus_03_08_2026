@@ -3,26 +3,38 @@
  * Persisted so the edited layout is used next time.
  */
 const SCHEMA_KEY = 'ascensus_diary_schema_v1';
+const WORKOUT_FLUID_MIGRATE_KEY = 'ascensus_diary_schema_workout_fluid_v1';
+
+const HYDRATION_FIELD = {
+  id: 'hydration_ml',
+  label: 'Fluid drunk (ml)',
+  type: 'quantitative',
+  hint: 'How much did you drink during this session? Counts toward your daily hydration goal',
+  min: 0,
+  step: 50
+};
 
 const DEFAULTS = {
   practice: [
     { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 triggers Lactate/HIT tracking)', min: 1, max: 10 },
     { id: 'athletic', label: 'Athletic Performance', type: 'scale10', hint: '', min: 1, max: 10 },
     { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '', min: 1, max: 10 },
-    { id: 'hydration_ml', label: 'Hydration (ml)', type: 'quantitative', hint: 'Counts toward your daily hydration goal', min: 0, step: 50 }
+    { ...HYDRATION_FIELD, label: 'Hydration (ml)', hint: 'Counts toward your daily hydration goal' }
   ],
   match: [
     { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 replaces a Lactate/HIT this week)', min: 1, max: 10 },
     { id: 'athletic', label: 'Athletic Performance', type: 'scale10', hint: '', min: 1, max: 10 },
     { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '', min: 1, max: 10 },
     { id: 'matchPerformance', label: 'Match Performance', type: 'scale10', hint: 'How did you play overall?', min: 1, max: 10 },
-    { id: 'hydration_ml', label: 'Hydration (ml)', type: 'quantitative', hint: 'Counts toward your daily hydration goal', min: 0, step: 50 }
+    { ...HYDRATION_FIELD, label: 'Hydration (ml)', hint: 'Counts toward your daily hydration goal' }
   ],
   gym: [
-    { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '', min: 1, max: 10 }
+    { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '', min: 1, max: 10 },
+    { ...HYDRATION_FIELD }
   ],
   lactate: [
-    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: 'Rate the Lactate/HIT work. HIT class recovery uses this score.', min: 1, max: 10 }
+    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: 'Rate the Lactate/HIT work. HIT class recovery uses this score.', min: 1, max: 10 },
+    { ...HYDRATION_FIELD }
   ]
 };
 
@@ -38,6 +50,23 @@ function uid() {
   return `f_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
+function ensureWorkoutFluidField(map) {
+  try {
+    if (localStorage.getItem(WORKOUT_FLUID_MIGRATE_KEY)) return map;
+    let changed = false;
+    for (const mode of ['gym', 'lactate']) {
+      const list = Array.isArray(map[mode]) ? map[mode] : [];
+      if (!list.some(f => f.id === 'hydration_ml')) {
+        map[mode] = [...list, { ...HYDRATION_FIELD }];
+        changed = true;
+      }
+    }
+    if (changed) saveDiarySchemaMap(map);
+    localStorage.setItem(WORKOUT_FLUID_MIGRATE_KEY, '1');
+  } catch (e) { /* ignore */ }
+  return map;
+}
+
 export function loadDiarySchemaMap() {
   try {
     const raw = JSON.parse(localStorage.getItem(SCHEMA_KEY) || '{}') || {};
@@ -47,7 +76,7 @@ export function loadDiarySchemaMap() {
         ? raw[mode].map(normalizeField)
         : DEFAULTS[mode].map(f => ({ ...f }));
     }
-    return out;
+    return ensureWorkoutFluidField(out);
   } catch (e) {
     return Object.fromEntries(Object.entries(DEFAULTS).map(([k, v]) => [k, v.map(f => ({ ...f }))]));
   }

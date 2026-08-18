@@ -823,7 +823,7 @@ export function isPrimaryMuscleBlocked(muscle) {
 export function usesHypertrophyProgramming(focus) {
     if (isHypertrophyFocus(focus)) return true;
     if (!isHypertrophyPhase()) return false;
-    if (/Strength\s*[AB]/i.test(focus || '')) return false;
+    if (/strength[_\s]*[ab]\b/i.test(focus || '')) return false;
     return focus === 'Full Body / Strength' || focus === 'Gym' || focus === 'Gym Workout';
 }
 
@@ -945,6 +945,15 @@ export function warmupRestPair({ isIsolation = false, workRestSec = 90, mode = '
     }
     // No rest between the two compound warmup sets
     return { afterFirst: 0, afterSecond: Math.round(work / 2) };
+}
+
+/** Rest that would sit between the last warmup and the first work set. */
+export function warmupToWorkRestSec(isIsolation, opts = {}) {
+    const resolved = resolveWarmupRestOptions(!!isIsolation, opts.exName);
+    const mode = opts.mode || resolved.mode;
+    const workRestSec = opts.workRestSec != null ? Number(opts.workRestSec) : resolved.workRestSec;
+    const pair = warmupRestPair({ isIsolation: !!isIsolation, workRestSec, mode });
+    return isIsolation ? pair.afterFirst : pair.afterSecond;
 }
 
 /** Resolve warmup rest mode + work rest from session (manual prefs or phase defaults). */
@@ -1178,9 +1187,10 @@ export function roundHypertrophyWorkWeight(kg, exName, choice = null) {
  * Apply a work weight to an active-log item:
  * rebuild warmups and set all non-warmup working sets to that load.
  * Bodyweight work is allowed (0 kg).
+ * opts.skipWarmups: finder protocol already served as the warmup — omit programmed WU sets.
  * Returns applied kg, or -1 on failure.
  */
-export function applyHypertrophyWorkWeight(item, workKg) {
+export function applyHypertrophyWorkWeight(item, workKg, opts = {}) {
     if (!item || !item.exercise) return -1;
     if (item.isSuperset) return -1;
     const exName = item.exercise.name || '';
@@ -1200,7 +1210,8 @@ export function applyHypertrophyWorkWeight(item, workKg) {
         rest = phaseDefaultWorkRestSec(isIso, { exName });
     }
 
-    const warmups = buildHypertrophyWarmupSets(exName, w, workReps, isIso, {
+    const skipWarmups = !!opts.skipWarmups;
+    const warmups = skipWarmups ? [] : buildHypertrophyWarmupSets(exName, w, workReps, isIso, {
         ...restResolved,
         equipmentChoice: choice
     });
@@ -1223,6 +1234,10 @@ export function applyHypertrophyWorkWeight(item, workKg) {
     item.needsBwGate = false;
     item.bwGateResolved = true;
     item.workWeightKg = w;
+    if (skipWarmups) {
+        item.finderReplacedWarmup = true;
+        item.pendingFinderRestSec = warmupToWorkRestSec(isIso, { ...restResolved, exName });
+    }
     return w;
 }
 
@@ -1230,7 +1245,7 @@ export function applyHypertrophyWorkWeight(item, workKg) {
  * Apply work weight to one side of a merged superset (rebuild that side's warmups + work loads).
  * Leaves the partner side untouched.
  */
-export function applyWorkWeightToSupersetSide(item, sideKey, workKg) {
+export function applyWorkWeightToSupersetSide(item, sideKey, workKg, opts = {}) {
     if (!item?.isSuperset || (sideKey !== 'A' && sideKey !== 'B')) return -1;
     const sideMeta = (item.sides || []).find(s => s.key === sideKey);
     if (!sideMeta?.exercise) return -1;
@@ -1250,8 +1265,9 @@ export function applyWorkWeightToSupersetSide(item, sideKey, workKg) {
         ? sideMeta.plannedSets
         : Math.max(3, sideWorkMain.length || 3);
     const restWork = sideKey === 'B' ? 100 : 0;
+    const skipWarmups = !!opts.skipWarmups;
 
-    const newWu = buildHypertrophyWarmupSets(exName, w, workReps, isIso).map(s => ({
+    const newWu = skipWarmups ? [] : buildHypertrophyWarmupSets(exName, w, workReps, isIso).map(s => ({
         ...s,
         side: sideKey,
         completed: false
@@ -1317,6 +1333,11 @@ export function applyWorkWeightToSupersetSide(item, sideKey, workKg) {
     sideMeta.needsWeightFind = false;
     sideMeta.needsBwGate = false;
     sideMeta.bwGateResolved = true;
+    if (skipWarmups) {
+        sideMeta.finderReplacedWarmup = true;
+        const wuRest = warmupToWorkRestSec(isIso, { exName });
+        item.pendingFinderRestSec = Math.max(Number(item.pendingFinderRestSec) || 0, wuRest);
+    }
     const nA = item.sides?.[0]?.exercise?.name || 'Exercise A';
     const nB = item.sides?.[1]?.exercise?.name || 'Exercise B';
     item.exercise = {

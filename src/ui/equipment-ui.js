@@ -3,7 +3,9 @@
  */
 import { store } from '../state/store.js';
 import {
+    catalogLoadOptions,
     exercisesNeedingEquipmentPick,
+    expandLoadChoices,
     optionLabel,
     resolveLoadProfile,
     roundUpLoad
@@ -141,29 +143,31 @@ export function confirmEquipmentPicks() {
 }
 
 /**
- * Switch Fca/Cca mid-session: re-round incomplete future sets only.
+ * Switch equipment mid-session (cable Fca/Cca or barbell/dumbbell): re-round incomplete future sets only.
  */
-export function switchCableEquipment(exIdx, newChoice) {
+export function switchLoadEquipment(exIdx, newChoice) {
     const item = store.activeLog?.items?.[exIdx];
     if (!item?.exercise?.name) return;
-    if (newChoice !== 'Fca' && newChoice !== 'Cca') return;
+    const allowed = expandLoadChoices(catalogLoadOptions(item.exercise.name));
+    if (!allowed.includes(newChoice)) return;
     item.equipmentChoice = newChoice;
     if (item.exercise) item.exercise.equipmentChoice = newChoice;
 
     const sets = item.sets || [];
-    let pastCompleted = true;
     const profile = resolveLoadProfile(item.exercise.name, newChoice);
     sets.forEach((s) => {
         if (!s || s.isText) return;
-        if (s.completed) {
-            pastCompleted = true;
-            return;
-        }
-        // Future / current incomplete
+        if (s.completed) return;
         const raw = Number(s.weight) || 0;
         if (raw > 0) s.weight = roundUpLoad(raw, profile);
-        pastCompleted = false;
     });
+}
+
+/**
+ * Switch Fca/Cca mid-session: re-round incomplete future sets only.
+ */
+export function switchCableEquipment(exIdx, newChoice) {
+    switchLoadEquipment(exIdx, newChoice);
 }
 
 export function saveExerciseIncrementOverrides(exName, overridesByCode) {

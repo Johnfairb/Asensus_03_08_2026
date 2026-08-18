@@ -21,7 +21,7 @@ const OLD_KG_DEFAULTS = {
 export const DEFAULT_PROFILES = {
     B: { code: 'B', label: 'Barbell', unit: 'kg', min: 10, step: 2.5 },
     D: { code: 'D', label: 'Dumbbell', unit: 'kg', min: 1, step: null },
-    Fca: { code: 'Fca', label: 'Functional cable', unit: 'lb', min: 5, step: 2 },
+    Fca: { code: 'Fca', label: 'Functional cable', unit: 'lb', min: 2.5, step: 5 },
     Cca: { code: 'Cca', label: 'Crossover cable', unit: 'lb', min: 5, step: 5 },
     M: { code: 'M', label: 'Machine', unit: 'lb', min: 10, step: 15 },
     C: { code: 'C', label: 'Custom', unit: 'lb', min: 10, step: 10 },
@@ -401,6 +401,29 @@ export function increaseLoadOneStep(weight, exName, choice = null) {
     const step = Number(profile?.step);
     if (!Number.isFinite(step) || step <= 0) return w;
     return roundUpLoad(w + step, profile);
+}
+
+/** One equipment increment below current load. Floors at the profile minimum. */
+export function decreaseLoadOneStep(weight, exName, choice = null) {
+    const w = Number(weight) || 0;
+    if (w <= 0) return w;
+    if (skipsWeightProgression(exName, choice)) return w;
+    const profile = resolveLoadProfile(exName, choice, { weight: w });
+    if (isLbStackProfile(profile)) {
+        return addLbIncrements(w, profile, -1);
+    }
+    const step = Number(profile?.step);
+    if (!Number.isFinite(step) || step <= 0) return w;
+    const min = Number(profile.min);
+    const floorMin = Number.isFinite(min) && min > 0 ? min : 0;
+    const snapped = Math.round(w / step) * step;
+    let next = Math.round((snapped - step) * 1000) / 1000;
+    if (next < floorMin) next = floorMin;
+    if (next < 0) next = 0;
+    if (profile.max != null && Number.isFinite(Number(profile.max)) && next > Number(profile.max)) {
+        next = Number(profile.max);
+    }
+    return next;
 }
 
 /** Map profile → legacy equipment string still used in a few call sites. */

@@ -1,6 +1,7 @@
 /**
  * Weekly Exercise goals (Mon–Sun) + Asensus points.
  */
+import { store } from '../state/store.js';
 import { getMondayISO, dateToISO, addDaysISO, getPlannedDayEvents, isLactateEvent, isSteadyCardio, isLiftingEvent, isStrengthEvent, isPracticeEvent, isGameEvent, loadWorkoutSessionSnapshots, loadLoggedSessionsMap, countLoggedWorkoutCredits, normalizeLoggedSessionKind } from './route-planner.js';
 
 const POINTS_KEY = 'ascensus_points_total';
@@ -10,12 +11,37 @@ function parseISO(iso) {
     return new Date(iso + 'T12:00:00');
 }
 
+function snapDateMatches(snap, iso) {
+    if (!snap || !iso) return false;
+    const raw = String(snap.dateIso || '').trim();
+    if (!raw) return false;
+    if (raw === iso) return true;
+    try {
+        const day = parseISO(iso);
+        if (raw === day.toLocaleDateString()) return true;
+        const fromRaw = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+            ? raw
+            : dateToISO(new Date(/T/.test(raw) ? raw : `${raw}T12:00:00`));
+        return fromRaw === iso;
+    } catch (e) {
+        return false;
+    }
+}
+
 /** Snapshots are keyed by sessionId; older builds may have used dateIso → array. */
 function sessionsForDate(snaps, iso) {
-    const fromIds = Object.values(snaps || {}).filter(s => s && typeof s === 'object' && !Array.isArray(s) && s.dateIso === iso);
+    const fromIds = Object.values(snaps || {}).filter(s => s && typeof s === 'object' && !Array.isArray(s) && snapDateMatches(s, iso));
     if (fromIds.length) return fromIds;
     const legacy = snaps?.[iso];
     return Array.isArray(legacy) ? legacy : [];
+}
+
+function historyLogsForIso(iso) {
+    const grouped = store.globalGroupedHistory || {};
+    let locale = iso;
+    try { locale = parseISO(iso).toLocaleDateString(); } catch (e) { /* keep iso */ }
+    const day = grouped[locale] || grouped[iso] || null;
+    return (day?.items || []).filter(i => i && i.type === 'workout');
 }
 
 function isGymStrengthKind(kind) {
@@ -83,12 +109,37 @@ function sessionHasCompletedWarmup(snap) {
     });
 }
 
+function itemLooksLikeStretch(it) {
+    if (!it) return false;
+    if (it.isStretchGroup || it.isCustomStretch) return true;
+    const name = String(it.exercise?.name || it.name || it.exercise || '');
+    if (/stretch/i.test(name)) return true;
+    return String(it.exercise?.domain || '').toLowerCase() === 'mobility';
+}
+
+function stretchSetCounts(set) {
+    if (!set || set._sessionSkipped) return false;
+    if (set.completed === false || set.completed === 0) return false;
+    return true;
+}
+
 function sessionHasCompletedStretch(snap) {
     const items = snap?.items || [];
-    return items.some(it => {
-        const name = String(it.exercise?.name || it.exercise || '');
-        if (!/stretch/i.test(name) && !it.isStretchGroup) return false;
-        return (it.sets || []).some(s => s.completed);
+    if (items.some(it => itemLooksLikeStretch(it) && (it.sets || []).some(stretchSetCounts))) {
+        return true;
+    }
+    const logs = snap?.logs || [];
+    if (logs.some(l => /stretch/i.test(String(l.exercise || '')) || String(l.type || '').toLowerCase() === 'mobility')) {
+        return true;
+    }
+    return false;
+}
+
+function historyLogsHaveStretch(logs) {
+    return (logs || []).some(l => {
+        if (!l) return false;
+        if (/stretch/i.test(String(l.exercise || ''))) return true;
+        return String(l.type || '').toLowerCase() === 'mobility';
     });
 }
 
@@ -223,6 +274,9 @@ export function computeWeeklyGoalScores(weekStartISO = getMondayISO(new Date()))
         });
 
         const daySnaps = sessionsForDate(snaps, iso);
+        const dayLogs = historyLogsForIso(iso);
+        const countedStretchLogIds = new Set();
+        let dayStretchFromSnaps = 0;
         daySnaps.forEach(snap => {
             const kind = String(snap.kind || '');
             const creditKind = normalizeLoggedSessionKind(kind);
@@ -248,7 +302,14 @@ export function computeWeeklyGoalScores(weekStartISO = getMondayISO(new Date()))
                     aerobic += 1;
                 }
             }
-            if (sessionHasCompletedStretch(snap)) stretchDone += 1;
+            const snapLogs = dayLogs.filter(l => (snap.logIds || []).map(String).includes(String(l.id)));
+            const hasStretch = sessionHasCompletedStretch(snap) || historyLogsHaveStretch(snapLogs);
+            if (hasStretch) {
+                stretchDone += 1;
+                dayStretchFromSnaps += 1;
+                (snap.logIds || []).forEach(id => countedStretchLogIds.add(String(id)));
+                snapLogs.forEach(l => { if (l?.id != null) countedStretchLogIds.add(String(l.id)); });
+            }
             if (sessionHasCompletedWarmup(snap)) warmupDone += 1;
 
             if (isGymStrengthKind(kind)) {
@@ -256,6 +317,11 @@ export function computeWeeklyGoalScores(weekStartISO = getMondayISO(new Date()))
                 strengthSessionCount += 1;
             }
         });
+
+        const leftoverStretchLogs = dayLogs.filter(l =>
+            !countedStretchLogIds.has(String(l.id)) && historyLogsHaveStretch([l])
+        );
+        if (!dayStretchFromSnaps && leftoverStretchLogs.length) stretchDone += 1;
 
         // Diary-only practice RPE credit (if snapshot missing rpe)
         try {

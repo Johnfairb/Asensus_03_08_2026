@@ -3,9 +3,9 @@ import { buildWeeklyTrainingPlan, getMondayISO, isStrengthEvent } from './route-
 import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, getSportData } from './sports-matrix.js';
 import { HYPERTROPHY_POOLS, avoidLockedMuscleOnItems, isExerciseMuscleLocked, isHypertrophyPhase } from './hypertrophy-engine.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
-import { buildStrengthMetaMap, EXERCISE_CATALOG, isUnilateralCompound } from './exercise-catalog.js';
+import { buildStrengthMetaMap, EXERCISE_CATALOG, getExerciseMeta, isUnilateralCompound, resolveCatalogName } from './exercise-catalog.js';
 import { pickCoreExercisesForLevel } from './core-programming.js';
-import { increaseLoadOneStep, skipsWeightProgression } from './load-increments.js';
+import { decreaseLoadOneStep, increaseLoadOneStep, skipsWeightProgression } from './load-increments.js';
 import { loadExercises } from '../ui/fuel.js';
 import { getBillingMonthKey } from './billing-month.js';
 import { weeklyPowerGymSlots } from './power-engine.js';
@@ -163,6 +163,29 @@ export function getStrengthMonthKey() {
         const d = new Date();
         return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
     }
+}
+
+function isIsoDayKey(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+/** Read the stored month plan without generating a new one. */
+export function peekStoredStrengthMonthPlan() {
+    try {
+        const plan = JSON.parse(localStorage.getItem(MONTH_PLAN_KEY) || 'null');
+        if (plan && Array.isArray(plan.sessionA) && Array.isArray(plan.sessionB)) return plan;
+    } catch (e) { /* ignore */ }
+    return null;
+}
+
+/** Full month plan snapshotted onto strength_A / strength_B at cycle start. */
+export function peekCycleStrengthPlan() {
+    try {
+        const raw = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}') || {};
+        const plan = raw.strength_A?.strengthPlan || raw.strength_B?.strengthPlan || null;
+        if (plan && Array.isArray(plan.sessionA) && Array.isArray(plan.sessionB)) return plan;
+    } catch (e) { /* ignore */ }
+    return null;
 }
 
 function shuffleInPlace(arr) {
@@ -356,14 +379,30 @@ export function saveStrengthMonthPlan(plan) {
 
 export function loadStrengthMonthPlan(sportData) {
     const month = getStrengthMonthKey();
-    let plan = null;
-    try { plan = JSON.parse(localStorage.getItem(MONTH_PLAN_KEY) || 'null'); } catch (e) { plan = null; }
-    if (!plan || plan.month !== month || !Array.isArray(plan.sessionA) || !Array.isArray(plan.sessionB)) {
-        plan = buildFreshMonthPlan(sportData || getSportData());
-        plan.month = month;
+    let plan = peekStoredStrengthMonthPlan();
+    const fromCycle = peekCycleStrengthPlan();
+
+    // A billing/cycle key change used to buildFreshMonthPlan() immediately, which
+    // skipped keep/change/custom. If the cycle snapshot is still on the previous
+    // month key, restore it until the user actually decides.
+    if (fromCycle && isIsoDayKey(fromCycle.month) && plan && isIsoDayKey(plan.month) && fromCycle.month < plan.month) {
+        plan = { ...fromCycle };
         saveStrengthMonthPlan(plan);
         return plan;
     }
+    if (!plan && fromCycle) {
+        plan = { ...fromCycle, month: fromCycle.month || month };
+        saveStrengthMonthPlan(plan);
+        return plan;
+    }
+
+    if (plan && Array.isArray(plan.sessionA) && Array.isArray(plan.sessionB)) {
+        return plan;
+    }
+
+    plan = buildFreshMonthPlan(sportData || getSportData());
+    plan.month = month;
+    saveStrengthMonthPlan(plan);
     return plan;
 }
 
@@ -665,34 +704,110 @@ export function getStrengthSetSplit(session, totalSets) {
     return [4, 4, 3, 3];
 }
 
+function canonExerciseName(name) {
+    return String(resolveCatalogName(name) || name || '').trim().toLowerCase();
+}
+
+function strengthLogDayKey(row) {
+    const raw = row?.created_at || row?.date || row?.day || '';
+    if (!raw) return '';
+    return String(raw).includes('T') ? String(raw).split('T')[0] : String(raw).slice(0, 10);
+}
+
+function lastSessionWorkSets(hist, exName) {
+    const want = canonExerciseName(exName);
+    const logs = (hist || []).filter((l) => {
+        if (canonExerciseName(l.exercise) !== want) return false;
+        if (l.is_warmup || l.isWarmup) return false;
+        return Number(l.reps) > 0 || Number(l.weight_kg) > 0;
+    });
+    if (!logs.length) return [];
+    const days = [...new Set(logs.map(strengthLogDayKey).filter(Boolean))].sort().reverse();
+    const latestDay = days[0];
+    const daySets = (latestDay ? logs.filter((l) => strengthLogDayKey(l) === latestDay) : logs)
+        .filter((l) => Number(l.reps) > 0);
+    daySets.sort((a, b) => (Number(a.sets) || 0) - (Number(b.sets) || 0));
+    return daySets;
+}
+
+function loggedRir(row) {
+    const n = Number(row?.rpe);
+    return Number.isFinite(n) ? n : null;
+}
+
+function isBodyweightExercise(exName) {
+    const meta = getExerciseMeta(exName);
+    return !!(meta && meta.bodyweight);
+}
+
+function applyProgressedLoad(next, equipmentRound) {
+    return typeof equipmentRound === 'function' ? equipmentRound(next) : next;
+}
+
 /**
- * Progress isolation load when last session: set 1 ≥ 8 and every work set in 6–10.
+ * Strength load progression from the last session:
+ * - ≥2 work sets hit target reps → +1 increment
+ * - 1 work set hit target reps → stay
+ * - 0 work sets hit target reps → −1 increment
+ * Weighted (non-bodyweight) loads under 10 kg only go up when every work set
+ * at that load is ≥8 reps with ≥5 RIR (and at least 2 such sets).
+ */
+export function progressStrengthWeight(exName, hist, currentWeight, opts = {}) {
+    const tWeight = Number(currentWeight) || 0;
+    const choice = opts.equipmentChoice || null;
+    if (skipsWeightProgression(exName, choice) || tWeight <= 0) {
+        return { weight: tWeight, note: '' };
+    }
+
+    const daySets = lastSessionWorkSets(hist, exName);
+    if (!daySets.length) return { weight: tWeight, note: '' };
+
+    const atLoad = daySets.filter((l) => Math.abs((Number(l.weight_kg) || 0) - tWeight) < 0.051);
+    const sets = atLoad.length ? atLoad : daySets;
+    const targetReps = Math.max(1, Number(opts.targetReps) || 5);
+    const hitCount = sets.filter((l) => (Number(l.reps) || 0) >= targetReps).length;
+
+    const lightWeighted = tWeight < 10 && !isBodyweightExercise(exName);
+    let direction = 0;
+    let note = '';
+
+    if (lightWeighted) {
+        const hitEight = sets.filter((l) => (Number(l.reps) || 0) >= 8).length;
+        const easyHits = sets.filter((l) => (Number(l.reps) || 0) >= 8 && (loggedRir(l) || 0) >= 5).length;
+        if (sets.length >= 2 && easyHits === sets.length) {
+            direction = 1;
+            note = 'AUTO-PROGRESSION: Hit 8 reps @ ≥5 RIR on both sets. Load increased one increment.';
+        } else if (hitEight === 0) {
+            direction = -1;
+            note = 'AUTO-PROGRESSION: Did not hit 8 reps. Load decreased one increment.';
+        }
+    } else if (hitCount >= 2) {
+        direction = 1;
+        note = 'AUTO-PROGRESSION: Hit target reps on at least 2 sets. Load increased one increment.';
+    } else if (hitCount === 0) {
+        direction = -1;
+        note = 'AUTO-PROGRESSION: Target reps not hit. Load decreased one increment.';
+    }
+
+    if (direction > 0) {
+        const next = increaseLoadOneStep(tWeight, exName, choice);
+        return { weight: applyProgressedLoad(next, opts.equipmentRound), note };
+    }
+    if (direction < 0) {
+        const next = decreaseLoadOneStep(tWeight, exName, choice);
+        return { weight: applyProgressedLoad(next, opts.equipmentRound), note };
+    }
+    return { weight: tWeight, note: '' };
+}
+
+/**
+ * Isolation wrapper — same 2 / 1 / 0 set rule, target 8 reps.
  */
 export function progressStrengthIsolationWeight(exName, hist, currentWeight, equipmentRound) {
-    if (skipsWeightProgression(exName)) return { weight: currentWeight, note: '' };
-    const name = String(exName || '').toLowerCase();
-    const logs = (hist || []).filter(l => String(l.exercise || '').toLowerCase() === name);
-    if (!logs.length) return { weight: currentWeight, note: '' };
-
-    const dayKey = (l) => l.created_at || l.date || l.day || '';
-    const days = [...new Set(logs.map(dayKey).filter(Boolean))];
-    if (!days.length) return { weight: currentWeight, note: '' };
-    const latestDay = days[0];
-    const daySets = logs.filter(l => dayKey(l) === latestDay && Number(l.reps) > 0);
-    // Prefer chronological order if set index exists
-    daySets.sort((a, b) => (Number(a.sets) || 0) - (Number(b.sets) || 0));
-    if (daySets.length < 1) return { weight: currentWeight, note: '' };
-
-    const reps = daySets.map(l => Number(l.reps) || 0);
-    const firstOk = reps[0] >= 8;
-    const allInRange = reps.every(r => r >= 6 && r <= 10);
-    if (!firstOk || !allInRange) return { weight: currentWeight, note: '' };
-
-    const next = increaseLoadOneStep(Number(currentWeight) || 0, exName);
-    return {
-        weight: typeof equipmentRound === 'function' ? equipmentRound(next) : next,
-        note: 'AUTO-PROGRESSION: Isolation — first set ≥8 and all sets 6–10. Load increased.'
-    };
+    return progressStrengthWeight(exName, hist, currentWeight, {
+        targetReps: 8,
+        equipmentRound
+    });
 }
 
 export function getGymPlanPrefs() {

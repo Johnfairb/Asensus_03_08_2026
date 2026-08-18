@@ -16,10 +16,26 @@ import { isStrengthFocus, isStrengthPhase } from './strength-engine.js';
 
 const PHASE_MAP_KEY = 'ascensus_log_periodization_v1';
 
+/** True for Strength A/B / strength_A / Full Body / Strength — not hypertrophy days. */
+export function isStrengthSessionKind(focus) {
+    const f = String(focus || '').trim();
+    if (!f) return false;
+    if (/hypertrophy/i.test(f)) return false;
+    if (/^strength[_ ]?[ab]\b/i.test(f)) return true;
+    if (/strength\s*(session\s*)?[ab]\b/i.test(f)) return true;
+    if (/full\s*body\s*\/\s*strength/i.test(f)) return true;
+    if (/\bstrength\b/i.test(f)) return true;
+    return false;
+}
+
 export function periodizationBucketForSession(phase, focus) {
     const p = phase || getSeasonPhase();
-    if (usesHypertrophyProgramming(focus)) return 'hypertrophy';
-    if (isStrengthFocus(focus) && !isHypertrophyFocus(focus)) return 'strength';
+    const f = String(focus || '');
+    // Hypertrophy session labels win; generic "Full Body / Strength" during a
+    // hypertrophy block is still hypertrophy programming. Real Strength A/B
+    // must never be tagged hypertrophy or last week's lift gets +15%.
+    if (isHypertrophyFocus(f) || usesHypertrophyProgramming(f)) return 'hypertrophy';
+    if (isStrengthSessionKind(f) || (isStrengthFocus(f) && !isHypertrophyFocus(f))) return 'strength';
     if (isHypertrophyPhase(p)) return 'hypertrophy';
     if (isStrengthPhase(p)) return 'strength';
     return null;
@@ -50,15 +66,22 @@ export function rememberLogPhasesByFingerprint(logs, phase) {
     logs.forEach((l) => {
         const key = fingerprintLog(l);
         if (key) map[key] = phase;
+        const loose = fingerprintLogLoose(l);
+        if (loose) map[loose] = phase;
     });
     try { localStorage.setItem(PHASE_MAP_KEY, JSON.stringify(map)); } catch (e) { /* ignore */ }
 }
 
 function fingerprintLog(l) {
     if (!l) return null;
-    if (l.id != null) return `id:${l.id}`;
-    const day = String(l.created_at || '').slice(0, 10);
+    if (l.id != null && String(l.id) !== '' && String(l.id) !== 'undefined') return `id:${l.id}`;
+    const day = String(l.created_at || l.date || '').slice(0, 10);
     return `fp:${day}|${l.exercise}|${l.sets}|${l.reps}|${l.weight_kg}`;
+}
+
+function fingerprintLogLoose(l) {
+    if (!l) return null;
+    return `fp:|${l.exercise}|${l.sets}|${l.reps}|${l.weight_kg}`;
 }
 
 export function resolveLogPeriodization(log) {
@@ -68,6 +91,9 @@ export function resolveLogPeriodization(log) {
     if (log.id != null && map[`id:${log.id}`]) return map[`id:${log.id}`];
     const fp = fingerprintLog(log);
     if (fp && map[fp]) return map[fp];
+    // Saves used to fingerprint before created_at existed (`fp:|Deadlift|…`).
+    const loose = fingerprintLogLoose(log);
+    if (loose && map[loose]) return map[loose];
     return null;
 }
 
@@ -117,13 +143,13 @@ export function exerciseLogNamesMatch(a, b) {
 }
 
 /**
- * Last completed working-set load from the most recent session for this exercise.
+ * Last completed working-set row from the most recent session for this exercise.
  * Prefers the highest set number on that day (the set the user finished on).
  */
-export function lastCompletedWorkingWeight(hist, exName) {
+export function latestWorkingLog(hist, exName) {
     const rows = (hist || []).filter((l) => {
         if (!exerciseLogNamesMatch(l.exercise, exName)) return false;
-        if (l.is_warmup) return false;
+        if (l.is_warmup || l.isWarmup) return false;
         const w = Number(l.weight_kg);
         const reps = Number(l.reps);
         return (Number.isFinite(w) && w > 0) || (Number.isFinite(reps) && reps > 0);
@@ -137,7 +163,15 @@ export function lastCompletedWorkingWeight(hist, exName) {
         if (setDiff) return setDiff;
         return String(a.created_at || '').localeCompare(String(b.created_at || ''));
     });
-    const last = dayRows[dayRows.length - 1];
+    return dayRows[dayRows.length - 1] || null;
+}
+
+/**
+ * Last completed working-set load from the most recent session for this exercise.
+ * Prefers the highest set number on that day (the set the user finished on).
+ */
+export function lastCompletedWorkingWeight(hist, exName) {
+    const last = latestWorkingLog(hist, exName);
     const w = Number(last?.weight_kg);
     return Number.isFinite(w) ? w : null;
 }
@@ -161,7 +195,7 @@ export function latestPhaseWeight(hist, exName, phaseBucket) {
         if (Number(l.reps) <= 0 && !(Number(l.weight_kg) >= 0)) return false;
         const tag = resolveLogPeriodization(l);
         if (phaseBucket === 'hypertrophy') {
-            return tag === 'hypertrophy' || tag == null;
+            return tag === 'hypertrophy';
         }
         if (phaseBucket === 'strength') {
             return tag === 'strength';

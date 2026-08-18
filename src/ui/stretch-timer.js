@@ -13,7 +13,7 @@ import {
 } from '../domain/session-prep.js';
 import { saveWorkoutDraft } from '../domain/workout-draft.js';
 import { getWorkoutElapsedMs } from './workout-timer.js';
-import { holdAudioAlive, playStretchBeepSound, releaseAudioAlive, unlockAudio } from './audio.js';
+import { holdAudioAlive, playStretchBeepSound, pokeLockScreenPosition, releaseAudioAlive, unlockAudio } from './audio.js';
 
 let _tickInterval = null;
 let _stretchAudioHeld = false;
@@ -212,6 +212,7 @@ function updateStretchCountdownDom(exIdx, item) {
     if (cardSub && step) {
         cardSub.textContent = stretchStepStatusLine(step, left);
     }
+    try { pokeLockScreenPosition(); } catch (e) { /* ignore */ }
 }
 
 function anyStretchTimerRunning() {
@@ -260,6 +261,7 @@ function markStretchSessionFinished(item) {
             saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() });
         }
         if (typeof window.updateDomainBars === 'function') window.updateDomainBars();
+        if (typeof window.syncGlobalRestBanners === 'function') window.syncGlobalRestBanners();
     } catch (e) { /* ignore */ }
 }
 
@@ -306,6 +308,7 @@ function advanceStretchStepOn(items, exIdx, { refresh = true, persist = true } =
     if (nextIndex >= t.steps.length) {
         markStretchSessionFinished(item);
         if (refresh) refreshStretchUi(exIdx);
+        try { window.syncGlobalRestBanners?.(); } catch (e) { /* ignore */ }
         return;
     }
 
@@ -314,6 +317,7 @@ function advanceStretchStepOn(items, exIdx, { refresh = true, persist = true } =
     t.stepStartedAt = Date.now();
     t.stepEndsAt = Date.now() + Math.max(1, next.durationSec) * 1000;
     if (refresh) refreshStretchUi(exIdx);
+    try { window.syncGlobalRestBanners?.(); } catch (e) { /* ignore */ }
 }
 
 function advanceStretchStep(exIdx) {
@@ -358,6 +362,7 @@ export function startStretchTimer(exIdx) {
     holdStretchAudio();
     ensureStretchTick();
     refreshStretchUi(exIdx);
+    try { window.syncGlobalRestBanners?.(); } catch (e) { /* ignore */ }
 }
 
 /** Rebuild remaining steps after session excludes change mid-run. */
@@ -405,6 +410,7 @@ export function rebuildStretchTimerAfterExclude(exIdx) {
     t.stepEndsAt = Date.now() + currentKept.durationSec * 1000;
     ensureStretchTick();
     refreshStretchUi(exIdx);
+    try { window.syncGlobalRestBanners?.(); } catch (e) { /* ignore */ }
 }
 
 export function toggleSessionStretchExclude(exIdx, baseName) {

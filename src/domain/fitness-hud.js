@@ -1,7 +1,7 @@
 import { store } from '../state/store.js';
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from './meal-planner.js';
 import { getLactateProtocolForSlot } from './lactate-engine.js';
-import { assignPairedSessionSlots, dateToISO, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listLoggedCreditKeysForDate, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, saveWorkoutSessionSnapshots } from './route-planner.js';
+import { assignPairedSessionSlots, dateToISO, foldMisfiledGymTailSessions, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listLoggedCreditKeysForDate, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, resolveStrengthEventLetter, saveWorkoutSessionSnapshots, strengthLabelForLetter } from './route-planner.js';
 import { loadDayJournal } from '../ui/journey.js';
 import { getSportData } from './sports-matrix.js';
 import { buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, resolveStrengthSession } from './strength-engine.js';
@@ -118,6 +118,9 @@ export function getTodayFocus() {
     } finally {
         updateSportLogButtons();
         try { generateDailyExerciseLog(); } catch (e) { console.warn(e); }
+        try {
+            import('../ui/workout-cycle-ui.js').then((m) => m.maybeOpenWorkoutCycleModal()).catch(() => {});
+        } catch (e) { /* ignore */ }
     }
     return focus;
 }
@@ -557,9 +560,37 @@ export function generateDailyExerciseLog() {
     })();
     const day = store.globalGroupedHistory && store.globalGroupedHistory[todayStr];
     const workouts = day ? day.items.filter(i => i.type === 'workout') : [];
-    const sessions = (typeof listWorkoutSessionsForDate === 'function')
-        ? listWorkoutSessionsForDate(todayIso)
-        : [];
+    const sessions = foldMisfiledGymTailSessions(
+        (typeof listWorkoutSessionsForDate === 'function')
+            ? listWorkoutSessionsForDate(todayIso)
+            : []
+    );
+    try {
+        const planned = (typeof getPlannedDayEvents === 'function') ? (getPlannedDayEvents(new Date()) || []) : [];
+        const plannedLetter = resolveStrengthEventLetter(planned.find(e => isStrengthEvent(e) && !/Hypertrophy/i.test(e)) || '');
+        const stored = localStorage.getItem('ascensus_strength_ab');
+        const letter = plannedLetter || (stored === 'A' || stored === 'B' ? stored : null);
+        if (letter === 'A' || letter === 'B') {
+            const labelled = strengthLabelForLetter(letter);
+            let changed = false;
+            sessions.forEach((sess) => {
+                if (resolveStrengthEventLetter(sess.kind)) return;
+                if (normalizeLoggedSessionKind(sess.kind) !== 'Full Body / Strength') return;
+                sess.kind = labelled;
+                changed = true;
+            });
+            if (changed) {
+                const snaps = loadWorkoutSessionSnapshots();
+                sessions.forEach((sess) => {
+                    if (snaps[sess.id] && snaps[sess.id].kind !== sess.kind) {
+                        snaps[sess.id].kind = sess.kind;
+                        snaps[sess.id].updatedAt = new Date().toISOString();
+                    }
+                });
+                saveWorkoutSessionSnapshots(snaps);
+            }
+        }
+    } catch (e) { /* keep generic Strength Session label */ }
 
     const dayJournal = loadDayJournal(todayIso);
     const hasSportDiary = !!(dayJournal && (
@@ -587,6 +618,10 @@ export function generateDailyExerciseLog() {
 
         if (isSport) {
             return `RPE ${first.rpe != null ? first.rpe : '—'}`;
+        }
+        const isWarmup = rows.every(r => /warmup/i.test(r.exercise || ''));
+        if (isWarmup) {
+            return rows.length === 1 ? 'Done' : `${rows.length} parts`;
         }
         if (isStretch) {
             const durations = rows.map(r => Number(r.time_minutes) || 0).filter(n => n > 0);
@@ -628,6 +663,7 @@ export function generateDailyExerciseLog() {
             return parts.length ? `${rows.length} sets (${parts.join(', ')})` : `${rows.length} sets`;
         }
         if (first.notes) return String(first.notes).slice(0, 80);
+        if (/warmup/i.test(first.exercise || '')) return rows.length === 1 ? 'Done' : `${rows.length} parts`;
         if (first.rpe != null) return `RPE ${first.rpe}`;
         return `${rows.length} sets`;
     };
@@ -760,15 +796,70 @@ export function generateDailyExerciseLog() {
         return `${rows.length} sets`;
     };
 
+    const snapshotItemSummary = (item) => {
+        const name = item?.exercise?.name || item?.name || '';
+        if (item?.isWarmupGroup || /warmup/i.test(name)) {
+            const n = (item.sets || []).filter(s => s && s.completed).length;
+            return n ? `${n} parts` : 'Done';
+        }
+        if (item?.isStretchGroup || item?.isCustomStretch || /stretch/i.test(name)) {
+            const n = (item.sets || []).filter(s => s && s.completed).length;
+            return n ? `${n} holds` : 'Done';
+        }
+        return summarizeSnapshotSets(item?.sets || []);
+    };
+
+    const workoutLogBelongsToSessionItems = (log, items) => {
+        const logName = String(log?.exercise || '').trim().toLowerCase();
+        if (!logName || !Array.isArray(items) || !items.length) return false;
+        return items.some(item => {
+            const itemName = String(item?.exercise?.name || item?.name || '').trim().toLowerCase();
+            if (itemName && itemName === logName) return true;
+            if ((item?.isStretchGroup || item?.isCustomStretch || /stretch/i.test(itemName)) && /^stretch/i.test(log.exercise || '')) return true;
+            if ((item?.isWarmupGroup || /warmup/i.test(itemName)) && /warmup/i.test(log.exercise || '')) return true;
+            if (item?.isSuperset && (item.sides || []).some(s => String(s?.exercise?.name || '').trim().toLowerCase() === logName)) return true;
+            return false;
+        });
+    };
+
+    const isGymLoggedKind = (kind) => {
+        const n = normalizeLoggedSessionKind(kind);
+        return n === 'Full Body / Strength' || n === 'Full Body / Power' || isStrengthEvent(kind);
+    };
+
+    const gymHostSess = sessions.find(s => isGymLoggedKind(s.kind)) || null;
+    const extraGymLogsBySess = new Map();
+
+    if (sessions.length) {
+        sessions.forEach(sess => {
+            const idSet = new Set((sess.logIds || []).map(String));
+            workouts.forEach(w => {
+                if (w.id == null) return;
+                if (idSet.has(String(w.id)) || workoutLogBelongsToSessionItems(w, sess.items)) {
+                    usedLogIds.add(String(w.id));
+                }
+            });
+        });
+        workouts.forEach(w => {
+            if (w.id == null || usedLogIds.has(String(w.id))) return;
+            if (w.exercise === 'Practice' || w.exercise === 'Match') return;
+            if (isCardioWorkoutLogRow(w)) return;
+            if (!gymHostSess) return;
+            usedLogIds.add(String(w.id));
+            const list = extraGymLogsBySess.get(gymHostSess.id) || [];
+            list.push(w);
+            extraGymLogsBySess.set(gymHostSess.id, list);
+        });
+    }
+
     if (sessions.length) {
         sessions.forEach(sess => {
             const label = prettyWorkoutTypeLabel(sess.kind);
             const idSet = new Set((sess.logIds || []).map(String));
-            const sessionLogs = workouts.filter(w => idSet.has(String(w.id)));
-            sessionLogs.forEach(w => { if (w.id != null) usedLogIds.add(String(w.id)); });
+            const sessionLogs = workouts.filter(w => idSet.has(String(w.id)) || workoutLogBelongsToSessionItems(w, sess.items));
+            const extraLogs = extraGymLogsBySess.get(sess.id) || [];
             const isLactateSess = isLactateEvent(sess.kind) || sess.kind === 'Lactate'
                 || (Array.isArray(sess.items) && sess.items.some(i => i.isLactateHit || (i.sets || []).some(s => s.isLactateHit || Number(s.duration_sec) > 0)));
-            // Lactate/HIT: always use session snapshot (has action + rest). Other kinds: logs then snapshot.
             let bodyHtml = '';
             if (isLactateSess && Array.isArray(sess.items) && sess.items.length) {
                 bodyHtml = sess.items.map(item => {
@@ -776,15 +867,16 @@ export function generateDailyExerciseLog() {
                     const summary = summarizeLactateSnapshotSets(item.sets || []);
                     return exerciseRowHtml(name, summary, formatExerciseDurationLabel(item));
                 }).join('');
-            } else {
-                bodyHtml = renderExerciseLines(sessionLogs, sess.items);
-            }
-            if (!bodyHtml && Array.isArray(sess.items)) {
+            } else if (Array.isArray(sess.items) && sess.items.length) {
                 bodyHtml = sess.items.map(item => {
                     const name = item.exercise?.name || item.name || 'Exercise';
-                    const summary = summarizeSnapshotSets(item.sets || []);
+                    const summary = snapshotItemSummary(item);
                     return exerciseRowHtml(name, summary, formatExerciseDurationLabel(item));
                 }).join('');
+                const leftover = extraLogs.filter(l => !workoutLogBelongsToSessionItems(l, sess.items));
+                if (leftover.length) bodyHtml += renderExerciseLines(leftover, sess.items);
+            } else {
+                bodyHtml = renderExerciseLines([...sessionLogs, ...extraLogs], sess.items);
             }
             const durMin = Number(sess.durationMinutes) || 0;
             html += `<div class="card" style="padding:16px; margin-bottom:12px;">
@@ -810,11 +902,7 @@ export function generateDailyExerciseLog() {
     // Any workout rows not yet attached to a session snapshot (legacy) — still editable
     const orphanLogs = workouts.filter(w => !usedLogIds.has(String(w.id)) && w.exercise !== 'Practice' && w.exercise !== 'Match');
     if (orphanLogs.length) {
-        // Prefer one combined card when it's clearly a cardio session bundle
-        const cardioOrphans = orphanLogs.filter(l =>
-            (Number(l.distance_km) > 0) || (Number(l.time_minutes) > 0)
-            || /cardio|steady|stretch|lactate|sprint|run|cycle|row|swim|bike/i.test(l.exercise || '')
-        );
+        const cardioOrphans = orphanLogs.filter(l => isCardioWorkoutLogRow(l));
         const strengthOrphans = orphanLogs.filter(l => !cardioOrphans.includes(l));
 
         const renderOrphanSession = (logs, label) => {
@@ -842,9 +930,8 @@ export function generateDailyExerciseLog() {
         }
 
         if (strengthOrphans.length) {
-            // One combined card for the planned gym session (not one card per lift)
             const looksAux = strengthOrphans.every(l => /auxiliar|prehab|band/i.test(l.exercise || ''));
-            renderOrphanSession(strengthOrphans, looksAux ? 'Auxiliary' : 'Gym Workout');
+            renderOrphanSession(strengthOrphans, looksAux ? 'Auxiliary' : 'Strength Session');
         }
     }
 

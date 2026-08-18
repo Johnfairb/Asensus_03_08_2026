@@ -1,7 +1,10 @@
 /**
  * Workout alarm audio. Phones suspend Web Audio after ~30s of silence, and
  * rest timers are 60–300s, so a later beep from setInterval often never plays.
- * Unlock on user taps, keep a silent loop alive during timers, fall back to HTMLAudio.
+ * Unlock on user taps. During rest/stretch, play a near-silent track matching
+ * the countdown so lock-screen Now Playing shows remaining time (not a 1s loop).
+ * Cues (rest alarm, prepare, stretch) use HTML audio on that same element so
+ * they still play when the phone is locked.
  */
 
 const REST_PATTERN = [
@@ -24,6 +27,12 @@ let _restWavUrl = null;
 let _stretchWavUrl = null;
 let _prepareWavUrl = null;
 let _silentWavUrl = null;
+let _timerKeepUrl = null;
+let _timerKeepSec = 0;
+let _lockScreen = null;
+let _cuePlaying = false;
+let _cueGen = 0;
+let _mediaHandlersInstalled = false;
 
 function pcmWavUrl(samples, sampleRate) {
     const n = samples.length;
@@ -92,7 +101,7 @@ function stretchBeepUrl() {
 
 function prepareBeepUrl() {
     if (_prepareWavUrl) return _prepareWavUrl;
-    _prepareWavUrl = synthTones([{ freq: 1244.5, offset: 0, dur: 0.1 }], { peak: 0.32 });
+    _prepareWavUrl = synthTones([{ freq: 1244.5, offset: 0, dur: 0.14 }], { peak: 0.52 });
     return _prepareWavUrl;
 }
 
@@ -103,6 +112,113 @@ function silentUrl() {
     for (let i = 0; i < samples.length; i++) samples[i] = i % 64 === 0 ? 2 : 0;
     _silentWavUrl = pcmWavUrl(samples, sr);
     return _silentWavUrl;
+}
+
+/** Near-silent WAV whose length matches the rest/stretch countdown (lock-screen Now Playing). */
+function silentDurationUrl(durationSec) {
+    const sec = Math.max(1, Math.min(600, Math.round(Number(durationSec) || 1)));
+    if (_timerKeepUrl && _timerKeepSec === sec) return _timerKeepUrl;
+    const sr = 8000;
+    const samples = new Int16Array(sec * sr);
+    for (let i = 0; i < samples.length; i++) samples[i] = i % 64 === 0 ? 2 : 0;
+    if (_timerKeepUrl) {
+        try { URL.revokeObjectURL(_timerKeepUrl); } catch (e) { /* ignore */ }
+    }
+    _timerKeepUrl = pcmWavUrl(samples, sr);
+    _timerKeepSec = sec;
+    return _timerKeepUrl;
+}
+
+function lockScreenRemainingSec() {
+    if (!_lockScreen?.endsAt) return 0;
+    return Math.max(0, Math.ceil((_lockScreen.endsAt - Date.now()) / 1000));
+}
+
+function installMediaSessionHandlers() {
+    if (_mediaHandlersInstalled || typeof navigator === 'undefined' || !navigator.mediaSession) return;
+    _mediaHandlersInstalled = true;
+    const resume = () => {
+        try { startKeepAlive(); } catch (e) { /* ignore */ }
+    };
+    try { navigator.mediaSession.setActionHandler('play', resume); } catch (e) { /* ignore */ }
+    try { navigator.mediaSession.setActionHandler('pause', resume); } catch (e) { /* ignore */ }
+}
+
+function applyMediaSession() {
+    if (typeof navigator === 'undefined' || !navigator.mediaSession) return;
+    installMediaSessionHandlers();
+    const title = _lockScreen?.title || 'Timer';
+    const artist = _lockScreen?.artist || 'Ascensus';
+    try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title,
+            artist,
+            album: 'Ascensus'
+        });
+        navigator.mediaSession.playbackState = 'playing';
+    } catch (e) { /* ignore */ }
+    pokeLockScreenPosition();
+}
+
+function clearMediaSession() {
+    if (typeof navigator === 'undefined' || !navigator.mediaSession) return;
+    try { navigator.mediaSession.playbackState = 'none'; } catch (e) { /* ignore */ }
+    try { navigator.mediaSession.metadata = null; } catch (e) { /* ignore */ }
+}
+
+export function pokeLockScreenPosition() {
+    if (!_lockScreen || typeof navigator === 'undefined' || !navigator.mediaSession?.setPositionState) return;
+    const dur = Math.max(1, Number(_lockScreen.durationSec) || 1);
+    const elapsed = Math.max(0, (Date.now() - (_lockScreen.startedAt || Date.now())) / 1000);
+    try {
+        navigator.mediaSession.setPositionState({
+            duration: dur,
+            playbackRate: 1,
+            position: Math.max(0, Math.min(dur - 0.05, elapsed))
+        });
+    } catch (e) { /* ignore */ }
+}
+
+/**
+ * Drive lock-screen Now Playing from the live rest or stretch countdown.
+ * Plays a near-silent track whose length is the remaining time (replaces the 1s loop).
+ */
+export function ensureLockScreenTimer({ remainingSec, title, artist } = {}) {
+    const remaining = Math.max(0, Math.ceil(Number(remainingSec) || 0));
+    if (remaining < 1) {
+        clearLockScreenTimer();
+        return;
+    }
+    const endsAt = Date.now() + remaining * 1000;
+    const nextTitle = String(title || 'Timer');
+    const nextArtist = String(artist || 'Ascensus');
+    if (
+        _lockScreen
+        && _lockScreen.title === nextTitle
+        && Math.abs((_lockScreen.endsAt || 0) - endsAt) < 2000
+    ) {
+        pokeLockScreenPosition();
+        return;
+    }
+    _lockScreen = {
+        title: nextTitle,
+        artist: nextArtist,
+        durationSec: remaining,
+        startedAt: Date.now(),
+        endsAt
+    };
+    if (!_cuePlaying) startKeepAlive();
+    applyMediaSession();
+}
+
+export function clearLockScreenTimer() {
+    _lockScreen = null;
+    if (_cuePlaying) return;
+    if (_holdCount > 0) startKeepAlive();
+    else {
+        stopKeepAlive();
+        clearMediaSession();
+    }
 }
 
 function getAudioContext() {
@@ -135,29 +251,42 @@ function getKeepEl() {
     return _keepEl;
 }
 
+function onCueEnded() {
+    _cuePlaying = false;
+    if (_holdCount > 0 || lockScreenRemainingSec() > 0) startKeepAlive();
+    else {
+        stopKeepAlive();
+        clearMediaSession();
+    }
+}
+
 function playHtmlWav(url) {
     try {
         const keepPlaying = _keepEl && !_keepEl.paused;
-        const el = keepPlaying ? _keepEl : getBeepEl();
+        const holdActive = _holdCount > 0 || !!_lockScreen || keepPlaying;
+        const el = holdActive ? getKeepEl() : getBeepEl();
+        const gen = ++_cueGen;
+        _cuePlaying = true;
         el.loop = false;
         el.pause();
         el.volume = 1;
         el.src = url;
         el.currentTime = 0;
         const p = el.play();
-        if (p && p.catch) p.catch(() => {});
-        if (keepPlaying) {
-            el.addEventListener('ended', () => {
-                if (_holdCount > 0) startKeepAlive();
-            }, { once: true });
-        }
+        if (p && p.catch) p.catch(() => { if (gen === _cueGen) _cuePlaying = false; });
+        el.addEventListener('ended', () => {
+            if (gen !== _cueGen) return;
+            onCueEnded();
+        }, { once: true });
         return true;
     } catch (e) {
+        _cuePlaying = false;
         return false;
     }
 }
 
 function startKeepAlive() {
+    if (_cuePlaying) return;
     const ctx = getAudioContext();
     if (ctx) {
         try {
@@ -175,15 +304,30 @@ function startKeepAlive() {
     }
     try {
         const el = getKeepEl();
-        el.loop = true;
         el.volume = 0.01;
-        if (el.src !== silentUrl()) el.src = silentUrl();
+        const left = lockScreenRemainingSec();
+        if (left > 0 && _lockScreen) {
+            _lockScreen.durationSec = left;
+            _lockScreen.startedAt = Date.now();
+            el.loop = false;
+            const url = silentDurationUrl(left);
+            if (el.src !== url) el.src = url;
+            applyMediaSession();
+        } else {
+            el.loop = true;
+            if (el.src !== silentUrl()) el.src = silentUrl();
+        }
         const p = el.play();
         if (p && p.catch) p.catch(() => {});
+        el.onended = () => {
+            if (_cuePlaying) return;
+            if (lockScreenRemainingSec() > 1 || _holdCount > 0) startKeepAlive();
+        };
     } catch (e) { /* ignore */ }
 }
 
 function stopKeepAlive() {
+    if (_cuePlaying) return;
     if (_keepOsc) {
         try { _keepOsc.stop(); } catch (e) { /* ignore */ }
         try { _keepOsc.disconnect(); } catch (e) { /* ignore */ }
@@ -261,29 +405,41 @@ export function holdAudioAlive() {
 
 export function pokeAudioAlive() {
     unlockAudio();
-    if (_holdCount > 0) startKeepAlive();
+    if (_cuePlaying) return;
+    if (_holdCount > 0 || lockScreenRemainingSec() > 0) startKeepAlive();
 }
 
 export function releaseAudioAlive() {
     _holdCount = Math.max(0, _holdCount - 1);
-    if (_holdCount === 0) stopKeepAlive();
+    if (_holdCount === 0 && !_cuePlaying && lockScreenRemainingSec() <= 0) stopKeepAlive();
 }
 
 export function releaseAllAudioHolds() {
     _holdCount = 0;
+    _lockScreen = null;
+    if (_cuePlaying) return;
     stopKeepAlive();
+    clearMediaSession();
+}
+
+function preferHtmlCues() {
+    if (_holdCount > 0 || _lockScreen || (_keepEl && !_keepEl.paused)) return true;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return true;
+    return false;
 }
 
 async function playSequence(notes, { type, peak, fallbackUrl }) {
     unlockAudio();
-    const ctx = getAudioContext();
-    if (ctx) {
-        try {
-            if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
-                await ctx.resume();
-            }
-        } catch (e) { /* ignore */ }
-        if (ctx.state === 'running' && scheduleWebAudio(notes, { type, peak })) return;
+    if (!preferHtmlCues()) {
+        const ctx = getAudioContext();
+        if (ctx) {
+            try {
+                if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+                    await ctx.resume();
+                }
+            } catch (e) { /* ignore */ }
+            if (ctx.state === 'running' && scheduleWebAudio(notes, { type, peak })) return;
+        }
     }
     playHtmlWav(fallbackUrl());
 }
@@ -316,8 +472,8 @@ export function playStretchBeepSound() {
 /** Very short cue at 30s remaining — get ready for the next set. */
 export function playPrepareBeepSound() {
     playSequence(
-        [{ freq: 1244.5, offset: 0, dur: 0.1 }],
-        { type: 'sine', peak: 0.32, fallbackUrl: prepareBeepUrl }
+        [{ freq: 1244.5, offset: 0, dur: 0.14 }],
+        { type: 'sine', peak: 0.52, fallbackUrl: prepareBeepUrl }
     ).catch(() => {
         playHtmlWav(prepareBeepUrl());
     });

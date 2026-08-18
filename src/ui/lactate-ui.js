@@ -1,6 +1,7 @@
 /**
  * Lactate/HIT picker wizard:
- * types → desired RPE (≥7) → baselines (first of type / redo) → build session
+ * types → desired RPE (≥7) → build session
+ * Unknown / redo baselines run as the first intervals in-session.
  * HIT class → diary RPE only (no interval log)
  */
 import { store } from '../state/store.js';
@@ -8,18 +9,19 @@ import {
     HIT_TYPE_OPTIONS,
     HIT_MODALITY_META,
     LACTATE_DURATION_BY_RPE,
+    buildBaselineProtocolRows,
     buildLactateIntervalPlan,
     clampDesiredRpe,
     clampSessionRpe,
     clearModalityBaselines,
+    getBaselineTestSequence,
     getLactateProtocolForSlot,
-    getModalityBaselines,
     hasAnyBaseline,
-    modalitiesNeedingBaseline,
+    hasCompleteBaseline,
+    lactateLogSetFromRow,
     needsLowRpeDisclaimer,
     normalizeHitTypeId,
-    recalculateLactatePlanIntensities,
-    saveModalityBaselines
+    recalculateLactatePlanIntensities
 } from '../domain/lactate-engine.js';
 import { dateToISO, getLactateSlotForDate, isLactateEvent } from '../domain/route-planner.js';
 
@@ -27,8 +29,6 @@ let _pendingContinue = null;
 let _selectedHitIds = new Set(['treadmill_sprints']);
 let _wizardStep = 'types';
 let _desiredRpe = null; // user must choose (min 7)
-let _baselineQueue = [];
-let _baselineIdx = 0;
 let _redoMode = false;
 let _forceRedoTypes = null;
 
@@ -67,7 +67,6 @@ function renderWizard() {
     const body = document.getElementById('lactate-hit-wizard-body');
     if (!body) return;
     if (_wizardStep === 'rpe') renderRpeStep(body);
-    else if (_wizardStep === 'baseline') renderBaselineStep(body);
     else if (_wizardStep === 'redo') renderRedoPicker(body);
     else renderTypesStep(body);
 }
@@ -92,7 +91,7 @@ function renderTypesStep(body) {
             </div>
             <button type="button" onclick="closeLactateHitPicker(false)" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
-        <p style="font-size:11px; color:var(--text-silver); margin:0 0 12px; line-height:1.4;">Pick one or more modalities. Mixed types alternate sets. <strong style="color:var(--text-main);">HIT class</strong> skips intervals — only a diary RPE is collected.</p>
+        <p style="font-size:11px; color:var(--text-silver); margin:0 0 12px; line-height:1.4;">Pick one or more modalities. Mixed types alternate sets. <strong style="color:var(--text-main);">HIT class</strong> skips intervals — only a diary RPE is collected. Missing baselines are tested as the first intervals and count toward the HIT block.</p>
         <input type="search" id="lactate-hit-search" class="input-field" placeholder="Search HIT types…" autocomplete="off" style="margin-bottom:10px;" oninput="filterLactateHitOptions()">
         <div id="lactate-hit-selected" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; min-height:28px;"></div>
         <div id="lactate-hit-options" style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;"></div>
@@ -128,44 +127,6 @@ function renderRpeStep(body) {
         </div>`;
 }
 
-function renderBaselineStep(body) {
-    const typeId = _baselineQueue[_baselineIdx];
-    const meta = HIT_MODALITY_META[typeId];
-    if (!meta) {
-        advanceBaselineQueue();
-        return;
-    }
-    const existing = getModalityBaselines(typeId)?.tests || {};
-    const resist = meta.machineResistance;
-    const progress = `${_baselineIdx + 1} / ${_baselineQueue.length}`;
-
-    body.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
-            <div>
-                <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">Baseline · ${escapeHtml(progress)}</div>
-                <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">${escapeHtml(meta.label)}</div>
-            </div>
-            <button type="button" onclick="closeLactateHitPicker(false)" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
-        </div>
-        <p style="font-size:12px; color:var(--text-silver); line-height:1.45; margin:0 0 10px;">
-            Only <strong style="color:var(--text-main);">one</strong> baseline test is required. Providing more gives the app a more complete picture of your speed.
-        </p>
-        ${resist ? `<div style="font-size:11px; color:var(--gold-accent); border:1px solid rgba(212,175,55,0.3); background:rgba(212,175,55,0.08); border-radius:8px; padding:10px; margin-bottom:12px; line-height:1.4;">Set machine resistance to <strong>${resist}</strong> for these tests and for the session.</div>` : ''}
-        <div id="lactate-baseline-fields" style="display:flex; flex-direction:column; gap:10px; margin-bottom:12px;">
-            ${meta.tests.map(t => `
-                <div>
-                    <label style="display:block; font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:4px; text-transform:uppercase;">${escapeHtml(t.label)} (${escapeHtml(t.unit)})</label>
-                    <input type="number" inputmode="decimal" min="0" step="0.1" data-test-id="${escapeHtml(t.id)}" class="input-field lactate-baseline-input" placeholder="Optional unless this is your only entry" value="${existing[t.id] != null ? escapeHtml(String(existing[t.id])) : ''}" style="margin:0;">
-                    ${t.hint ? `<div style="font-size:10px; color:var(--text-stealth); margin-top:4px;">${escapeHtml(t.hint)}</div>` : ''}
-                </div>`).join('')}
-        </div>
-        <div id="lactate-baseline-error" style="display:none; font-size:12px; color:#ff6b6b; margin-bottom:10px;"></div>
-        <div style="display:flex; flex-direction:column; gap:8px;">
-            <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="submitLactateBaselineStep()">Save &amp; continue</button>
-            <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="${_redoMode ? 'lactateWizardBackToTypes()' : 'lactateWizardBackToRpe()'}">Back</button>
-        </div>`;
-}
-
 function renderRedoPicker(body) {
     const options = HIT_TYPE_OPTIONS.filter(t => t.id !== 'hit_class');
     body.innerHTML = `
@@ -176,7 +137,7 @@ function renderRedoPicker(body) {
             </div>
             <button type="button" onclick="closeLactateHitPicker(false)" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
-        <p style="font-size:12px; color:var(--text-silver); line-height:1.45; margin:0 0 12px;">Use this after fitness gains or if a prior test was inaccurate. Existing values are cleared when you save new ones.</p>
+        <p style="font-size:12px; color:var(--text-silver); line-height:1.45; margin:0 0 12px;">Use this after fitness gains or if a prior test was inaccurate. Retests run as the next intervals — shortest to longest, with rest after each result.</p>
         <div id="lactate-redo-options" style="display:flex; flex-direction:column; gap:6px; margin-bottom:14px; max-height:240px; overflow:auto;">
             ${options.map(opt => {
                 const has = hasAnyBaseline(opt.id);
@@ -234,6 +195,7 @@ export function filterLactateHitOptions() {
         const label = String(opt.label || id);
         const selected = _selectedHitIds.has(id);
         const isClass = id === 'hit_class';
+        const hasComplete = !isClass && hasCompleteBaseline(id);
         const hasBase = !isClass && hasAnyBaseline(id);
         const border = selected ? 'var(--gold-accent)' : 'var(--border-highlight)';
         const bg = selected ? 'rgba(212,175,55,0.1)' : 'var(--bg-surface-elevated)';
@@ -241,12 +203,13 @@ export function filterLactateHitOptions() {
         const statusColor = selected ? 'var(--gold-accent)' : 'var(--text-stealth)';
         const sub = isClass
             ? 'Diary RPE only — no intervals'
-            : (hasBase ? 'Baseline saved' : 'No baseline yet');
+            : (hasComplete ? 'Baseline saved'
+                : (hasBase ? 'Baseline incomplete — tests in session' : 'No baseline yet — tests in session'));
 
-        const redoBtn = !isClass
+        const redoBtn = !isClass && hasBase
             ? `<button type="button" onclick="redoLactateBaselineForType('${escapeHtml(id)}')"
                 style="flex-shrink:0; background:transparent; border:1px solid var(--border-subtle); border-radius:6px; color:var(--text-silver); font-size:9px; font-family:'Roboto Mono',monospace; font-weight:700; padding:6px 8px; cursor:pointer; white-space:nowrap;">
-                ${hasBase ? 'REDO BASELINE' : 'SET BASELINE'}
+                REDO BASELINE
                </button>`
             : '';
 
@@ -308,13 +271,15 @@ export function redoLactateBaselineForType(id) {
     const nid = normalizeHitTypeId(id);
     if (!nid || nid === 'hit_class' || !HIT_MODALITY_META[nid]) return;
     if (hasAnyBaseline(nid)) clearModalityBaselines(nid);
-    // Keep this type selected so Continue can use it after retest
     _selectedHitIds.delete('hit_class');
     _selectedHitIds.add(nid);
-    _baselineQueue = [nid];
-    _baselineIdx = 0;
     _redoMode = true;
-    _wizardStep = 'baseline';
+    if (sessionHasLactateLog()) {
+        spliceBaselineTestsIntoActiveLog([nid]);
+        closeLactateHitPicker(true);
+        return;
+    }
+    _wizardStep = 'types';
     renderWizard();
 }
 
@@ -337,11 +302,18 @@ export function confirmLactateRedoSelection() {
         alert('Select at least one modality to retest.');
         return;
     }
-    ids.forEach(clearModalityBaselines);
-    _baselineQueue = ids;
-    _baselineIdx = 0;
+    ids.forEach((id) => {
+        clearModalityBaselines(id);
+        _selectedHitIds.delete('hit_class');
+        _selectedHitIds.add(normalizeHitTypeId(id));
+    });
     _redoMode = true;
-    _wizardStep = 'baseline';
+    if (sessionHasLactateLog()) {
+        spliceBaselineTestsIntoActiveLog(ids);
+        closeLactateHitPicker(true);
+        return;
+    }
+    _wizardStep = 'types';
     renderWizard();
 }
 
@@ -350,72 +322,115 @@ export function confirmLactateDesiredRpe() {
         alert('Choose a desired RPE (7–10) for this session.');
         return;
     }
-    const types = [..._selectedHitIds].map(normalizeHitTypeId);
-    const needing = modalitiesNeedingBaseline(types);
-    if (needing.length) {
-        _baselineQueue = needing;
-        _baselineIdx = 0;
-        _wizardStep = 'baseline';
-        renderWizard();
-        return;
-    }
     finishLactateWizardAndContinue();
 }
 
+/** @deprecated Wizard form removed — in-session tests collect results. */
 export function submitLactateBaselineStep() {
-    const typeId = _baselineQueue[_baselineIdx];
-    const meta = HIT_MODALITY_META[typeId];
-    const err = document.getElementById('lactate-baseline-error');
-    if (!meta) {
-        advanceBaselineQueue();
-        return;
-    }
-    const tests = {};
-    document.querySelectorAll('.lactate-baseline-input').forEach(input => {
-        const id = input.getAttribute('data-test-id');
-        const v = parseFloat(input.value);
-        if (Number.isFinite(v) && v > 0) tests[id] = v;
-    });
-    if (!Object.keys(tests).length) {
-        if (err) {
-            err.style.display = 'block';
-            err.textContent = 'Enter at least one baseline test result.';
-        }
-        return;
-    }
-    saveModalityBaselines(typeId, tests);
-    advanceBaselineQueue();
+    finishLactateWizardAndContinue();
 }
 
-function advanceBaselineQueue() {
-    _baselineIdx += 1;
-    if (_baselineIdx >= _baselineQueue.length) {
-        // In-session redo: refresh targets and close
-        if (_redoMode && window._lactateHitSelection && !window._lactateHitSelection.isHitClass) {
-            _redoMode = false;
-            const sel = window._lactateHitSelection;
-            window._lactateHitSelection = recalculateLactatePlanIntensities(
-                sel,
-                sel.sessionRpe ?? sel.desiredRpe ?? 7
-            );
-            syncLactateIntensitiesIntoActiveLog();
-            closeLactateHitPicker(true);
-            if (typeof window.renderWorkoutLog === 'function') window.renderWorkoutLog();
-            if (window.currentModalExIdx != null && typeof window.renderExerciseSets === 'function') {
-                window.renderExerciseSets();
-            }
-            return;
+function sessionHasLactateLog() {
+    const items = store.activeLog?.items;
+    if (!Array.isArray(items) || !items.length) return false;
+    return items.some(item => item?.isLactateHit || (item.sets || []).some(s => s?.isLactateHit));
+}
+
+function isLactateLogItem(item) {
+    if (!item) return false;
+    if (/hit\s*class/i.test(item.exercise?.name || '')) return false;
+    return !!(item.isLactateHit || (item.sets || []).some(s => s && s.isLactateHit));
+}
+
+function spliceBaselineTestsIntoActiveLog(typeIds) {
+    const ids = (typeIds || []).map(normalizeHitTypeId).filter(id => id && HIT_MODALITY_META[id]);
+    if (!ids.length) return;
+    ids.forEach(clearModalityBaselines);
+    const testRows = [];
+    ids.forEach((id) => {
+        testRows.push(...buildBaselineProtocolRows(id, getBaselineTestSequence(id)));
+    });
+    if (!testRows.length) return;
+
+    const sel = window._lactateHitSelection;
+    const items = store.activeLog?.items;
+    if (!sel || sel.isHitClass || !Array.isArray(items)) {
+        if (sel && !sel.isHitClass) {
+            sel.rows = [...testRows, ...(sel.rows || []).filter(r => !r.isBaselineTest)];
+            sel.hasBaselineTests = true;
         }
-        if (_redoMode && !_pendingContinue) {
-            _redoMode = false;
-            _wizardStep = 'types';
-            renderWizard();
-            return;
-        }
-        finishLactateWizardAndContinue();
         return;
     }
-    renderWizard();
+
+    let insertAt = items.findIndex(isLactateLogItem);
+    if (insertAt < 0) insertAt = items.length;
+    let cursor = 0;
+    let foundIncomplete = false;
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!isLactateLogItem(item)) continue;
+        const sets = item.sets || [];
+        for (let s = 0; s < sets.length; s++) {
+            if (sets[s]?.isBaselineTest && !sets[s].completed) {
+                foundIncomplete = true;
+                break;
+            }
+            if (!sets[s]?.completed) {
+                insertAt = i;
+                foundIncomplete = true;
+                break;
+            }
+            cursor += 1;
+        }
+        if (foundIncomplete) break;
+        insertAt = i + 1;
+    }
+
+    const lactateItems = items.filter(isLactateLogItem);
+    const mixed = (sel.types || []).length > 1 || lactateItems.length > 1;
+
+    if (!mixed && lactateItems.length === 1) {
+        const item = lactateItems[0];
+        const setInsert = (item.sets || []).findIndex(s => s && !s.completed && !s.isBaselineTest);
+        const at = setInsert < 0 ? (item.sets || []).length : setInsert;
+        const newSets = testRows.map(lactateLogSetFromRow);
+        item.sets.splice(at, 0, ...newSets);
+        item.lactateRows = item.lactateRows || [];
+        item.lactateRows.splice(at, 0, ...testRows);
+        item.plannedSets = (item.sets || []).length;
+        const rowAt = Math.max(0, Math.min(cursor, (sel.rows || []).length));
+        sel.rows = sel.rows || [];
+        sel.rows.splice(rowAt, 0, ...testRows);
+    } else {
+        const newItems = testRows.map((row) => ({
+            exercise: {
+                id: `HIT_${row.typeId || 'TEST'}`,
+                name: row.name,
+                domain: 'cardio',
+                muscle_group: 'cardio'
+            },
+            note: row.notes || row._baseNotes,
+            isLactateHit: true,
+            plannedSets: 1,
+            lactateRows: [row],
+            sets: [lactateLogSetFromRow(row)]
+        }));
+        items.splice(insertAt, 0, ...newItems);
+        sel.rows = sel.rows || [];
+        const rowAt = Math.max(0, Math.min(cursor, sel.rows.length));
+        sel.rows.splice(rowAt, 0, ...testRows);
+    }
+
+    sel.hasBaselineTests = true;
+    window._lactateHitSelection = recalculateLactatePlanIntensities(
+        sel,
+        sel.sessionRpe ?? sel.desiredRpe ?? 7
+    );
+    syncLactateIntensitiesIntoActiveLog();
+    if (typeof window.renderWorkoutLog === 'function') window.renderWorkoutLog();
+    if (window.currentModalExIdx != null && typeof window.renderExerciseSets === 'function') {
+        window.renderExerciseSets();
+    }
 }
 
 function finishLactateWizardAndContinue() {
@@ -447,6 +462,7 @@ function finishLactateWizardAndContinue() {
         desiredRpe: plan.desiredRpe,
         sessionRpe: plan.sessionRpe,
         blockMinutes: plan.blockMinutes,
+        hasBaselineTests: !!plan.hasBaselineTests,
         createdAt: new Date().toISOString()
     };
 
@@ -513,8 +529,6 @@ export function openLactateHitPicker(onContinue) {
     _desiredRpe = null;
     _redoMode = false;
     _forceRedoTypes = null;
-    _baselineQueue = [];
-    _baselineIdx = 0;
     _selectedHitIds = new Set(['treadmill_sprints']);
     const modal = ensureLactateHitModal();
     renderWizard();
@@ -580,6 +594,11 @@ export function syncLactateIntensitiesIntoActiveLog() {
             (item.sets || []).forEach((set, i) => {
                 const fresh = rows[rowCursor + i];
                 if (!fresh || set.isText) return;
+                if (set.isBaselineTest) {
+                    set.notes = fresh.notes || set.notes;
+                    set.targetDisplay = fresh.targetDisplay || set.targetDisplay;
+                    return;
+                }
                 set.notes = fresh.notes;
                 set.targetDisplay = fresh.targetDisplay;
                 set.targetRate = fresh.targetRate;
@@ -604,7 +623,7 @@ export function lactateSessionRpeBarHtml() {
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
                 <div style="min-width:0;">
                     <div style="font-size:9px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; letter-spacing:0.5px; text-transform:uppercase;">Session RPE</div>
-                    <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">HIT block ${block} min (from start RPE ${sel.desiredRpe ?? live}). Raising/lowering adjusts targets.</div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">HIT block ${block} min (from start RPE ${sel.desiredRpe ?? live})${sel.hasBaselineTests ? ' · includes baseline tests' : ''}. Raising/lowering adjusts targets.</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
                     <button type="button" onclick="adjustLactateSessionRpe(-1)" style="width:36px; height:36px; border-radius:8px; border:1px solid var(--border-highlight); background:var(--bg-surface-elevated); color:var(--text-main); font-size:18px; font-weight:700; cursor:pointer;">−</button>

@@ -61,7 +61,7 @@ export function renderDiaryFields(mode, prefillEntry = null) {
     html += `<div class="diary-field-block" style="margin-bottom:15px;">
       <label style="margin-top:0;">${escapeHtml(f.label)}${typeBadge ? ` <span style="color:var(--text-stealth); font-weight:600; font-size:9px; text-transform:uppercase;">${typeBadge}</span>` : ''}</label>
       ${f.hint ? `<div style="font-size:9px; color:var(--text-muted); margin-bottom:8px;">${escapeHtml(f.hint)}</div>` : ''}
-      <input class="input-field" style="margin-bottom:0;" data-diary-field-id="${escapeHtml(f.id)}" data-diary-field-type="${storeType}" ${inputAttrs} placeholder="${isQuant ? (tenScale ? '1–10' : '0') : 'Type here…'}">
+      <input class="input-field" style="margin-bottom:0;" data-diary-field-id="${escapeHtml(f.id)}" data-diary-field-type="${storeType}" ${inputAttrs} placeholder="${isQuant ? (tenScale ? '1–10' : (f.id === 'hydration_ml' ? 'e.g. 500' : '0')) : 'Type here…'}">
     </div>`;
   });
   host.innerHTML = html || `<div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">No diary fields — use Edit diary entry to add some.</div>`;

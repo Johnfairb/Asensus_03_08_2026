@@ -641,9 +641,9 @@ export function openExerciseDetail(id) {
                     <div style="padding:10px; border:1px solid var(--border-subtle); border-radius:10px; margin-bottom:8px;">
                         <div class="hud-label" style="margin:0 0 8px 0;">${optionLabel(code)}</div>
                         <label style="font-size:10px;">Minimum (${unit})</label>
-                        <input type="number" step="${lb ? '1' : '0.1'}" class="input-field" id="inc-min-${code}" value="${minVal}" style="margin-bottom:8px;">
+                        <input type="number" step="${lb ? '0.5' : '0.1'}" class="input-field" id="inc-min-${code}" value="${minVal}" style="margin-bottom:8px;">
                         <label style="font-size:10px;">Increment (${unit})</label>
-                        <input type="number" step="${lb ? '1' : '0.1'}" class="input-field" id="inc-step-${code}" value="${stepVal}">
+                        <input type="number" step="${lb ? '0.5' : '0.1'}" class="input-field" id="inc-step-${code}" value="${stepVal}">
                     </div>`;
             }).join('');
             bodyParts.push(`

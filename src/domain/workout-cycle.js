@@ -11,7 +11,16 @@ import {
     getAnchorDayOfMonth,
     parseISODate
 } from './billing-month.js';
-import { getGymPlanPrefs, isHybridPhase, isStrengthPhase, loadStrengthMonthPlan, saveStrengthMonthPlan, rebuildStrengthSessionInPlan } from './strength-engine.js';
+import {
+    getGymPlanPrefs,
+    isHybridPhase,
+    isStrengthPhase,
+    loadStrengthMonthPlan,
+    saveStrengthMonthPlan,
+    rebuildStrengthSessionInPlan,
+    peekStoredStrengthMonthPlan,
+    peekCycleStrengthPlan
+} from './strength-engine.js';
 import {
     buildHypertrophySessionRoutine,
     getHypertrophyPlanPrefs,
@@ -56,6 +65,7 @@ export function loadCycleState() {
             endDate,
             endSunday: endDate, // back-compat alias
             decisionsResolved: !!raw.decisionsResolved,
+            lastDecidedStart: raw.lastDecidedStart || null,
             pendingDecisions: raw.pendingDecisions && typeof raw.pendingDecisions === 'object' ? raw.pendingDecisions : {}
         };
     } catch (e) {
@@ -69,6 +79,7 @@ export function saveCycleState(state) {
             startDate: state.startDate || null,
             endDate: state.endDate || state.endSunday || null,
             decisionsResolved: !!state.decisionsResolved,
+            lastDecidedStart: state.lastDecidedStart || null,
             pendingDecisions: state.pendingDecisions && typeof state.pendingDecisions === 'object' ? state.pendingDecisions : {}
         };
         localStorage.setItem(CYCLE_KEY, JSON.stringify(toSave));
@@ -104,44 +115,92 @@ export function setCyclePlan(sessionTypeId, plan) {
 /**
  * Start / resume the monthly cycle from the onboarding (billing) anchor.
  */
+function isIsoDayKey(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+/** Oldest month-plan key that still belongs to a previous billing period. */
+function priorStrengthPlanStart(periodStart) {
+    const months = [peekCycleStrengthPlan()?.month, peekStoredStrengthMonthPlan()?.month]
+        .filter((m) => isIsoDayKey(m) && m < periodStart)
+        .sort();
+    return months[0] || null;
+}
+
+function cycleFromPeriod(period, startDate = period.startDate, { decided = false } = {}) {
+    const day = getAnchorDayOfMonth(ensureMonthAnchor(parseISODate(startDate) || new Date()));
+    return {
+        startDate,
+        endDate: anniversaryAfter(startDate, day) || period.endDate,
+        decisionsResolved: false,
+        lastDecidedStart: decided ? startDate : null,
+        pendingDecisions: {}
+    };
+}
+
 export function ensureCycleStarted(date = new Date()) {
     ensureMonthAnchor(date);
-    let state = loadCycleState();
     const period = getBillingPeriodForDate(date);
+    const today = dateToISO(date);
+    let state = loadCycleState();
+    const priorStart = priorStrengthPlanStart(period.startDate);
 
     if (state?.startDate && state?.endDate && !state.decisionsResolved) {
-        // Migrate period bounds if we're still in an active block but endDate drifted
+        // Mid-month legacy cycle: this period is already in progress, not a renewal.
+        if (!state.lastDecidedStart && state.startDate === period.startDate && today < state.endDate && today !== period.startDate) {
+            state = { ...state, lastDecidedStart: state.startDate };
+            saveCycleState(state);
+            return state;
+        }
+        // Login stamped today's new billing period without keep/change/custom — rewind.
+        if (!state.lastDecidedStart && state.startDate === period.startDate && today >= period.startDate && priorStart) {
+            state = {
+                startDate: priorStart,
+                endDate: period.startDate,
+                decisionsResolved: false,
+                lastDecidedStart: priorStart,
+                pendingDecisions: state.pendingDecisions || {}
+            };
+            saveCycleState(state);
+            return state;
+        }
         return state;
     }
 
     if (state?.startDate && state?.endDate && state.decisionsResolved) {
-        state = {
-            startDate: period.startDate,
-            endDate: period.endDate,
-            decisionsResolved: false,
-            pendingDecisions: {}
-        };
+        state = { ...state, decisionsResolved: false };
         saveCycleState(state);
         return state;
     }
 
-    state = {
-        startDate: period.startDate,
-        endDate: period.endDate,
-        decisionsResolved: false,
-        pendingDecisions: {}
-    };
+    if (priorStart) {
+        state = cycleFromPeriod(period, priorStart);
+        state.endDate = period.startDate;
+        state.lastDecidedStart = priorStart;
+        saveCycleState(state);
+        return state;
+    }
+
+    // First training month — not a renewal.
+    state = cycleFromPeriod(period, period.startDate, { decided: true });
     saveCycleState(state);
     return state;
 }
 
-/** True when the monthly anniversary has arrived and choices are still outstanding. */
+/** True when the monthly anniversary has arrived and keep/change/custom is still outstanding. */
 export function needsCycleDecisions(date = new Date()) {
     const state = loadCycleState();
     if (!state?.startDate || !state?.endDate) return false;
     if (state.decisionsResolved) return false;
     const today = dateToISO(date);
-    return today >= state.endDate;
+    const period = getBillingPeriodForDate(date);
+    if (state.lastDecidedStart && state.lastDecidedStart === period.startDate) return false;
+    if (today >= state.endDate) return true;
+    // Silently moved onto this billing period without a decision (including later the same week).
+    if (!state.lastDecidedStart && state.startDate === period.startDate && today >= period.startDate) {
+        return true;
+    }
+    return !!priorStrengthPlanStart(period.startDate) && today >= period.startDate;
 }
 
 /** @deprecated Sunday no longer special — alias of needsCycleDecisions. */
@@ -529,6 +588,7 @@ export function finalizeCycleDecisions(date = new Date()) {
         startDate: start,
         endDate: computeCycleEndDate(start),
         decisionsResolved: false,
+        lastDecidedStart: start,
         pendingDecisions: {}
     };
     saveCycleState(next);
@@ -554,6 +614,16 @@ export function finalizeCycleDecisions(date = new Date()) {
             if (pending[t.id] === 'change' && cleaned[t.id]) {
                 cleaned[t.id].exercisesConfirmed = false;
                 delete cleaned[t.id].lockedItems;
+            }
+        });
+        Object.keys(cleaned).forEach((id) => {
+            if (cleaned[id]?.strengthPlan) {
+                cleaned[id].strengthPlan = {
+                    ...cleaned[id].strengthPlan,
+                    month: next.startDate,
+                    cycleStart: next.startDate,
+                    cycleEnd: next.endDate
+                };
             }
         });
         saveCyclePlans(cleaned);

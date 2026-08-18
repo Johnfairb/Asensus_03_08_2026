@@ -4,15 +4,16 @@
 import { store } from '../state/store.js';
 import {
     applyCycleDecision,
+    ensureCycleStarted,
     finalizeCycleDecisions,
     getSessionTypesForCurrentProgramme,
     loadCycleState,
     needsCycleDecisions,
-    allCycleDecisionsComplete
+    allCycleDecisionsComplete,
+    focusForSessionType
 } from '../domain/workout-cycle.js';
 import { parseTemplateDetails, parseTemplateMeta } from './templates.js';
 import { prettyWorkoutTypeLabel } from '../domain/route-planner.js';
-import { focusForSessionType } from '../domain/workout-cycle.js';
 
 let _customForTypeId = null;
 
@@ -38,9 +39,12 @@ function ensureModal() {
 }
 
 export function maybeOpenWorkoutCycleModal() {
+    try { ensureCycleStarted(new Date()); } catch (e) { /* still try */ }
     if (!needsCycleDecisions()) return false;
     const types = getSessionTypesForCurrentProgramme();
     if (!types.length) return false;
+    const existing = document.getElementById('workout-cycle-modal');
+    if (existing && !existing.classList.contains('hidden')) return true;
     renderWorkoutCycleModal();
     return true;
 }

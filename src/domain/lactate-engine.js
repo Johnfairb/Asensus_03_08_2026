@@ -196,6 +196,114 @@ export function formatWorkRestLabel(workSec, restSec) {
     return `${formatSec(workSec)} work / ${formatSec(restSec)} rest`;
 }
 
+export const BASELINE_REST_AFTER_SHORT_SEC = 60;
+export const BASELINE_REST_AFTER_LONG_SEC = 120;
+
+/** In-session tests, shortest first (20 s before 40 s; 100 m before 400 m). */
+export function getBaselineTestSequence(typeId) {
+    const meta = HIT_MODALITY_META[normalizeHitTypeId(typeId)];
+    if (!meta?.tests?.length) return [];
+    return [...meta.tests].sort((a, b) => {
+        const ka = Number(a.durationSec || a.distanceM || 0);
+        const kb = Number(b.durationSec || b.distanceM || 0);
+        return ka - kb;
+    });
+}
+
+export function isDurationBaselineTest(test) {
+    return !!(test && test.durationSec);
+}
+
+/** Planning duration so tests eat into the HIT block before remaining intervals are generated. */
+export function estimateBaselineWorkSec(typeId, test) {
+    if (test?.durationSec) return Math.round(Number(test.durationSec));
+    const dist = Number(test?.distanceM) || 0;
+    if (!(dist > 0)) return 20;
+    const id = normalizeHitTypeId(typeId);
+    if (id === 'swimming') return Math.max(20, Math.round(dist * 0.9));
+    return Math.max(15, Math.round(dist * 0.2));
+}
+
+export function missingBaselineTests(typeId) {
+    const seq = getBaselineTestSequence(typeId);
+    const stored = getModalityBaselines(typeId)?.tests || {};
+    return seq.filter(t => !(Number(stored[t.id]) > 0));
+}
+
+export function hasCompleteBaseline(typeId) {
+    const seq = getBaselineTestSequence(typeId);
+    return seq.length > 0 && missingBaselineTests(typeId).length === 0;
+}
+
+export function buildBaselineProtocolRows(typeId, tests = null) {
+    const id = normalizeHitTypeId(typeId);
+    const seq = Array.isArray(tests) ? tests : getBaselineTestSequence(id);
+    if (!seq.length) return [];
+    const lastIdx = seq.length - 1;
+    return seq.map((test, i) => {
+        const durationKind = isDurationBaselineTest(test);
+        const workSec = estimateBaselineWorkSec(id, test);
+        const restSec = i === lastIdx ? BASELINE_REST_AFTER_LONG_SEC : BASELINE_REST_AFTER_SHORT_SEC;
+        const restLabel = restSec >= 120 ? '2 min rest' : '1 min rest';
+        return {
+            typeId: id,
+            name: hitTypeLabel(id),
+            setIndex: i + 1,
+            workSec,
+            restSec,
+            durationSec: workSec,
+            isBaselineTest: true,
+            baselineTestId: test.id,
+            baselineKind: durationKind ? 'duration' : 'distance',
+            baselineUnit: test.unit,
+            baselineLabel: test.label,
+            baselineHint: test.hint || null,
+            baselineDistanceM: test.distanceM || null,
+            baselineFixedWorkSec: test.durationSec || null,
+            repsLabel: durationKind
+                ? `${formatSec(test.durationSec)} all-out`
+                : `${test.label} · stopwatch`,
+            targetDisplay: 'All-out',
+            targetRate: 0,
+            targetValue: 0,
+            _baseNotes: `Baseline test · ${test.label} · then ${restLabel}`
+        };
+    });
+}
+
+export function mergeModalityBaselineTest(typeId, testId, rawValue) {
+    const n = Number(rawValue);
+    if (!(n > 0) || !testId) return null;
+    const existing = getModalityBaselines(typeId)?.tests || {};
+    existing[testId] = n;
+    return saveModalityBaselines(typeId, existing);
+}
+
+export function lactateLogSetFromRow(row) {
+    const workSec = Number(row?.workSec || row?.durationSec) || 0;
+    return {
+        weight: 0,
+        reps: 0,
+        duration_sec: workSec,
+        rpe: '',
+        completed: false,
+        isLactateHit: true,
+        restTime: Number(row?.restSec) || 0,
+        notes: row?.notes || row?._baseNotes || undefined,
+        targetDisplay: row?.targetDisplay || undefined,
+        targetRate: row?.targetRate || undefined,
+        targetValue: row?.targetValue || undefined,
+        isBaselineTest: !!row?.isBaselineTest,
+        baselineTestId: row?.baselineTestId || null,
+        baselineKind: row?.baselineKind || null,
+        baselineUnit: row?.baselineUnit || null,
+        baselineLabel: row?.baselineLabel || null,
+        baselineHint: row?.baselineHint || null,
+        baselineFixedWorkSec: row?.baselineFixedWorkSec || null,
+        typeId: row?.typeId || null
+    };
+}
+
 export function getRpeRules(rpe) {
     const r = clampSessionRpe(rpe);
     return LACTATE_RPE_RULES[r] || LACTATE_RPE_RULES[7];
@@ -239,7 +347,7 @@ export function hasAnyBaseline(typeId) {
 export function modalitiesNeedingBaseline(typeIds) {
     return (typeIds || [])
         .map(normalizeHitTypeId)
-        .filter(id => id && id !== 'hit_class' && HIT_MODALITY_META[id] && !hasAnyBaseline(id));
+        .filter(id => id && id !== 'hit_class' && HIT_MODALITY_META[id] && missingBaselineTests(id).length > 0);
 }
 
 export function saveModalityBaselines(typeId, testsObj) {
@@ -529,6 +637,19 @@ export function applyIntensityToRows(rows, sessionRpe, baselinesByType = null) {
     let prevByType = Object.create(null);
     return (rows || []).map((row) => {
         const typeId = normalizeHitTypeId(row.typeId);
+        if (row.isBaselineTest) {
+            const baseNotes = row._baseNotes || row.notes || `Baseline test · ${row.baselineLabel || ''}`.trim();
+            return {
+                ...row,
+                typeId,
+                _baseNotes: baseNotes,
+                targetRate: 0,
+                targetDisplay: 'All-out',
+                targetUnit: '',
+                targetValue: 0,
+                notes: baseNotes
+            };
+        }
         const prev = prevByType[typeId] || null;
         const baselines = baselinesByType?.[typeId] || null;
         const intensity = computeSetIntensity({
@@ -571,7 +692,8 @@ export function buildLactateIntervalPlan({
     slot = 'A',
     date = new Date(),
     desiredRpe = 7,
-    sessionRpe = null
+    sessionRpe = null,
+    forceRetestTypes = null
 } = {}) {
     const selected = (types || []).map(normalizeHitTypeId).filter(Boolean);
     const isHitClass = selected.length === 1 && selected[0] === 'hit_class';
@@ -580,6 +702,7 @@ export function buildLactateIntervalPlan({
     const liveRpe = sessionRpe != null ? clampSessionRpe(sessionRpe) : initialRpe;
     const blockSec = lactateWorkBlockSec(initialRpe);
     const blockMin = lactateWorkBlockMinutes(initialRpe);
+    const retest = new Set((forceRetestTypes || []).map(normalizeHitTypeId).filter(Boolean));
 
     if (isHitClass || (!intervalTypes.length && selected.includes('hit_class'))) {
         return {
@@ -606,10 +729,18 @@ export function buildLactateIntervalPlan({
 
     const seed = Date.now() ^ (getLactateMonthKey(date) * 1009) ^ (slot === 'B' ? 77 : 13) ^ (initialRpe * 17);
     const rng = mulberry32(seed);
-    const intervals = generateVariableIntervalSets(blockSec, rng, liveRpe);
     const modalities = intervalTypes.length ? intervalTypes : ['treadmill_sprints'];
+
+    const testRows = [];
+    modalities.forEach((typeId) => {
+        const tests = retest.has(typeId) ? getBaselineTestSequence(typeId) : missingBaselineTests(typeId);
+        if (tests.length) testRows.push(...buildBaselineProtocolRows(typeId, tests));
+    });
+    const consumedSec = testRows.reduce((s, r) => s + (Number(r.workSec) || 0) + (Number(r.restSec) || 0), 0);
+    const remainingSec = Math.max(0, blockSec - consumedSec);
+    const intervals = remainingSec >= 40 ? generateVariableIntervalSets(remainingSec, rng, liveRpe) : [];
     const totalSets = intervals.length;
-    const rawRows = [];
+    const rawRows = [...testRows];
 
     if (modalities.length === 1) {
         for (let i = 0; i < totalSets; i++) {
@@ -662,13 +793,19 @@ export function buildLactateIntervalPlan({
 
     const rows = applyIntensityToRows(rawRows, liveRpe);
     const typeNames = modalities.map(hitTypeLabel).join(' + ');
+    const nTest = testRows.length;
+    const workSummary = totalSets
+        ? `${totalSets}× variable · ${blockMin} min HIT @ RPE ${initialRpe}`
+        : `${blockMin} min HIT @ RPE ${initialRpe}`;
     const protocol = {
         slot,
-        sets: totalSets,
+        sets: nTest + totalSets,
         blockMinutes: blockMin,
         desiredRpe: initialRpe,
-        label: 'variable work/rest',
-        summary: `${totalSets}× variable · ${blockMin} min HIT @ RPE ${initialRpe}`
+        label: nTest ? 'baseline tests + variable work/rest' : 'variable work/rest',
+        summary: nTest
+            ? `${nTest} baseline test${nTest === 1 ? '' : 's'} + ${workSummary}`
+            : workSummary
     };
     return {
         isHitClass: false,
@@ -678,6 +815,7 @@ export function buildLactateIntervalPlan({
         desiredRpe: initialRpe,
         sessionRpe: liveRpe,
         blockMinutes: blockMin,
+        hasBaselineTests: nTest > 0,
         rows,
         summary: `Session ${slot}: ${protocol.summary} · ${typeNames}`
     };
@@ -693,18 +831,22 @@ export function recalculateLactatePlanIntensities(selection, newSessionRpe) {
     }));
     const rows = applyIntensityToRows(baseRows, rpe);
     const blockMin = selection.blockMinutes || lactateWorkBlockMinutes(selection.desiredRpe || 7);
+    const nTest = rows.filter(r => r.isBaselineTest).length;
+    const nWork = rows.length - nTest;
+    const typeNames = (selection.types || []).map(hitTypeLabel).join(' + ');
+    const workBit = nWork ? `${nWork}× variable · ` : '';
     return {
         ...selection,
         sessionRpe: rpe,
+        hasBaselineTests: nTest > 0,
         rows,
-        summary: `Session ${selection.slot || 'A'}: ${rows.length}× variable · ${blockMin} min HIT @ RPE ${selection.desiredRpe || rpe} (live ${rpe}) · ${(selection.types || []).map(hitTypeLabel).join(' + ')}`
+        summary: `Session ${selection.slot || 'A'}: ${nTest ? `${nTest} baseline test${nTest === 1 ? '' : 's'} + ` : ''}${workBit}${blockMin} min HIT @ RPE ${selection.desiredRpe || rpe} (live ${rpe}) · ${typeNames}`
     };
 }
 
 export function getLactateWarmupParts() {
     // Nested children so lactate warmup parts expand like hypertrophy (press for teaching points)
     const joints = ['Neck', 'Shoulders', 'Hips', 'Ankles'];
-    const dynamic = ['Leg swings', 'Open/close gate', 'Walking lunges'];
     return [
         {
             name: 'Pulse Raising',
@@ -720,12 +862,6 @@ export function getLactateWarmupParts() {
             reps: '10 Reps/Joint',
             notes: 'Tap a joint for its teaching-point video.',
             children: joints.map(j => ({ name: j, reps: 'Video', notes: 'Teaching point video placeholder' }))
-        },
-        {
-            name: 'Dynamic Stretching',
-            reps: '5 Mins',
-            notes: 'Tap a stretch for its teaching-point video.',
-            children: dynamic.map(s => ({ name: s, reps: 'Video', notes: 'Teaching point video placeholder' }))
         }
     ];
 }

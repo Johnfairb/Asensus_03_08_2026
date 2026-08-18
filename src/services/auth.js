@@ -163,6 +163,7 @@ export async function bootOperatorProfile() {
             loadTemplates();
             loadHistory();
             generateGroceryList();
+            import('../ui/workout-cycle-ui.js').then((m) => m.maybeOpenWorkoutCycleModal()).catch(() => {});
 
         } else {
             // -- BRAND NEW USER: SHOW ONBOARDING --

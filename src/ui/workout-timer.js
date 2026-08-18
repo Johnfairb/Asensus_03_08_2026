@@ -203,6 +203,21 @@ export function syncExerciseTimer(item, { editing = false } = {}) {
   }
 }
 
+export function sumExerciseDurationMs(items) {
+  return (items || []).reduce((sum, it) => {
+    if (!itemUsesExerciseTimer(it)) return sum;
+    const frozen = Number(it.exerciseDurationMs) || 0;
+    const live = getExerciseDurationMs(it);
+    return sum + Math.max(0, frozen || live);
+  }, 0);
+}
+
+/** Session clock minus the sum of per-exercise clocks (transitions, rests between lifts, warmup/stretch). */
+export function computeMiscellaneousMs(items, sessionMs) {
+  const total = Math.max(0, Number(sessionMs) || 0);
+  return Math.max(0, total - sumExerciseDurationMs(items));
+}
+
 /** Freeze any still-running exercise clocks when Complete log is pressed. */
 export function freezeOpenExerciseTimers(items) {
   const now = Date.now();

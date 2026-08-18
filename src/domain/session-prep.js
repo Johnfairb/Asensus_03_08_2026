@@ -160,10 +160,11 @@ export function saveSessionPrepPrefs(partial) {
     return next;
 }
 
-/** Map focus / session kind → gym | practice pair key. */
+/** Map focus / session kind → gym | practice | power pair key. */
 export function prepContextForFocus(focus) {
     const f = String(focus || '');
     if (/practice/i.test(f) || /match|game/i.test(f)) return 'practice';
+    if (/power/i.test(f)) return 'power';
     return 'gym';
 }
 
@@ -205,7 +206,8 @@ function videoPart(name) {
     );
 }
 
-/** Structured warmup parts for gym (hypertrophy/strength) or practice/match. */
+/** Structured warmup parts for gym, power, or practice/match.
+ * Dynamic stretching is only programmed for practice/match and power — not gym. */
 export function buildStructuredWarmupParts(context = 'gym') {
     const pulse = part(
         'Pulse Raising',
@@ -241,7 +243,10 @@ export function buildStructuredWarmupParts(context = 'gym') {
         'Tap a drill for teaching-point video placeholder.',
         SHOULDER_WARMUP_DRILLS.map(s => part(s, 'Video', 'Teaching point video placeholder'))
     );
-    return [pulse, mobilisation, shoulder, dynamicStretch];
+    if (context === 'power') {
+        return [pulse, mobilisation, shoulder, dynamicStretch];
+    }
+    return [pulse, mobilisation, shoulder];
 }
 
 export function buildStructuredStretchParts() {
@@ -283,7 +288,7 @@ export function resolveWarmupBlock({ context = 'gym', isLactate = false } = {}) 
             name: 'Warmup',
             isWarmupGroup: true,
             warmupParts: getLactateWarmupParts(),
-            warmupNote: 'Pulse raising, mobilisation & dynamic stretching'
+            warmupNote: 'Pulse raising & mobilisation'
         };
     }
     const mode = getWarmupMode(context);
@@ -304,7 +309,9 @@ export function resolveWarmupBlock({ context = 'gym', isLactate = false } = {}) 
         warmupParts: parts,
         warmupNote: context === 'practice'
             ? 'Pulse raising, mobilisation, dynamic warmup & dynamic stretching'
-            : 'Pulse raising, mobilisation, shoulder warmup & dynamic stretching'
+            : context === 'power'
+                ? 'Pulse raising, mobilisation, shoulder warmup & dynamic stretching'
+                : 'Pulse raising, mobilisation & shoulder warmup'
     };
 }
 

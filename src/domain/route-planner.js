@@ -58,6 +58,122 @@ export function isSteadyCardio(e) {
     if (/lactate|hit\s*class/i.test(e)) return false;
     return /steady(\s*state)?(\s*cardio)?/i.test(e);
 }
+
+/** Lifting “row” movements — must not be treated as rowing / steady cardio. */
+export function isStrengthRowExerciseName(name) {
+    const n = String(name || '');
+    if (!n) return false;
+    if (/rowing|\brower\b|concept\s*2/i.test(n)) return false;
+    return /\brows?\b/i.test(n);
+}
+
+export function isPrepBlockExerciseName(name) {
+    return /warmup|stretch|mobilisation|mobility/i.test(String(name || ''));
+}
+
+/** Zone-2 cardio exercise names (rowing machine, not barbell row). */
+export function looksLikeSteadyCardioExercise(name) {
+    const n = String(name || '').trim();
+    if (!n) return false;
+    if (isStrengthRowExerciseName(n) || isPrepBlockExerciseName(n)) return false;
+    if (/rowing(\s*machine)?|\brower\b|concept\s*2|ski\s*erg/i.test(n)) return true;
+    if (/steady(\s*state)?(\s*cardio)?/i.test(n)) return true;
+    if (/easy\s*run|incline\s*walk|cross\s*trainer|spin(\s*bike)?|elliptical/i.test(n)) return true;
+    if (/^(jog|bike|cycle|cycling|swim)$/i.test(n)) return true;
+    return false;
+}
+
+/** True when a flattened workout_log row is actually steady cardio — not a gym lift or stretch. */
+export function isCardioWorkoutLogRow(log) {
+    if (!log) return false;
+    const name = log.exercise || log.name || '';
+    if (isPrepBlockExerciseName(name) || isStrengthRowExerciseName(name)) return false;
+    if (Number(log.weight_kg) > 0) return false;
+    if (Number(log.distance_km) > 0) return true;
+    if (looksLikeSteadyCardioExercise(name)) return true;
+    const type = String(log.type || '').toLowerCase();
+    if (type === 'cardio' && Number(log.reps) > 0) return false;
+    if (type === 'cardio') return true;
+    const timed = Number(log.time_minutes) > 0;
+    return timed && !(Number(log.reps) > 0);
+}
+
+
+/** Snapshot labelled Steady State that is actually leftover gym work (rows / stretching). */
+export function sessionIsMisfiledGymTail(sess) {
+    if (!sess) return false;
+    const n = normalizeLoggedSessionKind(sess.kind);
+    if (n !== 'Cardio (Steady)' && !isSteadyCardio(sess.kind)) return false;
+    const items = sess.items || [];
+    if (!items.length) return false;
+    return items.every((it) => {
+        const name = it?.exercise?.name || it?.name || '';
+        if (it?.isStretchGroup || it?.isWarmupGroup || it?.isCustomStretch || /stretch|warmup/i.test(name)) return true;
+        if (isStrengthRowExerciseName(name)) return true;
+        const d = (it?.exercise?.domain || '').toLowerCase();
+        if (d === 'strength' || d === 'power' || d === 'hypertrophy') return true;
+        if (looksLikeSteadyCardioExercise(name) || d === 'cardio' || it?.isSteadyCardio) return false;
+        return (it?.sets || []).some(s => Number(s?.weight) > 0);
+    });
+}
+
+function snapshotItemNameKey(item) {
+    return String(item?.exercise?.name || item?.name || '').trim().toLowerCase();
+}
+
+function snapshotAlreadyHasItem(hostItems, item) {
+    const n = snapshotItemNameKey(item);
+    if (!n) return false;
+    return (hostItems || []).some((h) => {
+        const hn = snapshotItemNameKey(h);
+        if (hn && hn === n) return true;
+        if ((h?.isStretchGroup || /stretch/i.test(hn)) && /stretch/i.test(n)) return true;
+        if ((h?.isWarmupGroup || /warmup/i.test(hn)) && /warmup/i.test(n)) return true;
+        return false;
+    });
+}
+
+/** Display-time: fold a mislabelled Steady State snapshot back into the gym session. */
+export function foldMisfiledGymTailSessions(sessions) {
+    const list = Array.isArray(sessions) ? sessions.slice() : [];
+    const gymHost = list.find((s) => {
+        const n = normalizeLoggedSessionKind(s?.kind);
+        return n === 'Full Body / Strength' || n === 'Full Body / Power' || isStrengthEvent(s?.kind);
+    });
+    if (!gymHost) return list;
+    const misfiled = list.filter((s) => s && s !== gymHost && sessionIsMisfiledGymTail(s));
+    if (!misfiled.length) return list;
+    misfiled.forEach((s) => {
+        (s.items || []).forEach((it) => {
+            if (!snapshotAlreadyHasItem(gymHost.items, it)) {
+                gymHost.items = [...(gymHost.items || []), it];
+            }
+        });
+        (s.logIds || []).forEach((id) => {
+            if (id == null) return;
+            if (!(gymHost.logIds || []).map(String).includes(String(id))) {
+                gymHost.logIds = [...(gymHost.logIds || []), id];
+            }
+        });
+    });
+    try {
+        const snaps = loadWorkoutSessionSnapshots();
+        if (snaps[gymHost.id]) {
+            snaps[gymHost.id] = {
+                ...snaps[gymHost.id],
+                items: gymHost.items,
+                logIds: gymHost.logIds,
+                updatedAt: new Date().toISOString()
+            };
+            saveWorkoutSessionSnapshots(snaps);
+        }
+        misfiled.forEach((s) => {
+            if (s?.id) removeWorkoutSessionSnapshot(s.id);
+        });
+    } catch (e) { /* display-only if storage fails */ }
+    return list.filter((s) => !misfiled.includes(s));
+}
+
 export function isLactateEvent(e) { return e === 'Lactate' || e === 'Cardio (Lactate)'; }
 export function isAuxEvent(e) {
     if (!e || typeof e !== 'string') return false;
@@ -363,6 +479,7 @@ export function recordLoggedWorkoutSession({
     lactateSlot = null,
     isHitClass = null,
     lactateSummary = null,
+    miscellaneousMs = null,
     planSlotKey: slotKey = null,
     skipCredit = false
 } = {}) {
@@ -425,7 +542,10 @@ export function recordLoggedWorkoutSession({
         hitTypes: Array.isArray(hitTypes) ? hitTypes : (prev.hitTypes || null),
         lactateSlot: lactateSlot != null ? lactateSlot : (prev.lactateSlot || null),
         isHitClass: isHitClass != null ? !!isHitClass : !!prev.isHitClass,
-        lactateSummary: lactateSummary != null ? lactateSummary : (prev.lactateSummary || null)
+        lactateSummary: lactateSummary != null ? lactateSummary : (prev.lactateSummary || null),
+        miscellaneousMs: Number.isFinite(Number(miscellaneousMs)) && Number(miscellaneousMs) >= 0
+            ? Number(miscellaneousMs)
+            : (prev.miscellaneousMs || 0)
     };
     saveWorkoutSessionSnapshots(snaps);
 
@@ -464,8 +584,38 @@ export function listWorkoutSessionsForDate(dateIso) {
         .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
 }
 
+/** Collapse a planned/logged kind so gym variants (and sport labels) match across plan vs snapshots. */
+export function daySessionMatchKey(kind) {
+    const n = normalizeLoggedSessionKind(kind);
+    if (n) return n;
+    if (isPracticeEvent(kind) || /^practice$/i.test(kind || '')) return 'Practice';
+    if (isGameEvent(kind) || /^(match|game)$/i.test(kind || '')) return 'Match';
+    const s = String(kind || '').trim();
+    return s || 'Workout';
+}
+
+/**
+ * True once every planned training event for the calendar day has a matching completed session.
+ * Extra unplanned sessions after that still count as “last session” (remaining planned is 0).
+ */
+export function isLastPlannedSessionOfDay(dateObj = new Date()) {
+    const day = dateObj instanceof Date ? dateObj : new Date(dateObj);
+    const planned = (getPlannedDayEvents(day) || []).filter(e => e && !isRestEvent(e));
+    const iso = dateToISO(day);
+    const completed = listWorkoutSessionsForDate(iso) || [];
+    if (!completed.length) return false;
+    const used = new Set();
+    for (const ev of planned) {
+        const pk = daySessionMatchKey(ev);
+        const idx = completed.findIndex((s, i) => !used.has(i) && daySessionMatchKey(s.kind) === pk);
+        if (idx >= 0) used.add(idx);
+        else return false;
+    }
+    return true;
+}
+
 export function prettyWorkoutTypeLabel(kind) {
-    // Hypertrophy / Strength A·B keep their plan labels (do not collapse to "Gym Workout")
+    // Hypertrophy / Strength A·B keep their plan labels (do not collapse to a generic gym title)
     if (isHypertrophyEvent(kind)) return prettyFocusName(kind) || kind;
     if (kind === 'Full Body / Strength A' || /Strength\s*A/i.test(kind || '')) return 'Strength Session A';
     if (kind === 'Full Body / Strength B' || /Strength\s*B/i.test(kind || '')) return 'Strength Session B';
@@ -473,7 +623,7 @@ export function prettyWorkoutTypeLabel(kind) {
     const normalized = normalizeLoggedSessionKind(kind) || kind;
     if (normalized === 'Cardio (Steady)') return 'Steady State';
     if (normalized === 'Lactate') return 'Lactate/HIT';
-    if (normalized === 'Full Body / Strength') return 'Gym Workout';
+    if (normalized === 'Full Body / Strength') return 'Strength Session';
     if (normalized === 'Auxiliary' || isAuxEvent(normalized)) return 'Auxiliary';
     if (typeof normalized === 'string' && normalized.includes('Power')) return 'Power';
     if (normalized === 'Workout') return 'Workout';

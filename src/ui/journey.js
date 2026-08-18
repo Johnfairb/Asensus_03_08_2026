@@ -5,11 +5,14 @@ import { getRecommendedSleepHours, getTodaySleepHours } from '../domain/sleep-rp
 import { HIT_TYPE_OPTIONS, hitTypeLabel } from '../domain/lactate-engine.js';
 import {
     dateToISO,
+    foldMisfiledGymTailSessions,
     generateFutureTimeline,
     getDayMacroTargets,
     getWorkoutSessionSnapshot,
+    isCardioWorkoutLogRow,
     isLactateEvent,
     isSteadyCardio,
+    isStrengthEvent,
     listWorkoutSessionsForDate,
     loadWorkoutSessionSnapshots,
     normalizeLoggedSessionKind,
@@ -21,6 +24,7 @@ import { estimateFoodWaterMl, getHydrationLitersForDate, parseFoodLogDetails } f
 import { computeAimBarLayout, formatMacroAimLabel, getMacroRange } from '../lib/macro-range.js';
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from '../domain/meal-planner.js';
 import { resolveLogPeriodization } from '../domain/periodization-logs.js';
+import { getDiaryFieldsForMode } from '../domain/diary-schema.js';
 
 // ==========================================
 // 10. DASHBOARD, FORECAST, & TIMELINE
@@ -435,9 +439,21 @@ export async function openDayDetail(dateStr, isoHint) {
             .map(s => hydrateAdherenceSessionItems(s, dateStr, wks));
         nonLactateSessions.forEach((sess) => {
             const idSet = new Set((sess.logIds || []).map(String));
-            const names = new Set((sess.items || []).map(it => it.exercise?.name || it.name).filter(Boolean));
             (wks || []).forEach(w => {
-                if (idSet.has(String(w.id)) || names.has(w.exercise)) usedLogIds.add(String(w.id));
+                if (idSet.has(String(w.id))) {
+                    usedLogIds.add(String(w.id));
+                    return;
+                }
+                const logName = String(w.exercise || '').trim().toLowerCase();
+                const match = (sess.items || []).some(it => {
+                    const n = String(it.exercise?.name || it.name || '').trim().toLowerCase();
+                    if (n && n === logName) return true;
+                    if ((it.isStretchGroup || /stretch/i.test(n)) && /^stretch/i.test(w.exercise || '')) return true;
+                    if ((it.isWarmupGroup || /warmup/i.test(n)) && /warmup/i.test(w.exercise || '')) return true;
+                    if (it.isSuperset && (it.sides || []).some(s => String(s?.exercise?.name || '').trim().toLowerCase() === logName)) return true;
+                    return false;
+                });
+                if (match) usedLogIds.add(String(w.id));
             });
         });
         const orphanWorkouts = otherWorkouts.filter(l =>
@@ -446,16 +462,47 @@ export async function openDayDetail(dateStr, isoHint) {
             && l.exercise !== 'Match'
         );
         if (orphanWorkouts.length) {
-            const host = nonLactateSessions.length === 1 && !(nonLactateSessions[0].items || []).length
-                ? nonLactateSessions[0]
-                : null;
-            if (host) {
-                host.items = mergeDiaryOntoItems(itemsFromWorkoutLogs(orphanWorkouts), dateStr, iso);
-                host.logIds = [...(host.logIds || []), ...orphanWorkouts.map(l => l.id).filter(Boolean)];
+            const gymHost = nonLactateSessions.find(s => {
+                const n = normalizeLoggedSessionKind(s.kind);
+                return n === 'Full Body / Strength' || n === 'Full Body / Power' || isStrengthEvent(s.kind);
+            }) || (nonLactateSessions.length === 1 ? nonLactateSessions[0] : null);
+            const cardioOrphans = orphanWorkouts.filter(l => isCardioWorkoutLogRow(l));
+            const gymOrphans = orphanWorkouts.filter(l => !cardioOrphans.includes(l));
+
+            const attachToHost = (host, logs) => {
+                if (!host || !logs.length) return;
+                const hostItems = host.items || [];
+                const mergedItems = itemsFromWorkoutLogs(logs).filter(it => {
+                    const n = String(it.exercise?.name || it.name || '').trim().toLowerCase();
+                    if (!n) return false;
+                    if (/stretch/i.test(n) && hostItems.some(h => h.isStretchGroup || /stretch/i.test(h.exercise?.name || h.name || ''))) {
+                        return false;
+                    }
+                    if (/warmup/i.test(n) && hostItems.some(h => h.isWarmupGroup || /warmup/i.test(h.exercise?.name || h.name || ''))) {
+                        return false;
+                    }
+                    return !hostItems.some(h => String(h.exercise?.name || h.name || '').trim().toLowerCase() === n);
+                });
+                host.items = mergeDiaryOntoItems([...hostItems, ...mergedItems], dateStr, iso);
+                host.logIds = [...(host.logIds || []), ...logs.map(l => l.id).filter(Boolean)];
                 window._adherenceDaySessions[String(host.id)] = host;
-                orphanWorkouts.forEach(l => usedLogIds.add(String(l.id)));
-            } else {
-                nonLactateSessions.push(synthesizeAdherenceSessionFromLogs(dateStr, iso, orphanWorkouts));
+                logs.forEach(l => usedLogIds.add(String(l.id)));
+            };
+
+            if (gymHost && gymOrphans.length) {
+                attachToHost(gymHost, gymOrphans);
+            } else if (gymOrphans.length) {
+                const emptyHost = nonLactateSessions.length === 1 && !(nonLactateSessions[0].items || []).length
+                    ? nonLactateSessions[0]
+                    : null;
+                if (emptyHost) attachToHost(emptyHost, gymOrphans);
+                else nonLactateSessions.push(synthesizeAdherenceSessionFromLogs(dateStr, iso, gymOrphans));
+            }
+
+            if (cardioOrphans.length) {
+                const cardioHost = nonLactateSessions.find(s => normalizeLoggedSessionKind(s.kind) === 'Cardio (Steady)');
+                if (cardioHost) attachToHost(cardioHost, cardioOrphans);
+                else nonLactateSessions.push(synthesizeAdherenceSessionFromLogs(dateStr, iso, cardioOrphans));
             }
         }
         html += renderAdherenceSessionCardsHtml(nonLactateSessions, dateStr, wks, usedLogIds);
@@ -606,9 +653,9 @@ function listSessionsForAdherenceDay(dateStr, isoHint) {
             });
         }
     } catch (e) { /* ignore */ }
-    return [...byId.values()].sort((a, b) =>
+    return foldMisfiledGymTailSessions([...byId.values()].sort((a, b) =>
         String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))
-    );
+    ));
 }
 
 function renderSportDiaryBlockHtml(kind, journal, workoutLogs = []) {
@@ -957,6 +1004,12 @@ function resolveAdherenceSessionKind(snap) {
     const kind = snap?.kind;
     const inferred = sessionKindFromAdherenceItems(snap?.items);
     const norm = normalizeLoggedSessionKind(kind);
+    const hasLift = (snap?.items || []).some(it => {
+        const d = (it?.exercise?.domain || '').toLowerCase();
+        return d === 'strength' || d === 'power' || d === 'hypertrophy' || it?.isPower;
+    });
+    // Never collapse a lifting session to Steady State because stretch/row names look like cardio
+    if (hasLift) return kind;
     if (inferred === 'Cardio (Steady)' && (!kind || kind === 'Workout' || norm === 'Full Body / Strength')) {
         return 'Cardio (Steady)';
     }
@@ -988,7 +1041,7 @@ function synthesizeAdherenceSessionFromLogs(dateStr, iso, logs) {
     const dur = (logs || []).reduce((m, l) => Math.max(m, Number(l.session_duration_min) || 0), 0);
     const hasStretchOnly = items.length > 0 && items.every(it => /stretch/i.test(it.name || '') || it.isStretchGroup);
     const inferred = sessionKindFromAdherenceItems(items);
-    const hasCardioLogs = (logs || []).some(l => l.type === 'cardio' || /steady/i.test(l.exercise || ''));
+    const hasCardioLogs = (logs || []).some(l => isCardioWorkoutLogRow(l));
     const kind = hasStretchOnly
         ? 'Workout'
         : (inferred || (hasCardioLogs ? 'Cardio (Steady)' : 'Full Body / Strength'));
@@ -1729,22 +1782,41 @@ function buildLactateIntervalRowsHtml(block) {
         : `<div style="font-size:12px; color:var(--text-muted);">No interval breakdown stored for this session.</div>`;
 }
 
+function diaryFieldDisplayLabel(fieldId, schemaMode) {
+    const fields = getDiaryFieldsForMode(schemaMode);
+    const match = fields.find(f => f.id === fieldId);
+    if (match?.label) return match.label;
+    if (fieldId === 'hydration_ml') return 'Fluid drunk (ml)';
+    return fieldId;
+}
+
 function buildLactateDiaryHtml(journal) {
     if (!journal || (journal.type !== 'lactate' && journal.source !== 'gym' && !journal.hitTypes?.length && journal.rpe == null && !journal.notes)) {
         // Still show gym journal if it's the day's lactate diary
         if (!journal) return `<div style="font-size:12px; color:var(--text-muted);">No diary entry for this Lactate/HIT session.</div>`;
     }
+    const schemaMode = journal.type === 'lactate' ? 'lactate' : 'gym';
     const fields = journal.fields || {};
-    const fieldLines = Object.keys(fields).filter(k => fields[k] != null && fields[k] !== '')
+    const hydrationMl = Number(journal.hydration_ml != null ? journal.hydration_ml : fields.hydration_ml);
+    const skipIds = new Set(['rpe', 'notes']);
+    if (Number.isFinite(hydrationMl) && hydrationMl > 0) skipIds.add('hydration_ml');
+    const fieldLines = Object.keys(fields).filter(k => fields[k] != null && fields[k] !== '' && !skipIds.has(k))
         .map(k => `<div style="display:flex; justify-content:space-between; gap:10px; margin-bottom:8px; font-size:12px;">
-            <span style="color:var(--text-muted);">${escapeHtml(k)}</span>
-            <span style="color:var(--text-main); font-weight:700;">${escapeHtml(fields[k])}</span>
+            <span style="color:var(--text-muted);">${escapeHtml(diaryFieldDisplayLabel(k, schemaMode))}</span>
+            <span style="color:var(--text-main); font-weight:700;">${escapeHtml(fields[k])}${k === 'hydration_ml' ? ' ml' : ''}</span>
         </div>`).join('');
+    const hydLine = Number.isFinite(hydrationMl) && hydrationMl > 0
+        ? `<div style="display:flex; justify-content:space-between; gap:10px; margin-bottom:8px; font-size:12px;">
+            <span style="color:var(--text-muted);">${escapeHtml(diaryFieldDisplayLabel('hydration_ml', schemaMode))}</span>
+            <span style="color:var(--text-main); font-weight:700;">${hydrationMl} ml</span>
+        </div>`
+        : '';
     return `<div>
         ${journal.rpe != null ? `<div style="margin-bottom:10px; font-family:'Roboto Mono'; font-size:12px; color:var(--text-silver);">Session RPE <strong style="color:var(--text-main);">${journal.rpe}</strong></div>` : ''}
         ${journal.lactateSummary ? `<div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">${escapeHtml(journal.lactateSummary)}</div>` : ''}
         ${journal.notes ? `<div style="font-size:13px; color:var(--text-main); line-height:1.5; white-space:pre-wrap; margin-bottom:12px;">${escapeHtml(journal.notes)}</div>` : ''}
-        ${fieldLines || (!journal.notes && journal.rpe == null ? `<div style="font-size:12px; color:var(--text-muted);">Diary saved with no extra notes.</div>` : '')}
+        ${hydLine}
+        ${fieldLines || (!journal.notes && journal.rpe == null && !hydLine ? `<div style="font-size:12px; color:var(--text-muted);">Diary saved with no extra notes.</div>` : '')}
         <div id="lactate-diary-media-slot"></div>
     </div>`;
 }
@@ -2391,6 +2463,7 @@ export function saveGymJournalEntry(isoDate, entry) {
         notes: entry.notes || '',
         mental: entry.mental,
         rpe: entry.rpe,
+        hydration_ml: entry.hydration_ml || 0,
         fields: entry.fields || {},
         media: entry.media || [],
         type: entry.type || 'gym',

@@ -342,11 +342,11 @@ export function maybePromptWeightFinder(exIdx, opts = {}) {
     return openPromptForCurrentTarget(exIdx);
 }
 
-function applyWorkWeight(item, kg) {
+function applyWorkWeight(item, kg, opts = {}) {
     if (item.isSuperset && _finderSide) {
-        return applyWorkWeightToSupersetSide(item, _finderSide, kg);
+        return applyWorkWeightToSupersetSide(item, _finderSide, kg, opts);
     }
-    return applyHypertrophyWorkWeight(item, kg);
+    return applyHypertrophyWorkWeight(item, kg, opts);
 }
 
 function markSideBwResolved(side, opts = {}) {
@@ -500,7 +500,7 @@ export function submitFinderWorkWeight() {
         ? (activeSideMeta(item)?.exercise?.name || '')
         : (item.exercise?.name || '');
     const work = finder === 0 ? 0 : workWeightFromFinder(finder, exName, { forStrength: finderForStrength() });
-    const applied = applyWorkWeight(item, work);
+    const applied = applyWorkWeight(item, work, { skipWarmups: true });
     if (applied < 0) {
         showError('Could not apply that weight.');
         return;
@@ -559,6 +559,9 @@ function finishWeightFinderAndMaybeOpenLog() {
     }
 
     dismissWeightFinder();
+    if (exIdx != null && typeof window.startPendingFinderRest === 'function') {
+        window.startPendingFinderRest(exIdx);
+    }
     if (openAfter && exIdx != null && typeof window.openExerciseSetsModal === 'function') {
         window.openExerciseSetsModal(exIdx);
     }

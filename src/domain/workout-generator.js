@@ -1,10 +1,10 @@
 import { store } from '../state/store.js';
 import { excludeBannedExercises } from './bans.js';
 import { PERIODIZATION, getPhaseLoadMultiplier, getSeasonPhase, isGuidanceOff } from './fitness-hud.js';
-import { buildLactateIntervalPlan } from './lactate-engine.js';
-import { dateToISO, getLactateSlotForDate, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isSteadyCardio, openVideoModal, prettyFocusName } from './route-planner.js';
+import { buildLactateIntervalPlan, lactateLogSetFromRow } from './lactate-engine.js';
+import { dateToISO, getLactateSlotForDate, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isSteadyCardio, openVideoModal, prettyFocusName, prettyWorkoutTypeLabel, strengthLabelForLetter } from './route-planner.js';
 import { getSportData } from './sports-matrix.js';
-import { buildAuxiliaryExerciseList, buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, isStrengthPhase, progressStrengthIsolationWeight } from './strength-engine.js';
+import { buildAuxiliaryExerciseList, buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, isStrengthPhase, progressStrengthWeight } from './strength-engine.js';
 import {
     buildHypertrophyWarmupSets,
     equipmentForExercise,
@@ -44,7 +44,7 @@ import { renderActiveLog } from '../ui/templates.js';
 import { syncExerciseTimer } from '../ui/workout-timer.js';
 import { ensureCycleStarted, ensureCyclePlansForProgramme, sessionTypeIdFromFocus, confirmSessionExercises } from './workout-cycle.js';
 import { getEquivalentExercises, resolveItemSlotLabel } from './exercise-slots.js';
-import { latestPhaseWeight, lastCompletedWorkingWeight, strengthLoadFromHypertrophy, resolveLogPeriodization } from './periodization-logs.js';
+import { latestPhaseWeight, lastCompletedWorkingWeight, latestWorkingLog, strengthLoadFromHypertrophy, resolveLogPeriodization, exerciseLogNamesMatch } from './periodization-logs.js';
 
 // ==========================================
 // 8. ELITE WORKOUT ENGINE (DRIVE TAB)
@@ -192,7 +192,7 @@ export function renderGhostWorkoutFromItems() {
         if (item.isWarmupGroup) {
             html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
                 <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Warmup</div>
-                <div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note || 'Includes pulse raising, mobilisation, shoulder warmup & dynamic stretching'}</div>
+                <div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note || 'Session warmup'}</div>
             </div>`;
             return;
         }
@@ -615,6 +615,10 @@ export function repairSupersetWarmups(item) {
             rebuiltWu[sideKey] = sideWu;
             return;
         }
+        if (meta?.finderReplacedWarmup) {
+            rebuiltWu[sideKey] = sideWu;
+            return;
+        }
         const sideWork = (item.sets || []).filter(s =>
             s.side === sideKey && !s.isWarmup && !s.isDropSet && !s.isText
         );
@@ -776,11 +780,6 @@ export async function generateWorkoutTemplate() {
         console.warn('workout_logs history unavailable:', e);
     }
     hist = mergeLocalWorkoutHistory(hist);
-    const logDayKey = (row) => {
-        const raw = row && row.created_at;
-        if (!raw) return '';
-        return String(raw).includes('T') ? String(raw).split('T')[0] : String(raw).slice(0, 10);
-    };
     const EX_ALIASES = {
         'Side Sit': 'Side-sit on Hyperextension Bench',
         'Sidesit': 'Side-sit on Hyperextension Bench',
@@ -876,6 +875,13 @@ export async function generateWorkoutTemplate() {
         localStorage.setItem('ascensus_strength_ab', built.session);
         window.currentStrengthSession = built.session;
         window.currentStrengthTimeTier = built.timeTier;
+        window.manualSessionKind = strengthLabelForLetter(built.session);
+        const focusEl = document.getElementById('today-focus');
+        if (focusEl) focusEl.value = window.manualSessionKind;
+        const titleEl = document.getElementById('current-route-title');
+        if (titleEl && !/^EDIT/i.test(titleEl.innerText || '')) {
+            titleEl.innerText = prettyWorkoutTypeLabel(window.manualSessionKind).toUpperCase();
+        }
         // No auxiliary attachment in strength / hybrid
     } 
     else if (isPowerEvent(focus) || focus === 'Full Body / Power') {
@@ -926,7 +932,8 @@ export async function generateWorkoutTemplate() {
                 slot,
                 date: new Date(),
                 desiredRpe: sel?.desiredRpe || 7,
-                sessionRpe: sel?.sessionRpe || sel?.desiredRpe || 7
+                sessionRpe: sel?.sessionRpe || sel?.desiredRpe || 7,
+                forceRetestTypes: sel?.forceRetestTypes || null
             });
 
         if (plan.isHitClass) {
@@ -953,9 +960,11 @@ export async function generateWorkoutTemplate() {
                 mainRoutine.push({
                     name: row.name,
                     isLactateHit: true,
+                    isBaselineTest: !!row.isBaselineTest,
                     notes: row.notes || plan.summary,
                     restSec: row.restSec,
                     workSec: row.workSec || row.durationSec,
+                    typeId: row.typeId,
                     sets: 1,
                     lactateSetIndex: idx + 1,
                     lactateRows: [row]
@@ -1009,7 +1018,7 @@ export async function generateWorkoutTemplate() {
             }));
             store.currentGhostItems.push({
                 exercise: { id: item.isCustomWarmup ? 'CUSTOM_WARMUP' : 'WARMUP_GROUP', name: item.name || 'Warmup', domain: 'warmup', muscle_group: 'full' },
-                note: item.warmupNote || 'Includes pulse raising, mobilisation, shoulder warmup & dynamic stretching',
+                note: item.warmupNote || 'Session warmup',
                 sets: setsArray,
                 isWarmupGroup: true,
                 isCustomWarmup: !!item.isCustomWarmup,
@@ -1215,17 +1224,21 @@ export async function generateWorkoutTemplate() {
             itemNoteExtra = ` Bodyweight check: can you do the required reps? If not, we swap for this month.`;
         }
 
-        // Strength: last strength log (+ same progression below); else hypertrophy work +15% (BW in total); else 10@5 RIR finder → +15%
+        // Strength: last session load + weekly progression. Only convert hypertrophy
+        // logs (+15%) when the most recent session for this lift is tagged hypertrophy.
+        // Untagged recent logs are treated as strength so last week's 115 kg is not
+        // bumped to 132.5 kg.
         if (!item.isText && !isCardioEx && inStrengthPhase) {
-            const strengthW = latestPhaseWeight(hist, exObj.name, 'strength');
-            const hypW = latestPhaseWeight(hist, exObj.name, 'hypertrophy');
-            if (strengthW != null) {
-                tWeight = strengthW;
-                latestLog = hist.find(l => l.exercise === exObj.name && resolveLogPeriodization(l) === 'strength') || null;
-            } else if (hypW != null) {
-                tWeight = strengthLoadFromHypertrophy(hypW, exObj.name);
+            const lastWork = latestWorkingLog(hist, exObj.name);
+            const lastTag = resolveLogPeriodization(lastWork);
+            const lastW = lastWork != null ? Number(lastWork.weight_kg) : null;
+            if (lastTag === 'hypertrophy' && lastW != null && Number.isFinite(lastW)) {
+                tWeight = strengthLoadFromHypertrophy(lastW, exObj.name);
                 itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + 'Strength load = hypertrophy +15% (bodyweight included for BW lifts).';
                 latestLog = null; // first strength prescription from hyp — progression starts next session
+            } else if (lastW != null && Number.isFinite(lastW)) {
+                tWeight = lastW;
+                latestLog = lastWork;
             }
         }
 
@@ -1300,44 +1313,24 @@ export async function generateWorkoutTemplate() {
             pData.notes = `REPAIR MODE: Weight restricted to ${throttle*100}% to protect ${store.userConfig.injury}.`;
         }
         
-        if (latestLog && !item.isText && !item.isStrengthIsolation && !item.isCoreBlock
-            && (phaseStr === 'OffSeason_Strength' || phaseStr === 'OffSeason_Hybrid')) {
-            let allExLogs = hist.filter(l => l.exercise === exObj.name);
-            const strengthOnly = allExLogs.filter(l => resolveLogPeriodization(l) === 'strength');
-            if (strengthOnly.length) allExLogs = strengthOnly;
-            // Group by day to check last 2 sessions
-            let uniqueDays = [...new Set(allExLogs.map(logDayKey).filter(Boolean))].slice(0, 2);
-            let missedConsecutive = 0;
-            uniqueDays.forEach(day => {
-                let daySets = allExLogs.filter(l => logDayKey(l) === day);
-                let failedSets = daySets.filter(l => l.reps < pData.reps || l.rpe === 0); // RIR 0 is absolute failure
-                if (failedSets.length > daySets.length / 2) missedConsecutive++; 
+        if (latestLog && !item.isText && !item.isCoreBlock && inStrengthPhase) {
+            const strengthHist = (hist || []).filter((l) => {
+                if (!exerciseLogNamesMatch(l.exercise, exObj.name)) return false;
+                return resolveLogPeriodization(l) !== 'hypertrophy';
             });
-
-            if (missedConsecutive >= 2 && tWeight > 20) {
-                // AUTO DELOAD: Drop weight 15%, increase reps to build new tissue
-                tWeight = roundLoad(tWeight * 0.85, eqType);
-                pData = { ...pData, reps: 8, notes: "AUTO-DELOAD: Plateau detected. Weight dropped 15%, reps increased to 8 to build new tissue." };
-            } else {
-                const latestDay = logDayKey(latestLog);
-                let recentLogs = hist.filter(l => l.exercise === exObj.name && logDayKey(l) === latestDay);
-                // Grab the absolute last set completed in that session to check true RIR
-                let finalSet = recentLogs.reduce((max, obj) => (obj.sets > max.sets ? obj : max), recentLogs[0]);
-                
-                if (finalSet && finalSet.rpe > 2) {
-                    tWeight += 2.5; 
-                    pData = { ...pData, notes: "AUTO-PROGRESSION: Last session felt easy (RIR > 2). Load increased." };
-                } else {
-                    let successSets = recentLogs.filter(l => l.reps >= pData.reps && l.rpe >= 1); // RIR >= 1 is successful
-                    if (successSets.length >= 2) tWeight += 2.5; 
-                }
-            }
-        }
-
-        if (latestLog && !item.isText && item.isStrengthIsolation) {
-            const prog = progressStrengthIsolationWeight(exObj.name, hist, tWeight, (w) => roundLoad(w, eqType));
+            const targetReps = (item.isStrengthIsolation || item.isIsolation)
+                ? (item.targetReps || 8)
+                : (pData.reps || 5);
+            const prog = progressStrengthWeight(exObj.name, strengthHist, tWeight, {
+                targetReps,
+                equipmentChoice: item.equipmentChoice || null,
+                equipmentRound: (w) => roundLoad(w, eqType)
+            });
             tWeight = prog.weight;
-            if (prog.note) itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + prog.note;
+            if (prog.note) {
+                itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + prog.note;
+                pData = { ...pData, notes: prog.note };
+            }
         }
 
         if (latestLog && !item.isText && (useHypertrophy || phaseStr === 'OffSeason_Hypertrophy') && !item.isStrengthIsolation) {
@@ -1400,21 +1393,12 @@ export async function generateWorkoutTemplate() {
         for (let i = 0; i < activeSets; i++) {
             if (item.isLactateHit && !item.isText) {
                 const row = (item.lactateRows && item.lactateRows[i]) || null;
-                const workSec = Number(row?.workSec || row?.durationSec || item.workSec) || 30;
-                const restSec = Number(row?.restSec != null ? row.restSec : item.restSec) || 0;
-                setsArray.push({
-                    weight: 0,
-                    reps: 0,
-                    duration_sec: workSec,
-                    rpe: '',
-                    completed: false,
-                    isLactateHit: true,
-                    restTime: restSec,
-                    notes: row?.notes || item.notes || undefined,
-                    targetDisplay: row?.targetDisplay || undefined,
-                    targetRate: row?.targetRate || undefined,
-                    targetValue: row?.targetValue || undefined
-                });
+                setsArray.push(lactateLogSetFromRow(row || {
+                    workSec: Number(item.workSec) || 30,
+                    restSec: Number(item.restSec) || 0,
+                    notes: item.notes || undefined,
+                    typeId: item.typeId || null
+                }));
             } else if (item.isText) {
                 setsArray.push({
                     weight: 0,
@@ -1464,6 +1448,7 @@ export async function generateWorkoutTemplate() {
             isStrengthCompound: !!item.isStrengthCompound,
             role: item.role || null,
             isLactateHit: !!item.isLactateHit,
+            isBaselineTest: !!item.isBaselineTest,
             lactateRows: item.lactateRows || null,
             needsWeightFind: !!needsWeightFind,
             needsBwGate: !!needsBwGate,
