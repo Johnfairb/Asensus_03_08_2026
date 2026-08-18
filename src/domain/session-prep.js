@@ -32,7 +32,8 @@ const SHOULDER_CLIPS = [
 const PREP_VIDEOS = {
     shoulder: SHOULDER_CLIPS,
     shoulders: SHOULDER_CLIPS,
-    'shoulder girdle': [prepClip('Shoulder girdle', 'https://www.youtube.com/watch?v=oCWaOWuU-vo')]
+    'shoulder girdle': [prepClip('Shoulder girdle', 'https://www.youtube.com/watch?v=oCWaOWuU-vo')],
+    elbow: [prepClip('Elbow', 'https://youtu.be/CBCcRFJShn0')]
 };
 
 /** Teaching clips for a warmup / mobilisation part. Empty if none are wired yet. */
