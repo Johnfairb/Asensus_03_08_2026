@@ -142,9 +142,107 @@ const TYPE_ALIASES = {
     spinning: 'cycling'
 };
 
+/** Duration tests that currently take metres: user can log distance, watts, speed, or /500m split. */
+export const HIT_FLEXIBLE_INPUT_KINDS = ['distance', 'power', 'speed', 'split'];
+export const HIT_SPEED_UNITS = ['ms', 'kmh'];
+
+export const HIT_FLEXIBLE_INPUT_META = {
+    distance: { id: 'distance', label: 'Distance', resultLabel: 'metres' },
+    power: { id: 'power', label: 'Average power', resultLabel: 'watts' },
+    speed: { id: 'speed', label: 'Average speed', resultLabel: 'speed' },
+    split: { id: 'split', label: 'Average split', resultLabel: 'split' }
+};
+
 export function normalizeHitTypeId(id) {
     if (!id || id === 'hit_class') return id;
     return TYPE_ALIASES[id] || id;
+}
+
+export function modalityUsesFlexibleBaselineInput(typeId) {
+    const meta = HIT_MODALITY_META[normalizeHitTypeId(typeId)];
+    return !!(meta?.tests || []).some(t => t.unit === 'm' && Number(t.durationSec) > 0);
+}
+
+export function normalizeBaselineInputKind(kind) {
+    const k = String(kind || '').toLowerCase();
+    return HIT_FLEXIBLE_INPUT_KINDS.includes(k) ? k : 'distance';
+}
+
+export function normalizeSpeedUnit(unit) {
+    const u = String(unit || '').toLowerCase().replace('/', '');
+    if (u === 'kmh' || u === 'kph' || u === 'km/h') return 'kmh';
+    return 'ms';
+}
+
+export function getModalityBaselineInputKind(typeId) {
+    if (!modalityUsesFlexibleBaselineInput(typeId)) return 'distance';
+    return normalizeBaselineInputKind(getModalityBaselines(typeId)?.inputKind);
+}
+
+export function getModalitySpeedUnit(typeId) {
+    return normalizeSpeedUnit(getModalityBaselines(typeId)?.speedUnit);
+}
+
+export function baselineResultUnit(inputKind, speedUnit = 'ms') {
+    const kind = normalizeBaselineInputKind(inputKind);
+    if (kind === 'power') return 'W';
+    if (kind === 'speed') return normalizeSpeedUnit(speedUnit) === 'kmh' ? 'km/h' : 'm/s';
+    if (kind === 'split') return '/500m';
+    return 'm';
+}
+
+export function baselineTestDisplayLabel(test, inputKind, speedUnit = 'ms') {
+    const dur = formatSec(test?.durationSec || 20);
+    const kind = normalizeBaselineInputKind(inputKind);
+    if (kind === 'power') return `Average power in ${dur}`;
+    if (kind === 'speed') {
+        const unit = normalizeSpeedUnit(speedUnit) === 'kmh' ? 'km/h' : 'm/s';
+        return `Average speed in ${dur} (${unit})`;
+    }
+    if (kind === 'split') return `Average /500m split in ${dur}`;
+    return test?.label || `Max distance in ${dur}`;
+}
+
+/** Parse "1:38.5" or seconds like 98.5 into split seconds. */
+export function parseSplitInput(raw) {
+    const s = String(raw ?? '').trim();
+    if (!s) return 0;
+    if (s.includes(':')) {
+        const [minPart, secPart] = s.split(':');
+        const min = Number(minPart);
+        const sec = Number(secPart);
+        if (!(min >= 0) || !(sec >= 0) || !Number.isFinite(min) || !Number.isFinite(sec)) return 0;
+        const total = min * 60 + sec;
+        return total > 0 ? total : 0;
+    }
+    const n = Number(s);
+    return n > 0 ? n : 0;
+}
+
+export function formatSplit(sec) {
+    const s = Math.max(0, Number(sec) || 0);
+    const m = Math.floor(s / 60);
+    const rem = (s - m * 60).toFixed(1);
+    return m > 0 ? `${m}:${String(rem).padStart(4, '0')}` : `${Number(rem).toFixed(1)}s`;
+}
+
+export function formatBaselineStoredValue(raw, inputKind, speedUnit = 'ms') {
+    const v = Number(raw);
+    if (!(v > 0)) return '—';
+    const kind = normalizeBaselineInputKind(inputKind);
+    if (kind === 'split') return `${formatSplit(v)} /500m`;
+    if (kind === 'power') return `${Math.round(v * 10) / 10} W`;
+    if (kind === 'speed') {
+        return normalizeSpeedUnit(speedUnit) === 'kmh' ? `${v} km/h` : `${v} m/s`;
+    }
+    return `${v} m`;
+}
+
+export function parseBaselineResultInput(raw, inputKind) {
+    const kind = normalizeBaselineInputKind(inputKind);
+    if (kind === 'split') return parseSplitInput(raw);
+    const n = Number(raw);
+    return n > 0 ? n : 0;
 }
 
 export const HIT_TYPE_OPTIONS = [
@@ -240,11 +338,20 @@ export function buildBaselineProtocolRows(typeId, tests = null) {
     const seq = Array.isArray(tests) ? tests : getBaselineTestSequence(id);
     if (!seq.length) return [];
     const lastIdx = seq.length - 1;
+    const flexible = modalityUsesFlexibleBaselineInput(id);
+    const inputKind = flexible ? getModalityBaselineInputKind(id) : 'distance';
+    const speedUnit = getModalitySpeedUnit(id);
     return seq.map((test, i) => {
         const durationKind = isDurationBaselineTest(test);
         const workSec = estimateBaselineWorkSec(id, test);
         const restSec = i === lastIdx ? BASELINE_REST_AFTER_LONG_SEC : BASELINE_REST_AFTER_SHORT_SEC;
         const restLabel = restSec >= 120 ? '2 min rest' : '1 min rest';
+        const label = (durationKind && flexible)
+            ? baselineTestDisplayLabel(test, inputKind, speedUnit)
+            : test.label;
+        const unit = (durationKind && flexible)
+            ? baselineResultUnit(inputKind, speedUnit)
+            : test.unit;
         return {
             typeId: id,
             name: hitTypeLabel(id),
@@ -255,28 +362,34 @@ export function buildBaselineProtocolRows(typeId, tests = null) {
             isBaselineTest: true,
             baselineTestId: test.id,
             baselineKind: durationKind ? 'duration' : 'distance',
-            baselineUnit: test.unit,
-            baselineLabel: test.label,
+            baselineUnit: unit,
+            baselineLabel: label,
             baselineHint: test.hint || null,
             baselineDistanceM: test.distanceM || null,
             baselineFixedWorkSec: test.durationSec || null,
+            baselineInputKind: durationKind && flexible ? inputKind : null,
+            baselineSpeedUnit: durationKind && flexible ? speedUnit : null,
             repsLabel: durationKind
                 ? `${formatSec(test.durationSec)} all-out`
                 : `${test.label} · stopwatch`,
             targetDisplay: 'All-out',
             targetRate: 0,
             targetValue: 0,
-            _baseNotes: `Baseline test · ${test.label} · then ${restLabel}`
+            _baseNotes: `Baseline test · ${label} · then ${restLabel}`
         };
     });
 }
 
-export function mergeModalityBaselineTest(typeId, testId, rawValue) {
+export function mergeModalityBaselineTest(typeId, testId, rawValue, prefs = null) {
     const n = Number(rawValue);
     if (!(n > 0) || !testId) return null;
-    const existing = getModalityBaselines(typeId)?.tests || {};
+    const prev = getModalityBaselines(typeId) || {};
+    const existing = { ...(prev.tests || {}) };
     existing[testId] = n;
-    return saveModalityBaselines(typeId, existing);
+    return saveModalityBaselines(typeId, existing, {
+        inputKind: prefs?.inputKind ?? prev.inputKind,
+        speedUnit: prefs?.speedUnit ?? prev.speedUnit
+    });
 }
 
 export function lactateLogSetFromRow(row) {
@@ -300,6 +413,14 @@ export function lactateLogSetFromRow(row) {
         baselineLabel: row?.baselineLabel || null,
         baselineHint: row?.baselineHint || null,
         baselineFixedWorkSec: row?.baselineFixedWorkSec || null,
+        baselineInputKind: row?.baselineInputKind
+            || (row?.typeId && modalityUsesFlexibleBaselineInput(row.typeId)
+                ? getModalityBaselineInputKind(row.typeId)
+                : null),
+        baselineSpeedUnit: row?.baselineSpeedUnit
+            || (row?.typeId && modalityUsesFlexibleBaselineInput(row.typeId)
+                ? getModalitySpeedUnit(row.typeId)
+                : null),
         typeId: row?.typeId || null
     };
 }
@@ -350,17 +471,46 @@ export function modalitiesNeedingBaseline(typeIds) {
         .filter(id => id && id !== 'hit_class' && HIT_MODALITY_META[id] && missingBaselineTests(id).length > 0);
 }
 
-export function saveModalityBaselines(typeId, testsObj) {
+export function saveModalityBaselines(typeId, testsObj, prefs = null) {
     const id = normalizeHitTypeId(typeId);
     const all = loadLactateBaselines();
+    const prev = all[id] || {};
     const cleaned = {};
     Object.entries(testsObj || {}).forEach(([k, v]) => {
         const n = Number(v);
         if (Number.isFinite(n) && n > 0) cleaned[k] = n;
     });
-    all[id] = { tests: cleaned, updatedAt: new Date().toISOString() };
+    const flexible = modalityUsesFlexibleBaselineInput(id);
+    const inputKind = flexible
+        ? normalizeBaselineInputKind(prefs?.inputKind ?? prev.inputKind)
+        : 'distance';
+    const speedUnit = flexible
+        ? normalizeSpeedUnit(prefs?.speedUnit ?? prev.speedUnit)
+        : 'ms';
+    all[id] = {
+        tests: cleaned,
+        inputKind,
+        speedUnit,
+        updatedAt: new Date().toISOString()
+    };
     saveLactateBaselines(all);
     return all[id];
+}
+
+/** Persist metric choice for metre-based tests. Changing unit/kind clears stored results. */
+export function saveModalityBaselineInputPrefs(typeId, { inputKind, speedUnit } = {}) {
+    const id = normalizeHitTypeId(typeId);
+    if (!modalityUsesFlexibleBaselineInput(id)) return getModalityBaselines(id);
+    const prev = getModalityBaselines(id) || { tests: {} };
+    const nextKind = normalizeBaselineInputKind(inputKind ?? prev.inputKind);
+    const nextUnit = normalizeSpeedUnit(speedUnit ?? prev.speedUnit);
+    const prevKind = normalizeBaselineInputKind(prev.inputKind);
+    const prevUnit = normalizeSpeedUnit(prev.speedUnit);
+    const incompatible = nextKind !== prevKind || (nextKind === 'speed' && nextUnit !== prevUnit);
+    return saveModalityBaselines(id, incompatible ? {} : (prev.tests || {}), {
+        inputKind: nextKind,
+        speedUnit: nextUnit
+    });
 }
 
 export function clearModalityBaselines(typeId) {
@@ -373,8 +523,9 @@ export function clearModalityBaselines(typeId) {
 /* ─── Rate / intensity math ─────────────────────────────────────────────── */
 
 /** Convert a filled baseline test into a comparable rate (higher = harder). */
-export function baselineTestToRate(typeId, testId, rawValue) {
-    const meta = HIT_MODALITY_META[normalizeHitTypeId(typeId)];
+export function baselineTestToRate(typeId, testId, rawValue, prefs = null) {
+    const id = normalizeHitTypeId(typeId);
+    const meta = HIT_MODALITY_META[id];
     if (!meta) return 0;
     const test = meta.tests.find(t => t.id === testId);
     const v = Number(rawValue);
@@ -383,7 +534,19 @@ export function baselineTestToRate(typeId, testId, rawValue) {
     if (test.distanceM && test.unit === 'sec') {
         return test.distanceM / v;
     }
-    if (test.durationSec && (test.unit === 'm' || test.unit === 'count')) {
+    if (test.durationSec && test.unit === 'count') {
+        return v / test.durationSec;
+    }
+    if (test.durationSec && test.unit === 'm') {
+        const stored = prefs || getModalityBaselines(id);
+        const inputKind = normalizeBaselineInputKind(stored?.inputKind);
+        if (inputKind === 'power') return v;
+        if (inputKind === 'speed') {
+            return normalizeSpeedUnit(stored?.speedUnit) === 'kmh' ? v / 3.6 : v;
+        }
+        if (inputKind === 'split') {
+            return 500 / v;
+        }
         return v / test.durationSec;
     }
     return v;
@@ -396,13 +559,19 @@ export function resolveBaselineRate(typeId, workSec, baselinesOverride = null) {
     const id = normalizeHitTypeId(typeId);
     const meta = HIT_MODALITY_META[id];
     const stored = baselinesOverride || getModalityBaselines(id);
-    if (!meta || !stored?.tests) return { rate: 0, refDurationSec: 20, points: [] };
+    if (!meta || !stored?.tests) {
+        return { rate: 0, refDurationSec: 20, points: [], inputKind: 'distance', speedUnit: 'ms' };
+    }
+    const inputKind = modalityUsesFlexibleBaselineInput(id)
+        ? normalizeBaselineInputKind(stored.inputKind)
+        : (meta.intensityKind === 'chops' ? 'chops' : 'distance');
+    const speedUnit = normalizeSpeedUnit(stored.speedUnit);
 
     const points = [];
     meta.tests.forEach(test => {
         const raw = Number(stored.tests[test.id]);
         if (!(raw > 0)) return;
-        const rate = baselineTestToRate(id, test.id, raw);
+        const rate = baselineTestToRate(id, test.id, raw, stored);
         let dur;
         if (test.durationSec) dur = test.durationSec;
         else if (test.distanceM && test.unit === 'sec') dur = raw;
@@ -410,7 +579,9 @@ export function resolveBaselineRate(typeId, workSec, baselinesOverride = null) {
         if (rate > 0) points.push({ testId: test.id, rate, durationSec: dur, raw });
     });
 
-    if (!points.length) return { rate: 0, refDurationSec: 20, points: [] };
+    if (!points.length) {
+        return { rate: 0, refDurationSec: 20, points: [], inputKind, speedUnit };
+    }
 
     const W = Math.max(5, Number(workSec) || 20);
     let wSum = 0;
@@ -425,7 +596,9 @@ export function resolveBaselineRate(typeId, workSec, baselinesOverride = null) {
     return {
         rate: rateSum / wSum,
         refDurationSec: durSum / wSum,
-        points
+        points,
+        inputKind,
+        speedUnit
     };
 }
 
@@ -480,7 +653,10 @@ export function computeSetIntensity({
         rate = Math.min(withRest, prevWorkScaled);
     }
 
-    const formatted = formatIntensityDisplay(typeId, rate, workSec);
+    const formatted = formatIntensityDisplay(typeId, rate, workSec, {
+        inputKind: resolved.inputKind,
+        speedUnit: resolved.speedUnit
+    });
     return {
         rate,
         ...formatted,
@@ -489,12 +665,37 @@ export function computeSetIntensity({
     };
 }
 
-export function formatIntensityDisplay(typeId, rate, workSec = 20) {
+export function formatIntensityDisplay(typeId, rate, workSec = 20, prefs = null) {
     const id = normalizeHitTypeId(typeId);
     const meta = HIT_MODALITY_META[id];
     if (!(rate > 0) || !meta) {
         return { display: '—', displayUnit: '', targetValue: 0 };
     }
+    const flexible = modalityUsesFlexibleBaselineInput(id);
+    const inputKind = flexible ? normalizeBaselineInputKind(prefs?.inputKind) : null;
+    const speedUnit = normalizeSpeedUnit(prefs?.speedUnit);
+
+    if (inputKind === 'power') {
+        const watts = Math.round(rate);
+        return { display: `${watts} W`, displayUnit: 'W', targetValue: watts };
+    }
+    if (inputKind === 'speed') {
+        if (speedUnit === 'kmh') {
+            const kmh = Math.round(rate * 3.6 * 10) / 10;
+            return { display: `${kmh.toFixed(1)} km/h`, displayUnit: 'km/h', targetValue: kmh };
+        }
+        const ms = Math.round(rate * 100) / 100;
+        return { display: `${ms.toFixed(2)} m/s`, displayUnit: 'm/s', targetValue: ms };
+    }
+    if (inputKind === 'split') {
+        const split = 500 / rate;
+        return {
+            display: `${formatSplit(split)} /500m`,
+            displayUnit: '/500m',
+            targetValue: Math.round(split * 10) / 10
+        };
+    }
+
     const kind = meta.intensityKind;
     if (kind === 'speed') {
         const ms = Math.round(rate * 100) / 100;
@@ -527,13 +728,6 @@ export function formatIntensityDisplay(typeId, rate, workSec = 20) {
         };
     }
     return { display: String(Math.round(rate * 100) / 100), displayUnit: meta.unitLabel, targetValue: rate };
-}
-
-function formatSplit(sec) {
-    const s = Math.max(0, Number(sec) || 0);
-    const m = Math.floor(s / 60);
-    const rem = (s - m * 60).toFixed(1);
-    return m > 0 ? `${m}:${String(rem).padStart(4, '0')}` : `${Number(rem).toFixed(1)}s`;
 }
 
 /* ─── Interval generation ───────────────────────────────────────────────── */

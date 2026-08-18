@@ -6,7 +6,7 @@ import { checkMidnightRollover } from './lib/dates-rollover.js';
 import { bindUi } from './ui/bind.js';
 import { applyThemeChoice } from './ui/auth-onboarding.js';
 import { startNotificationScheduler } from './ui/notifications.js';
-import { syncRestTimersFromWallClock, syncStretchTimersFromWallClock } from './ui/drive.js';
+import { syncRestTimersFromWallClock, syncStretchTimersFromWallClock, syncHitTimersFromWallClock } from './ui/drive.js';
 import { unlockAudio } from './ui/audio.js';
 import { onAppBecameVisible } from './domain/thermodynamics.js';
 
@@ -42,6 +42,7 @@ document.addEventListener('visibilitychange', () => {
     try { unlockAudio(); } catch (e) { /* ignore */ }
     try { syncRestTimersFromWallClock(); } catch (e) { /* ignore */ }
     try { syncStretchTimersFromWallClock(); } catch (e) { /* ignore */ }
+    try { syncHitTimersFromWallClock(); } catch (e) { /* ignore */ }
     try { onAppBecameVisible(); } catch (e) { /* ignore */ }
     try { syncVisibleViewportHeight(); } catch (e) { /* ignore */ }
   }

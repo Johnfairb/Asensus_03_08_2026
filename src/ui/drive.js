@@ -4,7 +4,7 @@ import { sessionTypeIdFromFocus, updateLockedExerciseInPlan } from '../domain/wo
 import { resolveSessionRpe, getTonightSleepTargetHours } from '../domain/sleep-rpe.js';
 import { calculateLiveFitnessScores, generateDailyExerciseLog, getSeasonPhase, getTodayFocus, getWeeklyCoachTip, getWorkoutSessionAdvice, isGuidanceOff } from '../domain/fitness-hud.js';
 import { applyInjuryPainFollowUpFromJournal, injuryAreaLabel, needsInjuryPainFollowUp } from '../domain/periodization.js';
-import { HIT_TYPE_OPTIONS, mergeModalityBaselineTest, recalculateLactatePlanIntensities, resolveHitClassRecovery } from '../domain/lactate-engine.js';
+import { HIT_TYPE_OPTIONS, HIT_FLEXIBLE_INPUT_META, mergeModalityBaselineTest, recalculateLactatePlanIntensities, resolveHitClassRecovery, modalityUsesFlexibleBaselineInput, getModalityBaselineInputKind, getModalitySpeedUnit, saveModalityBaselineInputPrefs, parseBaselineResultInput, formatBaselineStoredValue, baselineResultUnit, baselineTestDisplayLabel, getBaselineTestSequence } from '../domain/lactate-engine.js';
 import { commitMatchSession, commitPracticeSession, dateToISO, generateFutureTimeline, getWorkoutSessionSnapshot, loadWorkoutSessionSnapshots, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, isLastPlannedSessionOfDay, looksLikeSteadyCardioExercise, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, resolveStrengthEventLetter, setRouteOverride, addDaysISO, isPowerEvent, strengthLabelForLetter } from '../domain/route-planner.js';
 import { lactateSessionRpeBarHtml, openLactateHitPicker, shouldPromptLactateHitTypes, syncLactateIntensitiesIntoActiveLog } from './lactate-ui.js';
 
@@ -66,6 +66,23 @@ import {
     syncStretchTimersFromWallClock,
     toggleSessionStretchExclude
 } from './stretch-timer.js';
+import {
+    adjustHitTimerRest,
+    canStartHitTimer,
+    currentHitStep,
+    getHitTimerState,
+    hitStepHeading,
+    hitTimerRestOverrideHtml,
+    hitTimerStatusSubtitle,
+    isHitTimerRunning,
+    logHitWorkNow,
+    remainingHitStepSeconds,
+    resetHitAudioHold,
+    resumeHitTimerAfterBaselineResult,
+    skipHitTimerRest,
+    startHitTimer,
+    syncHitTimersFromWallClock
+} from './hit-timer.js';
 import { addFoodToActiveLog, loadGhostTemplate, refreshTemplateSelector, removeFoodFromActiveLog, renderActiveLog, setConfirmRouteButtons, switchLogType, updateExecutionAuxBlocks, updateExerciseDropdowns, updateSaveTemplateButtonLabel } from './templates.js';
 import { openAddExercisesModal } from './add-exercises-modal.js';
 import {
@@ -304,6 +321,8 @@ export function renderWorkoutLog() {
             }
         } else if (item.isWarmupGroup) {
             subtitle = `${completedSets} / ${totalSets} parts`;
+        } else if (isLactateHit && isHitTimerRunning()) {
+            subtitle = hitTimerStatusSubtitle(item);
         } else if (item.isCoreBlock) {
             subtitle = `${completedSets} / ${totalSets} circuits`;
         } else if (item.isSuperset) {
@@ -385,7 +404,7 @@ export function renderWorkoutLog() {
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
                     <div class="workout-title" style="color:var(--text-main); margin-bottom:4px; font-size: 15px;">${displayName}${checkIcon}</div>
-                    <div ${(item.isStretchGroup || isStaticStretchingLogItem(item)) && !item.isCustomStretch ? `id="stretch-card-sub-${exIdx}"` : ''} style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${subtitle}${exerciseCardTimerHtml(item, exIdx)}</div>
+                    <div ${(item.isStretchGroup || isStaticStretchingLogItem(item)) && !item.isCustomStretch ? `id="stretch-card-sub-${exIdx}"` : (isLactateHit ? `id="hit-card-sub-${exIdx}"` : '')} style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${subtitle}${exerciseCardTimerHtml(item, exIdx)}</div>
                 </div>
                 <button class="btn-primary is-primary" style="width:auto; margin:0; padding:10px 20px; font-size:12px;" onclick="window.beginExerciseLog(${exIdx})">${isAllCompleted ? 'Edit' : 'Log'}</button>
             </div>
@@ -694,6 +713,7 @@ export function toggleStretchGroupComplete(exIdx) {
 }
 
 export { startStretchTimer, toggleSessionStretchExclude, syncStretchTimersFromWallClock };
+export { startHitTimer, logHitWorkNow, skipHitTimerRest, adjustHitTimerRest, syncHitTimersFromWallClock };
 
 /** Toggle all Left/Right parts for one muscle in the current cool-down. */
 export function toggleStretchMuscleGroupComplete(exIdx, baseName) {
@@ -991,6 +1011,23 @@ function restOverrideButtonsHtml(exIdx, setIdx, { include60 = false } = {}) {
 
 /** Rest countdown in the former "Superset with next" slot on lactate cards. */
 function lactateRestSlotHtml(item, exIdx) {
+    const hitTimer = getHitTimerState();
+    if (hitTimer?.running) {
+        const step = currentHitStep();
+        const left = remainingHitStepSeconds(hitTimer);
+        const heading = hitStepHeading(step);
+        if (step?.kind === 'result' || hitTimer.pausedForResult) {
+            return `<div id="lactate-rest-slot-${exIdx}" style="width:100%; margin-top:10px; padding:10px 12px; border-radius:6px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
+                <div data-hit-timer-label style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px;">${escapeHtmlSafe(heading)}</div>
+                <div style="font-size:12px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:700;">Enter result to continue</div>
+            </div>`;
+        }
+        return `<div id="lactate-rest-slot-${exIdx}" style="width:100%; margin-top:10px; padding:10px 12px; border-radius:6px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
+            <div data-hit-timer-label style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px;">${escapeHtmlSafe(heading)}</div>
+            <div data-hit-timer-countdown style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${left}s</div>
+            ${step?.kind === 'rest' ? hitTimerRestOverrideHtml() : (step?.kind === 'work' ? `<button type="button" onclick="logHitWorkNow()" style="margin-top:8px; background:none; border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 10px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">LOG NOW</button>` : '')}
+        </div>`;
+    }
     const sets = item.sets || [];
     const locked = sets.find(s => s.locked && remainingRestSeconds(s) > 0);
     if (locked) {
@@ -1089,7 +1126,8 @@ export function submitLactateBaselineResult(exIdx, setIdx) {
     const set = item?.sets?.[setIdx];
     if (!item || !set?.isBaselineTest || set.baselineConfirmed) return;
     const input = document.getElementById(`lactate-baseline-result-${exIdx}-${setIdx}`);
-    const raw = parseFloat(input?.value);
+    const inputKind = set.baselineInputKind || getModalityBaselineInputKind(set.typeId || item.lactateRows?.[setIdx]?.typeId);
+    const raw = parseBaselineResultInput(input?.value, inputKind);
     if (!(raw > 0)) {
         alert(`Enter the ${set.baselineUnit || 'result'} from this test.`);
         return;
@@ -1097,11 +1135,16 @@ export function submitLactateBaselineResult(exIdx, setIdx) {
     const typeId = set.typeId || item.lactateRows?.[setIdx]?.typeId || window._lactateHitSelection?.types?.[0];
     const testId = set.baselineTestId;
     if (!typeId || !testId) return;
-    mergeModalityBaselineTest(typeId, testId, raw);
+    mergeModalityBaselineTest(typeId, testId, raw, {
+        inputKind,
+        speedUnit: set.baselineSpeedUnit || getModalitySpeedUnit(typeId)
+    });
     set.baselineValue = raw;
     set.baselineConfirmed = true;
     set.baselineAwaitingResult = false;
     set.completed = true;
+    set.baselineInputKind = inputKind;
+    set.baselineSpeedUnit = set.baselineSpeedUnit || getModalitySpeedUnit(typeId);
     if (set.baselineKind === 'distance') set.duration_sec = raw;
     const row = item.lactateRows?.[setIdx];
     if (row) {
@@ -1121,17 +1164,113 @@ export function submitLactateBaselineResult(exIdx, setIdx) {
     }
     try { ensureWorkoutTimerStarted(); } catch (e) { /* ignore */ }
     try { syncExerciseTimer(item, { editing: isEditingLoggedSession() }); } catch (e) { /* ignore */ }
-    startLactateRestAfterSet(exIdx, setIdx);
+    if (!resumeHitTimerAfterBaselineResult(exIdx, setIdx)) {
+        startLactateRestAfterSet(exIdx, setIdx);
+    }
     renderExerciseSets();
     renderWorkoutLog();
 }
 
+function applyBaselineInputPrefsToLiveSets(typeId) {
+    const id = typeId;
+    if (!modalityUsesFlexibleBaselineInput(id)) return;
+    const inputKind = getModalityBaselineInputKind(id);
+    const speedUnit = getModalitySpeedUnit(id);
+    const unit = baselineResultUnit(inputKind, speedUnit);
+    const seq = getBaselineTestSequence(id);
+    (store.activeLog?.items || []).forEach((item) => {
+        (item.sets || []).forEach((set, setIdx) => {
+            if (!set?.isBaselineTest || set.baselineKind !== 'duration') return;
+            const setType = set.typeId || item.lactateRows?.[setIdx]?.typeId || item.typeId;
+            if (setType !== id) return;
+            if (set.baselineConfirmed) return;
+            if (!set.typeId) set.typeId = id;
+            const test = seq.find(t => t.id === set.baselineTestId);
+            set.baselineInputKind = inputKind;
+            set.baselineSpeedUnit = speedUnit;
+            set.baselineUnit = unit;
+            if (test) set.baselineLabel = baselineTestDisplayLabel(test, inputKind, speedUnit);
+            const row = item.lactateRows?.[setIdx];
+            if (row) {
+                row.baselineInputKind = inputKind;
+                row.baselineSpeedUnit = speedUnit;
+                row.baselineUnit = unit;
+                row.baselineLabel = set.baselineLabel;
+            }
+        });
+    });
+}
+
+export function setLactateBaselineInputKind(typeId, kind) {
+    if (!modalityUsesFlexibleBaselineInput(typeId)) return;
+    const locked = (store.activeLog?.items || []).some(item =>
+        (item.sets || []).some(s => s?.isBaselineTest && s.baselineConfirmed && (s.typeId === typeId || item.typeId === typeId))
+    );
+    if (locked) return;
+    saveModalityBaselineInputPrefs(typeId, { inputKind: kind, speedUnit: getModalitySpeedUnit(typeId) });
+    applyBaselineInputPrefsToLiveSets(typeId);
+    renderExerciseSets();
+}
+
+export function setLactateBaselineSpeedUnit(typeId, unit) {
+    if (!modalityUsesFlexibleBaselineInput(typeId)) return;
+    const locked = (store.activeLog?.items || []).some(item =>
+        (item.sets || []).some(s => s?.isBaselineTest && s.baselineConfirmed && (s.typeId === typeId || item.typeId === typeId))
+    );
+    if (locked) return;
+    saveModalityBaselineInputPrefs(typeId, {
+        inputKind: getModalityBaselineInputKind(typeId),
+        speedUnit: unit
+    });
+    applyBaselineInputPrefsToLiveSets(typeId);
+    renderExerciseSets();
+}
+
+function lactateBaselineMetricPickerHtml(typeId, locked) {
+    if (!modalityUsesFlexibleBaselineInput(typeId)) return '';
+    const kind = getModalityBaselineInputKind(typeId);
+    const speedUnit = getModalitySpeedUnit(typeId);
+    const chip = (id, label) => {
+        const on = kind === id;
+        const disable = locked ? 'opacity:0.45; pointer-events:none;' : '';
+        return `<button type="button" onclick="setLactateBaselineInputKind('${escapeHtmlSafe(typeId)}', '${id}')" style="${disable} padding:6px 8px; border-radius:6px; border:1px solid ${on ? 'var(--gold-accent)' : 'var(--border-subtle)'}; background:${on ? 'rgba(212,175,55,0.12)' : 'var(--bg-surface-elevated)'}; color:${on ? 'var(--gold-accent)' : 'var(--text-silver)'}; font-size:9px; font-family:'Roboto Mono'; font-weight:700; cursor:pointer; white-space:nowrap;">${label}</button>`;
+    };
+    const speedToggle = kind === 'speed'
+        ? `<div style="display:flex; gap:6px; margin-top:6px;">
+            <button type="button" onclick="setLactateBaselineSpeedUnit('${escapeHtmlSafe(typeId)}', 'ms')" style="${locked ? 'opacity:0.45; pointer-events:none;' : ''} padding:4px 8px; border-radius:6px; border:1px solid ${speedUnit === 'ms' ? 'var(--gold-accent)' : 'var(--border-subtle)'}; background:${speedUnit === 'ms' ? 'rgba(212,175,55,0.12)' : 'transparent'}; color:${speedUnit === 'ms' ? 'var(--gold-accent)' : 'var(--text-silver)'}; font-size:9px; font-family:'Roboto Mono'; cursor:pointer;">m/s</button>
+            <button type="button" onclick="setLactateBaselineSpeedUnit('${escapeHtmlSafe(typeId)}', 'kmh')" style="${locked ? 'opacity:0.45; pointer-events:none;' : ''} padding:4px 8px; border-radius:6px; border:1px solid ${speedUnit === 'kmh' ? 'var(--gold-accent)' : 'var(--border-subtle)'}; background:${speedUnit === 'kmh' ? 'rgba(212,175,55,0.12)' : 'transparent'}; color:${speedUnit === 'kmh' ? 'var(--gold-accent)' : 'var(--text-silver)'}; font-size:9px; font-family:'Roboto Mono'; cursor:pointer;">km/h</button>
+        </div>`
+        : '';
+    return `<div style="margin-bottom:10px;">
+        <div style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:6px;">Input for 20 s and 40 s</div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+            ${chip('distance', HIT_FLEXIBLE_INPUT_META.distance.label)}
+            ${chip('power', HIT_FLEXIBLE_INPUT_META.power.label)}
+            ${chip('speed', HIT_FLEXIBLE_INPUT_META.speed.label)}
+            ${chip('split', HIT_FLEXIBLE_INPUT_META.split.label)}
+        </div>
+        ${speedToggle}
+    </div>`;
+}
+
 function lactateBaselineSetHtml(item, exIdx, setIdx, set, rowMeta) {
     const label = set.baselineLabel || rowMeta?.baselineLabel || 'Baseline test';
-    const unit = set.baselineUnit || rowMeta?.baselineUnit || '';
+    const typeId = set.typeId || rowMeta?.typeId || item.lactateRows?.[setIdx]?.typeId || item.typeId;
+    const inputKind = set.baselineInputKind || (typeId ? getModalityBaselineInputKind(typeId) : 'distance');
+    const speedUnit = set.baselineSpeedUnit || (typeId ? getModalitySpeedUnit(typeId) : 'ms');
+    const unit = set.baselineUnit || rowMeta?.baselineUnit || baselineResultUnit(inputKind, speedUnit);
     const restLabel = set.restTime > 0 ? formatDurationSecLabel(set.restTime) : '—';
     const hint = set.baselineHint || rowMeta?.baselineHint || '';
     const confirmed = !!(set.completed && set.baselineConfirmed);
+    const kindLocked = !!(store.activeLog?.items || []).some(it =>
+        (it.sets || []).some(s => s?.isBaselineTest && s.baselineConfirmed && (s.typeId || typeId) === typeId)
+    );
+    const picker = set.baselineKind === 'duration' && typeId
+        ? lactateBaselineMetricPickerHtml(typeId, kindLocked)
+        : '';
+    const resultInputType = inputKind === 'split' ? 'text' : 'number';
+    const resultStep = inputKind === 'power' ? '1' : '0.1';
+    const resultPlaceholder = inputKind === 'split' ? 'e.g. 1:38.5 or 98.5' : unit;
     let body = '';
     if (set.baselineKind === 'distance') {
         const running = !!(set.baselineWatchStart && !set.baselineWatchStop);
@@ -1151,17 +1290,18 @@ function lactateBaselineSetHtml(item, exIdx, setIdx, set, rowMeta) {
                 <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="startLactateBaselineStopwatch(${exIdx}, ${setIdx})">Start stopwatch</button>`;
         }
     } else if (set.baselineAwaitingResult && !confirmed) {
-        body = `<div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Enter ${escapeHtmlSafe(unit || 'the result')} from this ${formatDurationSecLabel(set.baselineFixedWorkSec || set.duration_sec || 20)} all-out, then rest starts (${restLabel}).</div>
-            <input id="lactate-baseline-result-${exIdx}-${setIdx}" type="number" inputmode="decimal" min="0" step="0.1" class="input-field" placeholder="${escapeHtmlSafe(unit)}" style="margin:0 0 10px;">
+        body = `${picker}<div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Enter ${escapeHtmlSafe(unit || 'the result')} from this ${formatDurationSecLabel(set.baselineFixedWorkSec || set.duration_sec || 20)} all-out, then rest starts (${restLabel}).</div>
+            <input id="lactate-baseline-result-${exIdx}-${setIdx}" type="${resultInputType}" inputmode="${inputKind === 'split' ? 'text' : 'decimal'}" min="0" step="${resultStep}" class="input-field" placeholder="${escapeHtmlSafe(resultPlaceholder)}" style="margin:0 0 10px;">
             <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="submitLactateBaselineResult(${exIdx}, ${setIdx})">Save &amp; rest</button>`;
     } else if (confirmed) {
-        body = `<div style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${set.baselineValue}${unit ? ` ${escapeHtmlSafe(unit)}` : ''}</div>`;
+        body = `<div style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${escapeHtmlSafe(formatBaselineStoredValue(set.baselineValue, inputKind, speedUnit))}</div>`;
     } else {
         const work = formatDurationSecLabel(set.baselineFixedWorkSec || set.duration_sec || 20);
-        body = `<div style="font-size:11px; color:var(--text-silver); margin-bottom:10px; line-height:1.4;">All-out for ${work}. Tap Done when the interval finishes, then enter ${escapeHtmlSafe(unit || 'the result')}.</div>`;
+        const hitRunning = isHitTimerRunning();
+        body = `${picker}<div style="font-size:11px; color:var(--text-silver); margin-bottom:10px; line-height:1.4;">All-out for ${work}. ${hitRunning ? 'The HIT timer will log this interval, then you enter the result.' : `Tap Done when the interval finishes, then enter ${escapeHtmlSafe(unit || 'the result')}.`}</div>`;
     }
 
-    const showCheck = set.baselineKind !== 'distance' && !set.baselineAwaitingResult && !confirmed;
+    const showCheck = set.baselineKind !== 'distance' && !set.baselineAwaitingResult && !confirmed && !isHitTimerRunning();
     const lockOutClass = set.locked ? 'locked disabled' : '';
     const btnText = remainingRestSeconds(set) > 0 ? remainingRestSeconds(set) + 's' : (confirmed ? '✓' : 'DONE');
     const checkHtml = (showCheck || confirmed || remainingRestSeconds(set) > 0)
@@ -2275,10 +2415,38 @@ export function renderExerciseSets() {
         }
 
         let html = exerciseTimerBannerHtml(item, exIdx);
+        const seenTypes = new Set();
+        (item.sets || []).forEach((s) => {
+            const tid = s?.typeId || item.typeId;
+            if (s?.isBaselineTest && s.baselineKind === 'duration' && tid && !seenTypes.has(tid)) {
+                seenTypes.add(tid);
+                applyBaselineInputPrefsToLiveSets(tid);
+            }
+        });
         const hasBaseline = (item.sets || []).some(s => s && s.isBaselineTest);
+        const hitTimer = getHitTimerState();
+        const hitRunning = !!hitTimer?.running;
+        const hitFinished = !!hitTimer?.finished;
+        const hitStep = currentHitStep();
+        const hitLeft = remainingHitStepSeconds(hitTimer);
         html += hasBaseline
             ? `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">All-out <strong style="color:var(--text-main);">baseline tests</strong> come first and count toward the HIT block. Save each result, then rest starts (1 min after shorter tests, 2 min after the last). Then the usual intervals.</div>`
-            : `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">Hit each interval’s <strong style="color:var(--text-main);">target intensity</strong> for the work time. Rest starts automatically.</div>`;
+            : `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">Hit each interval’s <strong style="color:var(--text-main);">target intensity</strong> for the work time. Start the timer to auto-log work and rest, like stretching.</div>`;
+
+        if (hitRunning && hitStep) {
+            html += `<div style="margin-bottom:14px; padding:16px; border-radius:12px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
+                <div data-hit-timer-label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">${escapeHtmlSafe(hitStepHeading(hitStep))}</div>
+                <div data-hit-timer-countdown style="font-size:36px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono'; line-height:1;">${hitTimer.pausedForResult || hitStep.kind === 'result' ? '—' : `${hitLeft}s`}</div>
+                <div style="font-size:10px; color:var(--text-stealth); margin-top:8px; font-family:'Roboto Mono';">${hitStep.kind === 'result' ? 'Enter the baseline result below to continue' : 'Runs in background if you leave this screen'}</div>
+                ${hitStep.kind === 'work' ? `<button type="button" onclick="logHitWorkNow()" class="btn-primary is-secondary" style="margin:10px 0 0; padding:8px 12px; font-size:11px;">Log now</button>` : ''}
+                ${hitStep.kind === 'rest' ? hitTimerRestOverrideHtml() : ''}
+            </div>`;
+        } else if (canStartHitTimer()) {
+            html += `<button type="button" onclick="startHitTimer()" class="btn-primary" style="width:100%; margin:0 0 14px 0; padding:14px 16px; font-size:13px; font-weight:800; letter-spacing:0.3px;">Start HIT</button>`;
+        } else if (hitFinished) {
+            html += `<div style="margin-bottom:14px; padding:14px 16px; border-radius:12px; border:1px solid var(--border-subtle); background:var(--bg-surface-elevated); text-align:center; font-size:13px; font-weight:700; color:var(--text-main);">HIT block complete</div>`;
+        }
+
         html += `<div class="set-header" style="margin-top:8px;"><div style="width:25px;">SET</div><div style="flex:1;text-align:center;">WORK</div><div style="flex:1;text-align:center; color:var(--text-muted);">REST</div><div style="width:48px;"></div></div>`;
         item.sets.forEach((set, setIdx) => {
             const rowMeta = (item.lactateRows && item.lactateRows[setIdx]) || null;
@@ -2289,17 +2457,18 @@ export function renderExerciseSets() {
             const dur = set.duration_sec != null ? set.duration_sec : (parseInt(set.reps, 10) || 30);
             const restLabel = set.restTime > 0 ? formatDurationSecLabel(set.restTime) : '—';
             const target = set.targetDisplay || rowMeta?.targetDisplay || '';
-            let lockOutClass = set.locked ? 'locked disabled' : '';
+            let lockOutClass = set.locked || hitRunning ? 'locked disabled' : '';
             let btnText = remainingRestSeconds(set) > 0 ? remainingRestSeconds(set) + 's' : '✓';
             let overridesHtml = '';
-            if (set.locked) {
+            if (set.locked && !hitRunning) {
                 overridesHtml = restOverrideButtonsHtml(exIdx, setIdx, { include60: false });
             }
+            const durDisabled = hitRunning ? 'disabled' : '';
             html += `<div style="display:flex; flex-direction:column; margin-bottom:14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px;">
                 <div class="set-row" style="margin-bottom:0;">
                     <div class="set-num">${setIdx + 1}</div>
                     <div class="set-input-group">
-                        <input type="number" step="5" min="20" class="set-input" style="flex:1;" value="${dur}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'duration_sec', this.value)">
+                        <input type="number" step="5" min="20" class="set-input" style="flex:1;" value="${dur}" ${durDisabled} onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'duration_sec', this.value)">
                         <div style="flex:1; text-align:center; color:var(--text-muted); font-size:12px; font-weight:700; align-self:center; font-family:'Roboto Mono';">${restLabel}</div>
                     </div>
                     <div class="set-check"><div class="check-btn ${set.completed ? 'completed' : ''} ${lockOutClass}" id="btn-check-${exIdx}-${setIdx}" onclick="toggleSetComplete(${exIdx}, ${setIdx})">${btnText}</div></div>
@@ -3124,6 +3293,7 @@ export function toggleSetComplete(exIdx, setIdx) {
     if (setObj.locked) return;
     const itemGate = store.activeLog.items[exIdx];
     if (isStaticStretchingLogItem(itemGate) && getStretchTimerState(itemGate)?.running) return;
+    if (isLactateHitLogItem(itemGate) && isHitTimerRunning()) return;
     if (setObj._sessionSkipped) return;
 
     if (isLactateHitLogItem(itemGate) && setObj.isBaselineTest && !setObj.baselineConfirmed) {
@@ -3161,7 +3331,7 @@ export function toggleSetComplete(exIdx, setIdx) {
 
     if (setObj.completed && item.isCoreBlock && setObj.restTime > 0 && item.sets[setIdx + 1]) {
         startRestOnSet(exIdx, setIdx + 1, setObj.restTime);
-    } else if (setObj.completed && isLactate && setObj.restTime > 0) {
+    } else if (setObj.completed && isLactate && setObj.restTime > 0 && !isHitTimerRunning()) {
         // Prefer next set in this exercise; else first set of next lactate exercise
         if (item.sets[setIdx + 1]) {
             startRestOnSet(exIdx, setIdx + 1, setObj.restTime);
@@ -3914,6 +4084,7 @@ export function parkInProgressWorkout() {
     clearAllRestIntervals();
     try { releaseAllAudioHolds(); } catch (e) { /* ignore */ }
     try { resetStretchAudioHold(); } catch (e) { /* ignore */ }
+    try { resetHitAudioHold(); } catch (e) { /* ignore */ }
     (items || []).forEach(item => {
         (item.sets || []).forEach(s => {
             if (s) delete s._restAudioHeld;
@@ -4032,6 +4203,7 @@ export function resumeInProgressWorkout() {
     }
     try { restartRestTimersFromState(); } catch (e) { /* ignore */ }
     try { syncStretchTimersFromWallClock(); } catch (e) { /* ignore */ }
+    try { syncHitTimersFromWallClock(); } catch (e) { /* ignore */ }
     syncGlobalRestBanners();
     return true;
 }
@@ -4041,6 +4213,7 @@ export function discardInProgressWorkout() {
     clearAllRestIntervals();
     try { releaseAllAudioHolds(); } catch (e) { /* ignore */ }
     try { resetStretchAudioHold(); } catch (e) { /* ignore */ }
+    try { resetHitAudioHold(); } catch (e) { /* ignore */ }
     clearWorkoutDraft();
     window._workoutSessionConfirmed = false;
     window.manualWorkoutMode = false;

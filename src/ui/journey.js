@@ -1723,21 +1723,18 @@ function buildLactateIntervalRowsHtml(block) {
         block.items.forEach(item => {
             const name = item.exercise?.name || item.name || 'Interval';
             if (item.isWarmupGroup || /warmup/i.test(name)) {
+                const n = (item.sets || []).filter(s => s && s.completed).length;
                 rows.push(`<div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--border-subtle);">
                     <div style="font-size:12px; color:var(--text-main); font-weight:700;">${escapeHtml(name)}</div>
-                    <div style="margin-top:6px; font-size:11px; color:var(--text-silver); font-family:'Roboto Mono';">Warmup block</div>
+                    <div style="margin-top:6px; font-size:11px; color:var(--text-silver); font-family:'Roboto Mono';">${n ? `${n} parts` : 'Done'}</div>
                 </div>`);
                 return;
             }
             if (item.isStretchGroup || /static\s*stretch/i.test(name) || /stretch/i.test(name)) {
-                const muscles = adherenceLogSets(item, { stretch: true })
-                    .map((s, i) => stretchMuscleLabel(s, i));
-                const muscleHtml = muscles.length
-                    ? muscles.map(m => `<div>${escapeHtml(m)}</div>`).join('')
-                    : 'Cool-down';
+                const n = (item.sets || []).filter(s => s && s.completed).length;
                 rows.push(`<div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--border-subtle);">
-                    <div style="font-size:12px; color:var(--text-main); font-weight:700;">${escapeHtml(name)}</div>
-                    <div style="margin-top:6px; font-size:11px; color:var(--text-silver); font-family:'Roboto Mono'; line-height:1.5;">${muscleHtml}</div>
+                    <div style="font-size:12px; color:var(--text-main); font-weight:700;">Stretching</div>
+                    <div style="margin-top:6px; font-size:11px; color:var(--text-silver); font-family:'Roboto Mono';">${n ? `${n} holds` : 'Done'}</div>
                 </div>`);
                 return;
             }

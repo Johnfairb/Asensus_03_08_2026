@@ -864,8 +864,13 @@ export function generateDailyExerciseLog() {
             if (isLactateSess && Array.isArray(sess.items) && sess.items.length) {
                 bodyHtml = sess.items.map(item => {
                     const name = item.exercise?.name || item.name || 'Exercise';
-                    const summary = summarizeLactateSnapshotSets(item.sets || []);
-                    return exerciseRowHtml(name, summary, formatExerciseDurationLabel(item));
+                    const isWarm = !!(item?.isWarmupGroup || /warmup/i.test(name));
+                    const isStretch = !!(item?.isStretchGroup || item?.isCustomStretch || /stretch/i.test(name));
+                    const summary = (isWarm || isStretch)
+                        ? snapshotItemSummary(item)
+                        : summarizeLactateSnapshotSets(item.sets || []);
+                    const label = isStretch ? 'Stretching' : name;
+                    return exerciseRowHtml(label, summary, formatExerciseDurationLabel(item));
                 }).join('');
             } else if (Array.isArray(sess.items) && sess.items.length) {
                 bodyHtml = sess.items.map(item => {
