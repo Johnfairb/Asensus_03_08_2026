@@ -12,16 +12,34 @@ export const MOBILISATION_JOINTS = [
     'Spine', 'QL', 'Hips', 'Knees', 'Ankles'
 ];
 
+function youtubeEmbedUrl(urlOrId) {
+    const s = String(urlOrId || '').trim();
+    const m = s.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{6,})/)
+        || s.match(/^([A-Za-z0-9_-]{11})$/);
+    return m ? `https://www.youtube.com/embed/${m[1]}` : s;
+}
+
+function prepClip(label, urlOrId) {
+    return { label, videoUrl: youtubeEmbedUrl(urlOrId) };
+}
+
+const SHOULDER_CLIPS = [
+    prepClip('Shoulders 1', 'https://www.youtube.com/watch?v=tAL9fht9SlY'),
+    prepClip('Shoulders 2', 'https://youtu.be/ekJlpzEX2as')
+];
+
 /** YouTube teaching clips keyed by lowercase joint / drill name. */
-const PREP_VIDEO_URLS = {
-    shoulder: 'https://www.youtube.com/embed/tAL9fht9SlY',
-    shoulders: 'https://www.youtube.com/embed/tAL9fht9SlY'
+const PREP_VIDEOS = {
+    shoulder: SHOULDER_CLIPS,
+    shoulders: SHOULDER_CLIPS,
+    'shoulder girdle': [prepClip('Shoulder girdle', 'https://www.youtube.com/watch?v=oCWaOWuU-vo')]
 };
 
-/** Embed URL for a warmup / mobilisation part, or '' if none is wired yet. */
-export function getPrepVideoUrl(name) {
+/** Teaching clips for a warmup / mobilisation part. Empty if none are wired yet. */
+export function getPrepVideos(name) {
     const key = String(name || '').trim().toLowerCase();
-    return PREP_VIDEO_URLS[key] || '';
+    const clips = PREP_VIDEOS[key];
+    return Array.isArray(clips) ? clips.map(c => ({ ...c })) : [];
 }
 
 export const SHOULDER_WARMUP_DRILLS = [
@@ -173,13 +191,16 @@ function part(name, reps, notes, children = null, extra = null) {
 }
 
 function videoPart(name) {
-    const videoUrl = getPrepVideoUrl(name);
+    const videos = getPrepVideos(name);
+    const extra = videos.length
+        ? { videos, videoUrl: videos[0].videoUrl }
+        : null;
     return part(
         name,
-        'Video',
-        videoUrl ? 'Tap to play teaching video.' : 'Teaching point video placeholder',
+        videos.length > 1 ? `${videos.length} videos` : 'Video',
+        videos.length ? 'Tap to play teaching video.' : 'Teaching point video placeholder',
         null,
-        videoUrl ? { videoUrl } : null
+        extra
     );
 }
 

@@ -30,7 +30,7 @@ import {
 import { switchCableEquipment } from './equipment-ui.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
-import { getPrepVideoUrl } from '../domain/session-prep.js';
+import { getPrepVideos } from '../domain/session-prep.js';
 import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, exerciseLogNamesMatch, lastCompletedWorkingWeight } from '../domain/periodization-logs.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
@@ -573,19 +573,27 @@ export function togglePrepChildExpand(exIdx, setIdx, childIdx) {
 }
 
 function warmupChildVideoHtml(child) {
-    const videoUrl = child?.videoUrl || getPrepVideoUrl(child?.name);
-    if (!videoUrl) {
+    const clips = Array.isArray(child?.videos) && child.videos.length
+        ? child.videos
+        : getPrepVideos(child?.name);
+    const fallbackUrl = child?.videoUrl;
+    const list = clips.length
+        ? clips
+        : (fallbackUrl ? [{ label: child?.name || 'Teaching video', videoUrl: fallbackUrl }] : []);
+    if (!list.length) {
         return `<div style="border:1px dashed var(--border-highlight); border-radius:8px; min-height:72px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono';">Teaching point video placeholder</div>`;
     }
-    const title = String(child?.name || 'Teaching video').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const url = String(videoUrl).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const label = String(child?.name || '').replace(/</g, '&lt;');
-    return `<div style="margin-top:2px; border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.2);">
-        <button type="button" onclick="openVideoModal('${title}', '${url}')"
-            style="width:100%; padding:14px; background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:11px; cursor:pointer;">
-            🎥 FORM VIDEO — ${label}
-        </button>
-    </div>`;
+    return `<div style="display:flex; flex-direction:column; gap:6px; margin-top:2px;">${list.map((clip) => {
+        const title = String(clip.label || child?.name || 'Teaching video').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const url = String(clip.videoUrl || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const label = String(clip.label || child?.name || '').replace(/</g, '&lt;');
+        return `<div style="border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.2);">
+            <button type="button" onclick="openVideoModal('${title}', '${url}')"
+                style="width:100%; padding:14px; background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:11px; cursor:pointer;">
+                🎥 ${label}
+            </button>
+        </div>`;
+    }).join('')}</div>`;
 }
 
 /** Optional load for a core-circuit child exercise (no auto-progression). */
