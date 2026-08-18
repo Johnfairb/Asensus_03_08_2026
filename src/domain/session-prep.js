@@ -12,6 +12,18 @@ export const MOBILISATION_JOINTS = [
     'Spine', 'QL', 'Hips', 'Knees', 'Ankles'
 ];
 
+/** YouTube teaching clips keyed by lowercase joint / drill name. */
+const PREP_VIDEO_URLS = {
+    shoulder: 'https://www.youtube.com/embed/tAL9fht9SlY',
+    shoulders: 'https://www.youtube.com/embed/tAL9fht9SlY'
+};
+
+/** Embed URL for a warmup / mobilisation part, or '' if none is wired yet. */
+export function getPrepVideoUrl(name) {
+    const key = String(name || '').trim().toLowerCase();
+    return PREP_VIDEO_URLS[key] || '';
+}
+
 export const SHOULDER_WARMUP_DRILLS = [
     'Band pull-aparts', 'Y raises', 'W raises', 'Wall slides'
 ];
@@ -160,6 +172,17 @@ function part(name, reps, notes, children = null, extra = null) {
     return { name, reps, notes, children, ...(extra && typeof extra === 'object' ? extra : {}) };
 }
 
+function videoPart(name) {
+    const videoUrl = getPrepVideoUrl(name);
+    return part(
+        name,
+        'Video',
+        videoUrl ? 'Tap to play teaching video.' : 'Teaching point video placeholder',
+        null,
+        videoUrl ? { videoUrl } : null
+    );
+}
+
 /** Structured warmup parts for gym (hypertrophy/strength) or practice/match. */
 export function buildStructuredWarmupParts(context = 'gym') {
     const pulse = part(
@@ -170,8 +193,8 @@ export function buildStructuredWarmupParts(context = 'gym') {
     const mobilisation = part(
         'Mobilisation',
         'All joints',
-        'Tap to open joints. Each joint has a teaching-point video placeholder.',
-        MOBILISATION_JOINTS.map(j => part(j, 'Video', 'Teaching point video placeholder'))
+        'Tap a joint for its teaching video.',
+        MOBILISATION_JOINTS.map(j => videoPart(j))
     );
     const dynamicStretch = part(
         'Dynamic Stretching',
