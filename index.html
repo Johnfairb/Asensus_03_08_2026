@@ -993,7 +993,7 @@
     </div>
 
     <!-- ========================================== -->
-    <!-- TAB 8: NETWORK (Tips, Friends, Squads, Share) -->
+    <!-- TAB 8: NETWORK (Developers, Team, Friends) -->
     <!-- ========================================== -->
     <div id="tab-network" class="tab-content hidden">
         <div class="hud-header">Network</div>
@@ -1002,43 +1002,131 @@
         </div>
 
         <div id="network-nav" style="display: flex; gap: 8px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none;">
-            <button class="btn-primary network-tab-btn is-primary active" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('tips', this)">Tips</button>
+            <button class="btn-primary network-tab-btn is-primary active" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('developers', this)">Developers</button>
+            <button class="btn-primary network-tab-btn is-secondary" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('team', this)">Team</button>
             <button class="btn-primary network-tab-btn is-secondary" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('friends', this)">Friends</button>
-            <button class="btn-primary network-tab-btn is-secondary" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('squads', this)">Squads</button>
-            <button class="btn-primary network-tab-btn is-secondary" style="margin:0; padding:10px 15px; flex: 0 0 auto; width: auto;" onclick="switchNetworkTab('share', this)">Share</button>
         </div>
 
-        <!-- 1. TIPS (default) -->
-        <div id="network-tips" class="network-section">
-            <div class="card" style="padding: 16px; margin-bottom: 16px; border-color: var(--gold-accent);">
-                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; letter-spacing:0.4px; margin-bottom:6px;">Weekly tip</div>
-                <div style="font-size:14px; font-weight:bold; color:var(--text-main); margin-bottom:8px;">Protect the streak, not the perfect day</div>
-                <div style="font-size:12px; color:var(--text-silver); line-height:1.45;">Pete: If life compresses your window, run the minimum viable session and keep the meal on schedule. Adherence compounds — missing once is noise; missing twice becomes the new baseline.</div>
+        <!-- 1. DEVELOPERS -->
+        <div id="network-developers" class="network-section">
+            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:12px; line-height:1.45;">John, Tyler and Theo post here. Users can read — posting is staff-only.</div>
+            <div class="card" style="padding:16px; margin-bottom:10px; border-color:var(--gold-accent);">
+                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:6px;">Tyler · App update</div>
+                <div style="font-size:14px; font-weight:bold; color:var(--text-main); margin-bottom:6px;">GPS now respects locked team days</div>
+                <div style="font-size:12px; color:var(--text-silver); line-height:1.45;">Team events land on your plan as locked Practice / Game slots. Days without team events stay yours.</div>
             </div>
-            <div class="hud-header">Learn</div>
-            <div class="card" style="padding: 16px;">
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; cursor:pointer;" onclick="openVideoModal('Dr. Eric Berg: Insulin Resistance', 'https://www.youtube.com/embed/placeholder')">
-                        <div style="height:70px; background:var(--bg-surface); border:1px solid var(--border-highlight); border-radius:4px; margin-bottom:8px; display:flex; justify-content:center; align-items:center; color:var(--text-stealth);">▶</div>
-                        <div style="font-size:10px; color:var(--text-main); font-weight:bold; line-height:1.3;">Dr. Eric Berg: Insulin Resistance</div>
-                    </div>
-                    <div style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; cursor:pointer;" onclick="openVideoModal('Squat Mechanics Deep Dive', 'https://www.youtube.com/embed/placeholder')">
-                        <div style="height:70px; background:var(--bg-surface); border:1px solid var(--border-highlight); border-radius:4px; margin-bottom:8px; display:flex; justify-content:center; align-items:center; color:var(--text-stealth);">▶</div>
-                        <div style="font-size:10px; color:var(--text-main); font-weight:bold; line-height:1.3;">Squat Mechanics Deep Dive</div>
-                    </div>
-                    <div style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; cursor:pointer;" onclick="openVideoModal('Sleep Science for Hypertrophy', 'https://www.youtube.com/embed/placeholder')">
-                        <div style="height:70px; background:var(--bg-surface); border:1px solid var(--border-highlight); border-radius:4px; margin-bottom:8px; display:flex; justify-content:center; align-items:center; color:var(--text-stealth);">▶</div>
-                        <div style="font-size:10px; color:var(--text-main); font-weight:bold; line-height:1.3;">Sleep Science for Hypertrophy</div>
-                    </div>
-                    <div style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; cursor:pointer;" onclick="openVideoModal('Huberman: Dopamine & Drive', 'https://www.youtube.com/embed/placeholder')">
-                        <div style="height:70px; background:var(--bg-surface); border:1px solid var(--border-highlight); border-radius:4px; margin-bottom:8px; display:flex; justify-content:center; align-items:center; color:var(--text-stealth);">▶</div>
-                        <div style="font-size:10px; color:var(--text-main); font-weight:bold; line-height:1.3;">Huberman: Dopamine & Drive</div>
+            <div class="card" style="padding:16px; margin-bottom:10px;">
+                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:6px;">Theo · Video</div>
+                <div style="font-size:14px; font-weight:bold; color:var(--text-main); margin-bottom:6px;">Session B squat depth — Q&amp;A recap</div>
+                <div style="font-size:12px; color:var(--text-silver); line-height:1.45; margin-bottom:10px;">Clip from this week's live Q&amp;A. Form first, load second.</div>
+                <button type="button" class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="openVideoModal('Session B squat depth', 'https://www.youtube.com/embed/placeholder')">Watch</button>
+            </div>
+            <div class="card" style="padding:16px; margin-bottom:10px;">
+                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:6px;">John · Challenge</div>
+                <div style="font-size:14px; font-weight:bold; color:var(--text-main); margin-bottom:6px;">Biggest deadlift on Ascensus</div>
+                <div style="font-size:12px; color:var(--text-silver); line-height:1.45; margin-bottom:10px;">We'll pull the heaviest logged deadlift from the database and ask that athlete for a recording.</div>
+                <button type="button" class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="networkDemoNotice('network-dev-notice', 'Challenge entry coming soon')">Enter (demo)</button>
+            </div>
+            <div class="card" style="padding:16px; margin-bottom:10px;">
+                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:6px;">Theo · Highlight of the month</div>
+                <div style="font-size:12px; color:var(--text-silver); line-height:1.45;">Send in a clip. Each of us picks five favourites and cuts a short reel with first names.</div>
+            </div>
+            <div class="card" style="padding:16px; margin-bottom:12px;">
+                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:6px;">John · Rewards</div>
+                <div style="font-size:12px; color:var(--text-silver); line-height:1.45;">New reward schemes land here first — not in a public forum.</div>
+            </div>
+            <button type="button" class="btn-primary" style="margin:0;" onclick="networkDemoNotice('network-dev-notice', 'Staff posting coming soon')">Post as developer (demo)</button>
+            <div id="network-dev-notice" class="network-demo-notice hidden"></div>
+        </div>
+
+        <!-- 2. TEAM -->
+        <div id="network-team" class="network-section hidden">
+            <div class="card" style="padding:16px; margin-bottom:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:12px;">
+                    <div>
+                        <div style="font-size:13px; font-weight:bold; color:var(--text-main);">Imperial College 1st XV</div>
+                        <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">Demo team · player key PLAYER-1XV · staff key STAFF-1XV</div>
                     </div>
                 </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button type="button" class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="openNetworkCreateTeam()">+ Create</button>
+                    <button type="button" class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="openNetworkJoinTeam()">Join</button>
+                </div>
             </div>
+
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; margin-bottom:8px;">SKELETON PREVIEW</div>
+            <div id="network-role-pills" style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; scrollbar-width:none;">
+                <button type="button" class="btn-primary network-role-btn is-primary active" data-role="player" style="margin:0; padding:8px 12px; flex:0 0 auto; width:auto; font-size:11px;" onclick="setNetworkPreviewRole('player', this)">Player</button>
+                <button type="button" class="btn-primary network-role-btn is-secondary" data-role="assistant" style="margin:0; padding:8px 12px; flex:0 0 auto; width:auto; font-size:11px;" onclick="setNetworkPreviewRole('assistant', this)">Assistant</button>
+                <button type="button" class="btn-primary network-role-btn is-secondary" data-role="coach" style="margin:0; padding:8px 12px; flex:0 0 auto; width:auto; font-size:11px;" onclick="setNetworkPreviewRole('coach', this)">Coach</button>
+            </div>
+
+            <div id="network-team-player-nav" class="network-sub-nav">
+                <button type="button" class="btn-primary network-team-sub-btn is-primary active" data-pane="announcements" style="margin:0; padding:8px 12px; flex:0 0 auto; width:auto; font-size:11px;" onclick="switchTeamSubTab('announcements', this)">Announcements</button>
+                <button type="button" class="btn-primary network-team-sub-btn is-secondary" data-pane="status" style="margin:0; padding:8px 12px; flex:0 0 auto; width:auto; font-size:11px;" onclick="switchTeamSubTab('status', this)">My status</button>
+            </div>
+            <div id="network-team-staff-nav" class="network-sub-nav hidden">
+                <button type="button" class="btn-primary network-team-sub-btn is-primary active" data-pane="announcements" style="margin:0; padding:8px 12px; flex:0 0 auto; width:auto; font-size:11px;" onclick="switchTeamSubTab('announcements', this)">Announcements</button>
+                <button type="button" class="btn-primary network-team-sub-btn is-secondary" data-pane="staff" style="margin:0; padding:8px 12px; flex:0 0 auto; width:auto; font-size:11px;" onclick="switchTeamSubTab('staff', this)">Staff thread</button>
+                <button type="button" class="btn-primary network-team-sub-btn is-secondary" data-pane="roster" style="margin:0; padding:8px 12px; flex:0 0 auto; width:auto; font-size:11px;" onclick="switchTeamSubTab('roster', this)">Roster</button>
+            </div>
+
+            <div id="network-pane-announcements" class="network-team-pane">
+                <div class="card" style="padding:16px; margin-bottom:10px;">
+                    <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:6px;">Coach · Tuesday</div>
+                    <div style="font-size:13px; font-weight:bold; color:var(--text-main); margin-bottom:6px;">Captain's run Thursday 07:30</div>
+                    <div style="font-size:12px; color:var(--text-silver); line-height:1.45;">Meet pitch-side. If you are injured, update My status before Wednesday night.</div>
+                </div>
+                <div class="card" style="padding:16px; margin-bottom:12px;">
+                    <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:6px;">Assistant · Monday</div>
+                    <div style="font-size:12px; color:var(--text-silver); line-height:1.45;">Fixed schedule is locked on player plans for Tue / Thu / Sat. Other days stay personal.</div>
+                </div>
+                <div id="network-announce-composer" class="hidden">
+                    <textarea id="network-announce-text" class="input-field" placeholder="Post an announcement…" style="min-height:72px; margin-bottom:8px;"></textarea>
+                    <button type="button" class="btn-primary" style="margin:0;" onclick="networkDemoNotice('network-team-notice', 'Announcements posting coming soon')">Post (demo)</button>
+                </div>
+                <div id="network-announce-player-note" style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">Only coaches and assistants can post.</div>
+            </div>
+
+            <div id="network-pane-status" class="network-team-pane hidden">
+                <div class="card" style="padding:16px;">
+                    <div style="font-size:12px; font-weight:bold; color:var(--text-main); margin-bottom:12px;">This week</div>
+                    <label class="pill-toggle" style="margin:0 0 12px 0; display:inline-block;">
+                        <input type="checkbox" id="network-status-injury"><span>Injury present</span>
+                    </label>
+                    <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">Availability</label>
+                    <select id="network-status-availability" class="input-field" style="margin-bottom:12px;">
+                        <option value="available">Available — all practices and events</option>
+                        <option value="unavailable">Unavailable for an event this week</option>
+                    </select>
+                    <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">Private note to coach</label>
+                    <textarea id="network-status-note" class="input-field" placeholder="Message or context for staff only…" style="min-height:72px; margin-bottom:8px;"></textarea>
+                    <button type="button" class="btn-icon" style="padding:6px 10px; font-size:10px; margin-bottom:12px;" onclick="networkDemoNotice('network-team-notice', 'Media upload to coach coming soon')">Upload media (demo)</button>
+                    <button type="button" class="btn-primary" style="margin:0;" onclick="submitNetworkStatus()">Update status (demo)</button>
+                </div>
+            </div>
+
+            <div id="network-pane-staff" class="network-team-pane hidden">
+                <div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; max-height:200px; overflow-y:auto; margin-bottom:8px;">
+                    <div style="margin-bottom:10px;"><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">Coach</span><div style="font-size:12px; color:var(--text-silver);">John_F flagged a hamstring — keep him off contact Thursday.</div></div>
+                    <div><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">Assistant</span><div style="font-size:12px; color:var(--text-silver);">Noted. I'll move him to a rehab block on the locked Thursday slot.</div></div>
+                </div>
+                <input type="text" class="input-field" placeholder="Staff thread coming soon" disabled style="opacity:0.55; margin:0;">
+            </div>
+
+            <div id="network-pane-roster" class="network-team-pane hidden">
+                <div style="display:flex; gap:12px; flex-wrap:wrap; font-size:10px; font-family:'Roboto Mono'; color:var(--text-muted); margin-bottom:12px;">
+                    <span style="display:flex; align-items:center; gap:6px;"><span class="network-status-dot is-available"></span> Available</span>
+                    <span style="display:flex; align-items:center; gap:6px;"><span class="network-status-dot is-unavailable"></span> Unavailable</span>
+                    <span style="display:flex; align-items:center; gap:6px;"><span class="network-status-dot is-injured"></span> Injured</span>
+                    <span style="display:flex; align-items:center; gap:6px;"><span class="network-roster-bell"></span> Private note</span>
+                </div>
+                <div id="network-roster-list"></div>
+            </div>
+            <div id="network-team-notice" class="network-demo-notice hidden"></div>
         </div>
 
-        <!-- 2. FRIENDS -->
+        <!-- 3. FRIENDS -->
         <div id="network-friends" class="network-section hidden">
             <div class="card" style="padding: 16px; margin-bottom: 16px;">
                 <div style="font-size:12px; color:var(--text-main); font-weight:bold; margin-bottom:12px;">Your profile</div>
@@ -1057,12 +1145,19 @@
                 </div>
             </div>
 
+            <div class="card" style="padding:16px; margin-bottom:16px;">
+                <div style="font-size:12px; color:var(--text-main); font-weight:bold; margin-bottom:8px;">Add friend</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Exact username. They can accept or reject.</div>
+                <input type="text" id="network-friend-lookup" class="input-field" placeholder="Exact username" style="margin-bottom:8px;" autocomplete="off">
+                <button type="button" class="btn-primary" style="margin:0;" onclick="sendNetworkFriendRequest()">Send request (demo)</button>
+            </div>
+
             <div style="position: relative; margin-bottom: 12px;">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                 <input type="text" id="network-friend-search" class="input-field search-bar" placeholder="Search friends..." style="margin-bottom: 0; padding-left: 42px;" oninput="filterNetworkFriends(this.value)" autocomplete="off">
             </div>
             <div id="network-friend-empty" class="hidden" style="padding:12px; margin-bottom:12px; font-size:12px; color:var(--text-muted);">
-                No matches. <button type="button" style="background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:12px; cursor:pointer; padding:0;" onclick="switchNetworkTab('share', document.querySelectorAll('.network-tab-btn')[3])">Share a workout with a teammate</button>
+                No matches in your friends list.
             </div>
             <div id="network-friends-list">
                 <div class="network-friend-row card" data-username="Theo_C" style="padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
@@ -1070,83 +1165,106 @@
                         <div style="font-size:13px; font-weight:bold; color:var(--text-main);">Theo_C</div>
                         <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">12-day streak · Bench 110kg</div>
                     </div>
-                    <button class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="addNetworkFriendDemo('Theo_C')">Add</button>
+                    <button class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="openNetworkFriendThread('Theo_C')">Chat</button>
                 </div>
                 <div class="network-friend-row card" data-username="John_F" style="padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <div style="font-size:13px; font-weight:bold; color:var(--text-main);">John_F</div>
                         <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">8-day streak · Bench 95kg</div>
                     </div>
-                    <button class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="addNetworkFriendDemo('John_F')">Add</button>
+                    <button class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="openNetworkFriendThread('John_F')">Chat</button>
                 </div>
                 <div class="network-friend-row card" data-username="Tyler_F" style="padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <div style="font-size:13px; font-weight:bold; color:var(--text-main);">Tyler_F</div>
                         <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">5-day streak · Bench 87.5kg</div>
                     </div>
-                    <button class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="addNetworkFriendDemo('Tyler_F')">Add</button>
+                    <button class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="openNetworkFriendThread('Tyler_F')">Chat</button>
                 </div>
             </div>
-            <div id="network-friend-demo-notice" class="hidden" style="margin-top:8px; font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono';"></div>
-        </div>
 
-        <!-- 3. SQUADS -->
-        <div id="network-squads" class="network-section hidden">
-            <div class="card" style="padding: 16px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <span style="font-size:12px; color:var(--text-main); font-weight:bold;">My Squads</span>
-                    <div style="display:flex; gap:10px;">
-                        <button type="button" style="background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:10px; font-weight:bold; cursor:pointer;" onclick="networkCreateSquadDemo()">+ CREATE</button>
-                        <button type="button" style="background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:10px; font-weight:bold; cursor:pointer;" onclick="networkInviteSquadDemo()">INVITE</button>
+            <div id="network-friend-thread" class="hidden" style="margin-top:12px;">
+                <div class="card" style="padding:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <div>
+                            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">CHAT</div>
+                            <div id="network-friend-thread-name" style="font-size:13px; font-weight:bold; color:var(--text-main);">Friend</div>
+                        </div>
+                        <button type="button" class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="closeNetworkFriendThread()">Close</button>
+                    </div>
+                    <div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; max-height:160px; overflow-y:auto; margin-bottom:10px;">
+                        <div style="margin-bottom:10px;"><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">Them</span><div style="font-size:12px; color:var(--text-silver);">Send a workout or recipe card when you want to compare weeks.</div></div>
+                        <div><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">You</span><div style="font-size:12px; color:var(--text-silver);">Messaging is a skeleton — share is the working preview.</div></div>
+                    </div>
+                    <input type="text" class="input-field" placeholder="Messages coming soon" disabled style="opacity:0.55; margin:0 0 10px 0;">
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        <button type="button" class="btn-primary" style="margin:0;" onclick="openNetworkShareToFriend('workout')">Share last workout</button>
+                        <button type="button" class="btn-primary" style="margin:0; border-color:var(--border-highlight); color:var(--text-silver);" onclick="openNetworkShareToFriend('meal')">Share recipe / meal</button>
                     </div>
                 </div>
-                <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-surface-elevated); padding:12px; border-radius:8px; border:1px solid var(--border-subtle); margin-bottom:10px;">
-                    <div>
-                        <div style="font-size:13px; font-weight:bold; color:var(--text-main); margin-bottom:2px;">Imperial College 1st XV</div>
-                        <div style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">34 Operators · Pre-Season · Demo</div>
-                    </div>
-                    <button class="btn-icon" style="padding:6px 12px; font-size:10px;" onclick="toggleSquadDetail()">VIEW</button>
-                </div>
-                <div id="network-squad-detail" class="hidden" style="margin-top:12px; border-top:1px solid var(--border-highlight); padding-top:12px;">
-                    <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:8px;">SHARED SESSIONS</div>
-                    <div style="background:var(--bg-surface-elevated); padding:10px; border-radius:6px; margin-bottom:8px; font-size:12px; color:var(--text-silver);">
-                        <strong style="color:var(--text-main);">Session B — Squats</strong><br>
-                        <span style="font-size:10px; font-family:'Roboto Mono'; color:var(--text-muted);">Theo_C · 5×5 @ 140kg · yesterday</span>
-                    </div>
-                    <div style="background:var(--bg-surface-elevated); padding:10px; border-radius:6px; margin-bottom:12px; font-size:12px; color:var(--text-silver);">
-                        <strong style="color:var(--text-main);">Upper Power</strong><br>
-                        <span style="font-size:10px; font-family:'Roboto Mono'; color:var(--text-muted);">John_F · Bench 4×6 @ 95kg · Mon</span>
-                    </div>
-                    <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:8px;">CHAT <span style="color:var(--gold-accent);">(demo — not live)</span></div>
-                    <div id="network-squad-chat" style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px; padding:10px; max-height:180px; overflow-y:auto; margin-bottom:8px;">
-                        <div style="margin-bottom:10px;"><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">Theo_C</span><div style="font-size:12px; color:var(--text-silver);">Squats felt heavy but bar speed was clean. Anyone hitting Session B tomorrow?</div></div>
-                        <div style="margin-bottom:10px;"><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">John_F</span><div style="font-size:12px; color:var(--text-silver);">I'm in for 07:30 if the room's free.</div></div>
-                        <div style="margin-bottom:10px;"><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">Tyler_F</span><div style="font-size:12px; color:var(--text-silver);">Bring bands — coach wants activation before doubles.</div></div>
-                        <div><span style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono';">Theo_C</span><div style="font-size:12px; color:var(--text-silver);">Copy. See you there.</div></div>
-                    </div>
-                    <input type="text" class="input-field" placeholder="Chat coming soon" disabled style="opacity:0.55; margin:0;">
-                </div>
             </div>
-        </div>
-
-        <!-- 4. SHARE -->
-        <div id="network-share" class="network-section hidden">
-            <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
-                <button class="btn-primary" style="margin:0;" onclick="shareNetworkWorkout()">Share last workout</button>
-                <button class="btn-primary" style="margin:0; border-color:var(--border-highlight); color:var(--text-silver);" onclick="shareNetworkMeal()">Share today's meal</button>
-            </div>
-            <div class="hud-header">Card preview</div>
-            <div id="network-share-preview" class="card" style="padding: 20px; min-height: 140px; background: linear-gradient(160deg, rgba(212,175,55,0.12) 0%, var(--bg-surface) 55%); border-color: var(--gold-accent);">
-                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; letter-spacing:1px; margin-bottom:8px;">ASCENSUS</div>
-                <div id="network-share-preview-title" style="font-size:16px; font-weight:bold; color:var(--text-main); margin-bottom:6px;">Session B — Squats</div>
-                <div id="network-share-preview-body" style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; line-height:1.5;">5×5 @ 140kg<br>Calibrated via Ascensus GPS</div>
-            </div>
+            <div id="network-friend-demo-notice" class="network-demo-notice hidden"></div>
         </div>
     </div>
 
     <!-- ========================================== -->
     <!-- MODALS & OVERLAYS -->
     <!-- ========================================== -->
+
+    <div id="network-join-modal" class="hidden" style="position:absolute; top:0; left:0; width:100%; height:100%; background:transparent; z-index:4500; display:flex; justify-content:center; align-items:center; padding:20px;" onclick="if(event.target===this)closeNetworkJoinTeam()">
+        <div class="modal-content stealth-panel" style="width:100%; max-width:390px; background:var(--bg-surface);" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:14px;">Join team</h2>
+                <button type="button" onclick="closeNetworkJoinTeam()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <div id="network-join-key-step">
+                <p style="font-size:11px; color:var(--text-muted); line-height:1.5; margin:0 0 12px 0;">Enter the player or assistant passkey. Demo keys: PLAYER-1XV and STAFF-1XV.</p>
+                <input type="text" id="network-join-key" class="input-field" placeholder="Passkey" autocomplete="off">
+                <div id="network-join-error" class="network-demo-notice hidden"></div>
+                <button type="button" class="btn-primary" style="margin:0;" onclick="continueNetworkJoin()">Continue</button>
+            </div>
+            <div id="network-join-lock-step" class="hidden">
+                <p style="font-size:12px; color:var(--text-silver); line-height:1.5; margin:0 0 12px 0;">Joining this team copies the team plan onto your personal plan. Days that have team events will be <strong style="color:var(--text-main);">replaced and locked</strong>. Days without team events stay yours and stay editable.</p>
+                <p style="font-size:11px; color:var(--text-muted); line-height:1.45; margin:0 0 16px 0;">This skeleton will not change your plan yet.</p>
+                <button type="button" class="btn-primary" style="margin:0 0 8px 0; border-color:var(--gold-accent); color:var(--gold-accent);" onclick="confirmNetworkJoin()">Join and lock team days (demo)</button>
+                <button type="button" class="btn-primary" style="margin:0;" onclick="closeNetworkJoinTeam()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="network-create-modal" class="hidden" style="position:absolute; top:0; left:0; width:100%; height:100%; background:transparent; z-index:4500; display:flex; justify-content:center; align-items:center; padding:20px;" onclick="if(event.target===this)closeNetworkCreateTeam()">
+        <div class="modal-content stealth-panel" style="width:100%; max-width:390px; background:var(--bg-surface); max-height:85vh; overflow-y:auto;" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:14px;">Create team</h2>
+                <button type="button" onclick="closeNetworkCreateTeam()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p style="font-size:11px; color:var(--text-muted); line-height:1.5; margin:0 0 12px 0;">Coach sets a name, a player passkey, and an assistant passkey. Fixed and long-term schedules are copied onto members' plans on join.</p>
+            <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">Team name</label>
+            <input type="text" id="network-create-name" class="input-field" placeholder="e.g. Imperial College 1st XV" autocomplete="off">
+            <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">Player passkey</label>
+            <input type="text" id="network-create-player-key" class="input-field" placeholder="Player join key" autocomplete="off">
+            <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">Assistant passkey</label>
+            <input type="text" id="network-create-staff-key" class="input-field" placeholder="Assistant join key" autocomplete="off">
+            <p style="font-size:11px; color:var(--text-muted); line-height:1.45; margin:0 0 12px 0;">Next step (not in this skeleton): attach your fixed weekly schedule and long-term calendar.</p>
+            <button type="button" class="btn-primary" style="margin:0;" onclick="submitNetworkCreateTeam()">Create team (demo)</button>
+        </div>
+    </div>
+
+    <div id="network-share-friend-modal" class="hidden" style="position:absolute; top:0; left:0; width:100%; height:100%; background:transparent; z-index:4500; display:flex; justify-content:center; align-items:center; padding:20px;" onclick="if(event.target===this)closeNetworkShareToFriend()">
+        <div class="modal-content stealth-panel" style="width:100%; max-width:390px; background:var(--bg-surface);" onclick="event.stopPropagation()">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:14px;">Share with friend</h2>
+                <button type="button" onclick="closeNetworkShareToFriend()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <p id="network-share-friend-label" style="font-size:11px; color:var(--text-muted); margin:0 0 12px 0;">Send this card to a friend.</p>
+            <div id="network-share-preview" class="card" style="padding: 20px; min-height: 140px; background: linear-gradient(160deg, rgba(212,175,55,0.12) 0%, var(--bg-surface) 55%); border-color: var(--gold-accent); margin-bottom:16px;">
+                <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; letter-spacing:1px; margin-bottom:8px;">ASCENSUS</div>
+                <div id="network-share-preview-title" style="font-size:16px; font-weight:bold; color:var(--text-main); margin-bottom:6px;">Session B — Squats</div>
+                <div id="network-share-preview-body" style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono'; line-height:1.5;">5×5 @ 140kg<br>Calibrated via Ascensus GPS</div>
+            </div>
+            <button type="button" class="btn-primary" style="margin:0;" onclick="sendNetworkShareToFriend()">Send (demo)</button>
+        </div>
+    </div>
 
     <!-- SHARED EXECUTION ZONE (FULL-SCREEN FOCUS) -->
     <div id="execution-zone" class="hidden">

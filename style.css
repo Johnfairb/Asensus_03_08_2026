@@ -1911,6 +1911,40 @@ div[id$="-modal"] .modal-content {
 }
 
 /* ========================================== */
+/* NETWORK SKELETON                           */
+/* ========================================== */
+.network-status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.network-status-dot.is-available { background: #34C759; }
+.network-status-dot.is-unavailable { background: #FFD60A; }
+.network-status-dot.is-injured { background: #FF3B30; }
+.network-roster-bell {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #FFD60A;
+}
+.network-demo-notice {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--gold-accent);
+    font-family: 'Roboto Mono', monospace;
+    line-height: 1.4;
+}
+.network-sub-nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+}
+
+/* ========================================== */
 /* DESKTOP-ONLY iPHONE DEVICE FRAME           */
 /* Pass-through on phones; chrome ≥ 480px     */
 /* ========================================== */

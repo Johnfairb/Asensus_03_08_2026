@@ -1,9 +1,19 @@
 import { store } from '../state/store.js';
 
+const PREVIEW_ROLE_KEY = 'ascensus_network_preview_role';
+const PLAYER_KEY = 'PLAYER-1XV';
+const STAFF_KEY = 'STAFF-1XV';
+
 export const DEMO_FRIENDS = [
   { username: 'Theo_C', streakDays: 12, lift: 'Bench 110kg' },
   { username: 'John_F', streakDays: 8, lift: 'Bench 95kg' },
   { username: 'Tyler_F', streakDays: 5, lift: 'Bench 87.5kg' }
+];
+
+const DEMO_ROSTER = [
+  { username: 'Theo_C', status: 'available', note: false, detail: 'Full week' },
+  { username: 'John_F', status: 'injured', note: true, detail: 'Hamstring · private note' },
+  { username: 'Tyler_F', status: 'unavailable', note: false, detail: 'Misses Thursday' }
 ];
 
 const EXEMPLAR_WORKOUT = {
@@ -17,6 +27,10 @@ const EXEMPLAR_MEAL = {
   lines: ['~720 kcal · 55g protein', 'Calibrated via Ascensus GPS'],
   text: 'High-Density Beef Bowl\n~720 kcal · 55g protein\nCalibrated via Ascensus GPS'
 };
+
+let pendingJoinRole = 'player';
+let activeFriendUsername = '';
+let pendingShareKind = 'workout';
 
 function persistNetworkConfig() {
   localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig));
@@ -78,6 +92,185 @@ export function hydrateNetworkProfileDom() {
   setVal('network-private', store.userConfig.networkPrivate !== false, true);
   setVal('network-show-streak', store.userConfig.networkShowStreak !== false, true);
   setVal('network-show-lift', store.userConfig.networkShowLift !== false, true);
+  hydrateNetworkShell();
+}
+
+export function hydrateNetworkShell() {
+  renderNetworkRoster();
+  applyTeamRoleView();
+}
+
+export function networkDemoNotice(id, text) {
+  const notice = document.getElementById(id);
+  if (!notice) {
+    alert(text);
+    return;
+  }
+  notice.textContent = text;
+  notice.classList.remove('hidden');
+  window.clearTimeout(notice._hideTimer);
+  notice._hideTimer = window.setTimeout(() => {
+    notice.classList.add('hidden');
+    notice.textContent = '';
+  }, 2800);
+}
+
+function getPreviewRole() {
+  const v = localStorage.getItem(PREVIEW_ROLE_KEY);
+  return v === 'assistant' || v === 'coach' ? v : 'player';
+}
+
+function isStaffRole(role) {
+  return role === 'coach' || role === 'assistant';
+}
+
+function setSubBtnActive(containerSelector, pane) {
+  document.querySelectorAll(`${containerSelector} .network-team-sub-btn`).forEach((btn) => {
+    const on = btn.getAttribute('data-pane') === pane;
+    btn.classList.toggle('is-primary', on);
+    btn.classList.toggle('active', on);
+    btn.classList.toggle('is-secondary', !on);
+  });
+}
+
+export function setNetworkPreviewRole(role, element) {
+  const next = role === 'assistant' || role === 'coach' ? role : 'player';
+  localStorage.setItem(PREVIEW_ROLE_KEY, next);
+  applyTeamRoleView(element);
+}
+
+export function applyTeamRoleView() {
+  const role = getPreviewRole();
+  const staff = isStaffRole(role);
+
+  document.querySelectorAll('.network-role-btn').forEach((btn) => {
+    const on = btn.getAttribute('data-role') === role;
+    btn.classList.toggle('is-primary', on);
+    btn.classList.toggle('active', on);
+    btn.classList.toggle('is-secondary', !on);
+  });
+
+  document.getElementById('network-team-player-nav')?.classList.toggle('hidden', staff);
+  document.getElementById('network-team-staff-nav')?.classList.toggle('hidden', !staff);
+  document.getElementById('network-announce-composer')?.classList.toggle('hidden', !staff);
+  document.getElementById('network-announce-player-note')?.classList.toggle('hidden', staff);
+
+  const current = [...document.querySelectorAll('.network-team-pane')].find((el) => !el.classList.contains('hidden'));
+  const currentPane = current?.id?.replace('network-pane-', '') || 'announcements';
+  switchTeamSubTab(currentPane);
+}
+
+export function switchTeamSubTab(pane, element) {
+  const role = getPreviewRole();
+  const staff = isStaffRole(role);
+  const allowed = staff
+    ? ['announcements', 'staff', 'roster']
+    : ['announcements', 'status'];
+  const next = allowed.includes(pane) ? pane : 'announcements';
+
+  document.querySelectorAll('.network-team-pane').forEach((el) => el.classList.add('hidden'));
+  document.getElementById(`network-pane-${next}`)?.classList.remove('hidden');
+
+  setSubBtnActive('#network-team-player-nav', next);
+  setSubBtnActive('#network-team-staff-nav', next);
+  if (element) {
+    const nav = element.closest('.network-sub-nav');
+    if (nav) setSubBtnActive(`#${nav.id}`, next);
+  }
+}
+
+function renderNetworkRoster() {
+  const root = document.getElementById('network-roster-list');
+  if (!root) return;
+  root.innerHTML = DEMO_ROSTER.map((row) => {
+    const tone = row.status === 'injured' ? 'injured' : row.status;
+    const label = tone === 'injured' ? 'Injured' : tone === 'unavailable' ? 'Unavailable' : 'Available';
+    const bell = row.note
+      ? '<span class="network-roster-bell" title="Private note to coach"></span>'
+      : '';
+    return `<div class="card" style="padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+        <span class="network-status-dot is-${tone}" title="${label}"></span>
+        <div>
+          <div style="font-size:13px; font-weight:bold; color:var(--text-main);">${row.username}</div>
+          <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">${row.detail}</div>
+        </div>
+      </div>
+      ${bell}
+    </div>`;
+  }).join('');
+}
+
+export function submitNetworkStatus() {
+  const injured = !!document.getElementById('network-status-injury')?.checked;
+  const availability = document.getElementById('network-status-availability')?.value || 'available';
+  const tone = injured ? 'injured' : availability;
+  const label = tone === 'injured' ? 'injured' : tone === 'unavailable' ? 'unavailable this week' : 'available';
+  networkDemoNotice('network-team-notice', `Status saved as ${label} (demo — coming soon)`);
+}
+
+export function openNetworkJoinTeam() {
+  const modal = document.getElementById('network-join-modal');
+  if (!modal) return;
+  document.getElementById('network-join-key-step')?.classList.remove('hidden');
+  document.getElementById('network-join-lock-step')?.classList.add('hidden');
+  const keyEl = document.getElementById('network-join-key');
+  if (keyEl) keyEl.value = '';
+  document.getElementById('network-join-error')?.classList.add('hidden');
+  modal.classList.remove('hidden');
+}
+
+export function closeNetworkJoinTeam() {
+  document.getElementById('network-join-modal')?.classList.add('hidden');
+}
+
+export function continueNetworkJoin() {
+  const raw = String(document.getElementById('network-join-key')?.value || '').trim().toUpperCase();
+  if (!raw) {
+    networkDemoNotice('network-join-error', 'Enter a passkey.');
+    return;
+  }
+  if (raw === PLAYER_KEY) {
+    pendingJoinRole = 'player';
+    document.getElementById('network-join-key-step')?.classList.add('hidden');
+    document.getElementById('network-join-lock-step')?.classList.remove('hidden');
+    return;
+  }
+  if (raw === STAFF_KEY) {
+    pendingJoinRole = 'assistant';
+    closeNetworkJoinTeam();
+    setNetworkPreviewRole('assistant');
+    networkDemoNotice('network-team-notice', 'Joined as assistant (demo — coming soon). Staff thread and roster are available.');
+    return;
+  }
+  networkDemoNotice('network-join-error', 'Unknown passkey. Demo keys: PLAYER-1XV or STAFF-1XV.');
+}
+
+export function confirmNetworkJoin() {
+  closeNetworkJoinTeam();
+  setNetworkPreviewRole(pendingJoinRole || 'player');
+  networkDemoNotice(
+    'network-team-notice',
+    'Joined as player (demo). Team days would replace and lock on your plan; other days stay yours.'
+  );
+}
+
+export function openNetworkCreateTeam() {
+  document.getElementById('network-create-modal')?.classList.remove('hidden');
+}
+
+export function closeNetworkCreateTeam() {
+  document.getElementById('network-create-modal')?.classList.add('hidden');
+}
+
+export function submitNetworkCreateTeam() {
+  const name = String(document.getElementById('network-create-name')?.value || '').trim();
+  closeNetworkCreateTeam();
+  setNetworkPreviewRole('coach');
+  networkDemoNotice(
+    'network-team-notice',
+    `${name || 'Team'} created (demo — coming soon). Player and assistant keys would be issued next.`
+  );
 }
 
 export function filterNetworkFriends(query) {
@@ -94,31 +287,51 @@ export function filterNetworkFriends(query) {
   if (empty) empty.classList.toggle('hidden', !(q && visible === 0));
 }
 
-export function addNetworkFriendDemo(username) {
-  const notice = document.getElementById('network-friend-demo-notice');
-  if (notice) {
-    notice.textContent = `Request sent to ${username} (demo)`;
-    notice.classList.remove('hidden');
-    setTimeout(() => {
-      notice.classList.add('hidden');
-      notice.textContent = '';
-    }, 2500);
-  } else {
-    alert(`Request sent to ${username} (demo)`);
+export function sendNetworkFriendRequest() {
+  const username = String(document.getElementById('network-friend-lookup')?.value || '').trim();
+  if (!username) {
+    networkDemoNotice('network-friend-demo-notice', 'Enter an exact username.');
+    return;
   }
+  networkDemoNotice('network-friend-demo-notice', `Request sent to ${username} (demo — they can accept or reject).`);
 }
 
-export function toggleSquadDetail() {
-  const panel = document.getElementById('network-squad-detail');
-  if (panel) panel.classList.toggle('hidden');
+export function addNetworkFriendDemo(username) {
+  networkDemoNotice('network-friend-demo-notice', `Request sent to ${username} (demo)`);
 }
 
-export function networkCreateSquadDemo() {
-  alert('Create Squad (demo) — squads stay local in this build.');
+export function openNetworkFriendThread(username) {
+  activeFriendUsername = username;
+  const thread = document.getElementById('network-friend-thread');
+  const nameEl = document.getElementById('network-friend-thread-name');
+  if (nameEl) nameEl.textContent = username;
+  thread?.classList.remove('hidden');
 }
 
-export function networkInviteSquadDemo() {
-  alert('Invite sent (demo) — messaging is not live yet.');
+export function closeNetworkFriendThread() {
+  document.getElementById('network-friend-thread')?.classList.add('hidden');
+}
+
+export function openNetworkShareToFriend(kind) {
+  pendingShareKind = kind === 'meal' ? 'meal' : 'workout';
+  const label = document.getElementById('network-share-friend-label');
+  if (label) {
+    const what = pendingShareKind === 'meal' ? 'recipe / meal' : 'workout';
+    label.textContent = `Send this ${what} card to ${activeFriendUsername || 'your friend'}.`;
+  }
+  renderSharePreview(pendingShareKind);
+  document.getElementById('network-share-friend-modal')?.classList.remove('hidden');
+}
+
+export function closeNetworkShareToFriend() {
+  document.getElementById('network-share-friend-modal')?.classList.add('hidden');
+}
+
+export function sendNetworkShareToFriend() {
+  const who = activeFriendUsername || 'your friend';
+  const what = pendingShareKind === 'meal' ? 'recipe' : 'workout';
+  closeNetworkShareToFriend();
+  networkDemoNotice('network-friend-demo-notice', `${what} card sent to ${who} (demo — coming soon)`);
 }
 
 function buildWorkoutFromActiveLog() {

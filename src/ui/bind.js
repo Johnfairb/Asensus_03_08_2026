@@ -73,7 +73,7 @@ import {
 import { renderRpeGuidancePanel, toggleRpeGuidanceSection, toggleGuidanceSection } from '../domain/rpe-guidance.js';
 import { renderMonthlySummaryBanner, toggleMonthlySummaryDropdown } from '../domain/monthly-summary.js';
 import { openMealDetail, closeMealDetail, generateDailyFoodLog, openLoggedMealDetail } from '../domain/meal-planner.js';
-import { addNetworkFriendDemo, applyNetworkKillSwitch, filterNetworkFriends, networkCreateSquadDemo, networkInviteSquadDemo, renderSharePreview, saveNetworkProfile, shareActiveRouteCard, shareNetworkMeal, shareNetworkWorkout, toggleNetworkEnabled, toggleSquadDetail } from './network.js';
+import { addNetworkFriendDemo, applyNetworkKillSwitch, closeNetworkCreateTeam, closeNetworkFriendThread, closeNetworkJoinTeam, closeNetworkShareToFriend, confirmNetworkJoin, continueNetworkJoin, filterNetworkFriends, hydrateNetworkShell, networkDemoNotice, openNetworkCreateTeam, openNetworkFriendThread, openNetworkJoinTeam, openNetworkShareToFriend, renderSharePreview, saveNetworkProfile, sendNetworkFriendRequest, sendNetworkShareToFriend, setNetworkPreviewRole, shareActiveRouteCard, shareNetworkMeal, shareNetworkWorkout, submitNetworkCreateTeam, submitNetworkStatus, switchTeamSubTab, toggleNetworkEnabled } from './network.js';
 import { populateSportSelects } from '../domain/sports-matrix.js';
 
 export function bindUi() {
@@ -410,15 +410,32 @@ export function bindUi() {
 
   window.toggleNetworkEnabled = toggleNetworkEnabled;
   window.saveNetworkProfile = saveNetworkProfile;
+  window.filterNetworkFriends = filterNetworkFriends;
   window.addNetworkFriendDemo = addNetworkFriendDemo;
-  window.toggleSquadDetail = toggleSquadDetail;
-  window.networkCreateSquadDemo = networkCreateSquadDemo;
-  window.networkInviteSquadDemo = networkInviteSquadDemo;
+  window.sendNetworkFriendRequest = sendNetworkFriendRequest;
+  window.hydrateNetworkShell = hydrateNetworkShell;
+  window.networkDemoNotice = networkDemoNotice;
+  window.setNetworkPreviewRole = setNetworkPreviewRole;
+  window.switchTeamSubTab = switchTeamSubTab;
+  window.openNetworkJoinTeam = openNetworkJoinTeam;
+  window.closeNetworkJoinTeam = closeNetworkJoinTeam;
+  window.continueNetworkJoin = continueNetworkJoin;
+  window.confirmNetworkJoin = confirmNetworkJoin;
+  window.openNetworkCreateTeam = openNetworkCreateTeam;
+  window.closeNetworkCreateTeam = closeNetworkCreateTeam;
+  window.submitNetworkCreateTeam = submitNetworkCreateTeam;
+  window.openNetworkFriendThread = openNetworkFriendThread;
+  window.closeNetworkFriendThread = closeNetworkFriendThread;
+  window.openNetworkShareToFriend = openNetworkShareToFriend;
+  window.closeNetworkShareToFriend = closeNetworkShareToFriend;
+  window.sendNetworkShareToFriend = sendNetworkShareToFriend;
+  window.submitNetworkStatus = submitNetworkStatus;
   window.shareNetworkWorkout = shareNetworkWorkout;
   window.shareNetworkMeal = shareNetworkMeal;
   window.renderSharePreview = renderSharePreview;
   window.shareActiveRoute = shareActiveRouteCard;
   applyNetworkKillSwitch();
+  hydrateNetworkShell();
 
   try { populateSportSelects(); } catch (e) { /* ignore */ }
 

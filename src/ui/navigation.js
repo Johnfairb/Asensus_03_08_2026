@@ -142,8 +142,8 @@ export function switchTab(element, tabId, title) {
         const panel = active?.getAttribute('data-library') || 'foods';
         switchLibrarySubTab(panel, active || undefined);
     }
-    if (tabId === 'network' && typeof window.renderSharePreview === 'function') {
-        try { window.renderSharePreview('workout'); } catch (e) { /* ignore */ }
+    if (tabId === 'network' && typeof window.hydrateNetworkShell === 'function') {
+        try { window.hydrateNetworkShell(); } catch (e) { /* ignore */ }
     }
 }
 
@@ -253,9 +253,7 @@ export function switchEngineSubTab(panel, btn) {
 }
 
 export function switchNetworkTab(sectionId, element) {
-    // Hide all network sections
     document.querySelectorAll('.network-section').forEach(sec => sec.classList.add('hidden'));
-    // Remove active styles from buttons
     document.querySelectorAll('.network-tab-btn').forEach(btn => {
         btn.classList.remove('is-primary', 'active');
         btn.classList.add('is-secondary');
@@ -263,14 +261,16 @@ export function switchNetworkTab(sectionId, element) {
         btn.style.color = '';
     });
 
-    // Show selected section and light up button
-    document.getElementById(`network-${sectionId}`).classList.remove('hidden');
-    element.classList.remove('is-secondary');
-    element.classList.add('is-primary', 'active');
-    element.style.borderColor = '';
-    element.style.color = '';
+    const section = document.getElementById(`network-${sectionId}`);
+    if (section) section.classList.remove('hidden');
+    if (element) {
+        element.classList.remove('is-secondary');
+        element.classList.add('is-primary', 'active');
+        element.style.borderColor = '';
+        element.style.color = '';
+    }
 
-    if (sectionId === 'share' && typeof window.renderSharePreview === 'function') {
-        try { window.renderSharePreview('workout'); } catch (e) { /* ignore */ }
+    if (sectionId === 'team' && typeof window.hydrateNetworkShell === 'function') {
+        try { window.hydrateNetworkShell(); } catch (e) { /* ignore */ }
     }
 }
