@@ -28,7 +28,7 @@ import { configureJournalModal } from '../ui/drive.js';
 import { buildDiaryEntryFromForm } from '../ui/diary-ui.js';
 import { loadDayJournal, loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveMatchJournalEntry, savePracticeJournalEntry, deleteMatchJournalEntry, deletePracticeJournalEntry } from '../ui/journey.js';
 import { canProgramPower, isPowerEvent, POWER_EVENT } from './power-engine.js';
-import { getExerciseTeachingPoints } from './exercise-catalog.js';
+import { getExerciseTeachingPoints, getTeachingPointVideoUrl } from './exercise-catalog.js';
 import {
     getSportWeeklyQuotas,
     isGameEvent,
@@ -3070,8 +3070,9 @@ export function submitSleepLog() {
 
 const TEACHING_POINT_PLACEHOLDER_URL = 'https://www.youtube.com/embed/placeholder';
 
-function teachingPoint(label, videoUrl = TEACHING_POINT_PLACEHOLDER_URL) {
-    return { label, videoUrl: videoUrl || TEACHING_POINT_PLACEHOLDER_URL };
+function teachingPoint(label, videoUrl) {
+    const url = videoUrl || getTeachingPointVideoUrl(label) || TEACHING_POINT_PLACEHOLDER_URL;
+    return { label, videoUrl: url };
 }
 
 function youtubeVideoId(url) {

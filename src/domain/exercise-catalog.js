@@ -807,6 +807,20 @@ const TP_A_LABELS = [
     'Knees over toes'
 ];
 
+/** YouTube clips for shared teaching-point labels (lowercase keys). */
+const TEACHING_POINT_VIDEOS = {
+    'knee angle': 'https://www.youtube.com/watch?v=nN-MGugsPLg',
+    'neck angle': 'https://www.youtube.com/watch?v=Kkg6kc_8e98',
+    'knees over toes': 'https://www.youtube.com/watch?v=NrkKf1iEMbY',
+    'neutral lumbar spine': 'https://www.youtube.com/watch?v=goAAADaMZfc'
+};
+
+/** Watch URL for a teaching-point label, or '' if none is wired yet. */
+export function getTeachingPointVideoUrl(label) {
+    const key = String(label || '').trim().toLowerCase();
+    return TEACHING_POINT_VIDEOS[key] || '';
+}
+
 const EXERCISE_TEACHING_POINT_TOKENS = {
     'Deadlift': ['LNKT'],
     'Sumo Deadlift': ['LNKT'],

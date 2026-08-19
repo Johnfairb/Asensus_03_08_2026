@@ -6,6 +6,7 @@ import {
     getExerciseMeta,
     getExerciseSessionLabel,
     getExerciseTeachingPoints,
+    getTeachingPointVideoUrl,
     resolveCatalogName,
     EXERCISE_CATALOG
 } from '../domain/exercise-catalog.js';
@@ -577,7 +578,20 @@ export function openExerciseDetail(id) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
     const tpLabels = getExerciseTeachingPoints(displayName) || [];
-    const teachingPoints = tpLabels.map((label) => `
+    const teachingPoints = tpLabels.map((label) => {
+        const videoUrl = getTeachingPointVideoUrl(label);
+        if (videoUrl) {
+            const jsLabel = String(label).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const jsUrl = String(videoUrl).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            return `
+        <button type="button" class="detail-metric-row" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:10px; padding:12px; color:inherit;" onclick="openVideoModal('${jsLabel}', '${jsUrl}')">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+                <span class="hud-label" style="margin:0;">${escapeTp(label)}</span>
+                <span style="font-family:'Roboto Mono'; font-size:10px; color:var(--gold-accent);">Video</span>
+            </div>
+        </button>`;
+        }
+        return `
         <button type="button" class="detail-metric-row" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:10px; padding:12px; color:inherit;" onclick="this.nextElementSibling?.classList.toggle('hidden')">
             <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
                 <span class="hud-label" style="margin:0;">${escapeTp(label)}</span>
@@ -585,7 +599,8 @@ export function openExerciseDetail(id) {
             </div>
         </button>
         <div class="hidden" style="margin:-2px 0 8px 0;">${videoPlaceholder('Teaching point video placeholder')}</div>
-    `).join('');
+    `;
+    }).join('');
 
     const bodyParts = [];
     const pin = document.getElementById('library-detail-pin');
