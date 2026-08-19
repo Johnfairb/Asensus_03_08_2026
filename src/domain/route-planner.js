@@ -133,45 +133,112 @@ function snapshotAlreadyHasItem(hostItems, item) {
     });
 }
 
-/** Display-time: fold a mislabelled Steady State snapshot back into the gym session. */
-export function foldMisfiledGymTailSessions(sessions) {
-    const list = Array.isArray(sessions) ? sessions.slice() : [];
-    const gymHost = list.find((s) => {
-        const n = normalizeLoggedSessionKind(s?.kind);
-        return n === 'Full Body / Strength' || n === 'Full Body / Power' || isStrengthEvent(s?.kind);
-    });
-    if (!gymHost) return list;
-    const misfiled = list.filter((s) => s && s !== gymHost && sessionIsMisfiledGymTail(s));
-    if (!misfiled.length) return list;
-    misfiled.forEach((s) => {
+function absorbSessionsIntoHost(host, tails) {
+    if (!host || !tails?.length) return;
+    tails.forEach((s) => {
         (s.items || []).forEach((it) => {
-            if (!snapshotAlreadyHasItem(gymHost.items, it)) {
-                gymHost.items = [...(gymHost.items || []), it];
+            if (!snapshotAlreadyHasItem(host.items, it)) {
+                host.items = [...(host.items || []), it];
             }
         });
         (s.logIds || []).forEach((id) => {
             if (id == null) return;
-            if (!(gymHost.logIds || []).map(String).includes(String(id))) {
-                gymHost.logIds = [...(gymHost.logIds || []), id];
+            if (!(host.logIds || []).map(String).includes(String(id))) {
+                host.logIds = [...(host.logIds || []), id];
             }
         });
     });
     try {
         const snaps = loadWorkoutSessionSnapshots();
-        if (snaps[gymHost.id]) {
-            snaps[gymHost.id] = {
-                ...snaps[gymHost.id],
-                items: gymHost.items,
-                logIds: gymHost.logIds,
+        if (host.id && snaps[host.id]) {
+            snaps[host.id] = {
+                ...snaps[host.id],
+                items: host.items,
+                logIds: host.logIds,
                 updatedAt: new Date().toISOString()
             };
             saveWorkoutSessionSnapshots(snaps);
         }
-        misfiled.forEach((s) => {
+        tails.forEach((s) => {
             if (s?.id) removeWorkoutSessionSnapshot(s.id);
         });
     } catch (e) { /* display-only if storage fails */ }
-    return list.filter((s) => !misfiled.includes(s));
+}
+
+function sessionIsPrepOnlyTail(sess) {
+    const items = sess?.items || [];
+    if (!items.length) return false;
+    return items.every((it) => {
+        const name = it?.exercise?.name || it?.name || '';
+        return it?.isStretchGroup || it?.isWarmupGroup || it?.isCustomStretch
+            || isPrepBlockExerciseName(name);
+    });
+}
+
+/** Generic leftover labels — not Strength A/B, hypertrophy, power, lactate, or named cardio. */
+function sessionIsGenericWorkoutKind(kind) {
+    const n = normalizeLoggedSessionKind(kind);
+    if (n === 'Cardio (Steady)' || n === 'Lactate' || n === 'Full Body / Power' || n === 'Auxiliary') return false;
+    if (isHypertrophyEvent(kind) || /Strength\s*[AB]/i.test(kind || '')) return false;
+    const s = String(kind || '').trim();
+    return !s || /^workout$/i.test(s) || /^gym(\s*workout)?$/i.test(s) || n === 'Full Body / Strength';
+}
+
+function sessionLooksLikeSteadyCardioWork(sess) {
+    const items = sess?.items || [];
+    const work = items.filter((it) => {
+        const name = it?.exercise?.name || it?.name || '';
+        return !(it?.isStretchGroup || it?.isWarmupGroup || it?.isCustomStretch || isPrepBlockExerciseName(name));
+    });
+    if (!work.length) return false;
+    const hasLift = work.some((it) => {
+        const d = (it?.exercise?.domain || '').toLowerCase();
+        if (d === 'strength' || d === 'power' || d === 'hypertrophy' || it?.isPower) return true;
+        if (isStrengthRowExerciseName(it?.exercise?.name || it?.name || '')) return true;
+        return (it?.sets || []).some(s => Number(s?.weight) > 0);
+    });
+    if (hasLift) return false;
+    return work.some((it) => {
+        const name = it?.exercise?.name || it?.name || '';
+        const d = (it?.exercise?.domain || '').toLowerCase();
+        return it?.isSteadyCardio || d === 'cardio' || looksLikeSteadyCardioExercise(name);
+    });
+}
+
+/** Display-time: fold a mislabelled Steady State snapshot back into the gym session. */
+export function foldMisfiledGymTailSessions(sessions) {
+    let list = Array.isArray(sessions) ? sessions.slice() : [];
+    const gymHost = list.find((s) => {
+        const n = normalizeLoggedSessionKind(s?.kind);
+        return n === 'Full Body / Strength' || n === 'Full Body / Power' || isStrengthEvent(s?.kind);
+    });
+    if (gymHost) {
+        const misfiled = list.filter((s) => s && s !== gymHost && sessionIsMisfiledGymTail(s));
+        if (misfiled.length) {
+            absorbSessionsIntoHost(gymHost, misfiled);
+            list = list.filter((s) => !misfiled.includes(s));
+        }
+    }
+
+    // Stretch-only (or duplicate cardio) leftovers labelled Workout next to a real Steady State
+    const cardioHost = list.find((s) => {
+        const n = normalizeLoggedSessionKind(s?.kind);
+        return n === 'Cardio (Steady)' || isSteadyCardio(s?.kind);
+    });
+    if (cardioHost) {
+        const tails = list.filter((s) => {
+            if (!s || s === cardioHost) return false;
+            if (!sessionIsGenericWorkoutKind(s.kind)) return false;
+            const items = s.items || [];
+            if (!items.length) return true;
+            return sessionIsPrepOnlyTail(s) || sessionLooksLikeSteadyCardioWork(s);
+        });
+        if (tails.length) {
+            absorbSessionsIntoHost(cardioHost, tails);
+            list = list.filter((s) => !tails.includes(s));
+        }
+    }
+    return list;
 }
 
 export function isLactateEvent(e) { return e === 'Lactate' || e === 'Cardio (Lactate)'; }

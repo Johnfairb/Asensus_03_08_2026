@@ -432,6 +432,10 @@ h2 {
     flex-direction: column;
     overflow: hidden;
 }
+#library-detail-panel.detail-bottom-panel.is-tall {
+    max-height: min(96svh, calc(var(--vvh, 100svh) - 8px));
+    height: min(96svh, calc(var(--vvh, 100svh) - 8px));
+}
 #library-detail-panel.detail-bottom-panel > div:first-child {
     flex-shrink: 0;
 }
@@ -451,6 +455,8 @@ h2 {
     min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding-bottom: 8px;
 }
 .library-detail-footer {
     flex: 0 0 auto;
@@ -2288,6 +2294,12 @@ div[id$="-modal"] .modal-content {
         padding-bottom: var(--fake-safe-bottom, 22px);
         max-height: none;
         box-sizing: border-box;
+    }
+
+    #library-detail-panel.detail-bottom-panel.is-tall {
+        height: 100%;
+        max-height: 100%;
+        max-width: none;
     }
 
     #post-session-modal {

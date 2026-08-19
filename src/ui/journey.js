@@ -11,6 +11,7 @@ import {
     getWorkoutSessionSnapshot,
     isCardioWorkoutLogRow,
     isLactateEvent,
+    isPrepBlockExerciseName,
     isSteadyCardio,
     isStrengthEvent,
     listWorkoutSessionsForDate,
@@ -489,8 +490,25 @@ export async function openDayDetail(dateStr, isoHint) {
                 logs.forEach(l => usedLogIds.add(String(l.id)));
             };
 
-            if (gymHost && gymOrphans.length) {
+            const cardioHost = nonLactateSessions.find(s => {
+                const n = normalizeLoggedSessionKind(s.kind);
+                return n === 'Cardio (Steady)' || isSteadyCardio(s.kind);
+            });
+            const prepOnlyGym = gymOrphans.length > 0
+                && gymOrphans.every(l => isPrepBlockExerciseName(l.exercise));
+            const gymHostIsLeftover = !!(gymHost && cardioHost && gymHost !== cardioHost && (
+                !(gymHost.items || []).length
+                || (gymHost.items || []).every((it) => {
+                    const name = it?.exercise?.name || it?.name || '';
+                    return it?.isStretchGroup || it?.isWarmupGroup || it?.isCustomStretch
+                        || isPrepBlockExerciseName(name);
+                })
+            ));
+
+            if (gymHost && gymOrphans.length && !gymHostIsLeftover) {
                 attachToHost(gymHost, gymOrphans);
+            } else if (cardioHost && prepOnlyGym) {
+                attachToHost(cardioHost, gymOrphans);
             } else if (gymOrphans.length) {
                 const emptyHost = nonLactateSessions.length === 1 && !(nonLactateSessions[0].items || []).length
                     ? nonLactateSessions[0]
@@ -500,12 +518,14 @@ export async function openDayDetail(dateStr, isoHint) {
             }
 
             if (cardioOrphans.length) {
-                const cardioHost = nonLactateSessions.find(s => normalizeLoggedSessionKind(s.kind) === 'Cardio (Steady)');
-                if (cardioHost) attachToHost(cardioHost, cardioOrphans);
+                const host = cardioHost
+                    || nonLactateSessions.find(s => normalizeLoggedSessionKind(s.kind) === 'Cardio (Steady)');
+                if (host) attachToHost(host, cardioOrphans);
                 else nonLactateSessions.push(synthesizeAdherenceSessionFromLogs(dateStr, iso, cardioOrphans));
             }
         }
-        html += renderAdherenceSessionCardsHtml(nonLactateSessions, dateStr, wks, usedLogIds);
+        const foldedSessions = foldMisfiledGymTailSessions(nonLactateSessions);
+        html += renderAdherenceSessionCardsHtml(foldedSessions, dateStr, wks, usedLogIds);
         html += renderLactateSessionCardsHtml(lactateBlocks, dateStr);
 
         // Diary-only lactate day (journal + optional snapshot, no food/history rows)

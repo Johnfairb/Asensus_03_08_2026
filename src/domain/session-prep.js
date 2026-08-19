@@ -9,7 +9,7 @@ const PREFS_KEY = 'ascensus_session_prep_prefs_v1';
 
 export const MOBILISATION_JOINTS = [
     'Neck', 'Shoulder', 'Shoulder girdle', 'Elbow', 'Wrists',
-    'Spine', 'QL', 'Hips', 'Knees', 'Ankles'
+    'Spine', 'QL', 'Hips', 'Knees', 'Ankles', 'Toe tap', 'Heels to toes'
 ];
 
 function youtubeEmbedUrl(urlOrId) {
@@ -33,7 +33,19 @@ const PREP_VIDEOS = {
     shoulder: SHOULDER_CLIPS,
     shoulders: SHOULDER_CLIPS,
     'shoulder girdle': [prepClip('Shoulder girdle', 'https://www.youtube.com/watch?v=oCWaOWuU-vo')],
-    elbow: [prepClip('Elbow', 'https://youtu.be/CBCcRFJShn0')]
+    elbow: [prepClip('Elbow', 'https://youtu.be/CBCcRFJShn0')],
+    'y raises': [prepClip('Y raises', 'https://www.youtube.com/watch?v=DnxiEORpN_E')],
+    'w raises': [prepClip('W raises', 'https://www.youtube.com/watch?v=9wTtbQEHR9Q')],
+    'wall slides': [prepClip('Wall slides', 'https://www.youtube.com/watch?v=xVT__DQ6xdg')],
+    spine: [prepClip('Spine', 'https://www.youtube.com/watch?v=puhgKkKVlu8')],
+    ql: [prepClip('QL', 'https://www.youtube.com/watch?v=kto7lbx_c3s')],
+    hips: [prepClip('Hips', 'https://www.youtube.com/watch?v=qMs7H3QWIG0')],
+    knees: [prepClip('Knees', 'https://www.youtube.com/watch?v=C7EYa3Ksgtw')],
+    knee: [prepClip('Knees', 'https://www.youtube.com/watch?v=C7EYa3Ksgtw')],
+    ankle: [prepClip('Ankles', 'https://www.youtube.com/watch?v=_68QTGG57v4')],
+    ankles: [prepClip('Ankles', 'https://www.youtube.com/watch?v=_68QTGG57v4')],
+    'toe tap': [prepClip('Toe tap', 'https://www.youtube.com/watch?v=kLrWRtcgxbE')],
+    'heels to toes': [prepClip('Heels to toes', 'https://www.youtube.com/watch?v=rc4S7GiEnXY')]
 };
 
 /** Teaching clips for a warmup / mobilisation part. Empty if none are wired yet. */
@@ -44,7 +56,7 @@ export function getPrepVideos(name) {
 }
 
 export const SHOULDER_WARMUP_DRILLS = [
-    'Band pull-aparts', 'Y raises', 'W raises', 'Wall slides'
+    'Y raises', 'W raises', 'Wall slides'
 ];
 
 export const DYNAMIC_WARMUP_DRILLS = [
@@ -240,8 +252,8 @@ export function buildStructuredWarmupParts(context = 'gym') {
     const shoulder = part(
         'Shoulder Warmup',
         `${SHOULDER_WARMUP_DRILLS.length} drills`,
-        'Tap a drill for teaching-point video placeholder.',
-        SHOULDER_WARMUP_DRILLS.map(s => part(s, 'Video', 'Teaching point video placeholder'))
+        'Tap a drill for its teaching video.',
+        SHOULDER_WARMUP_DRILLS.map(s => videoPart(s))
     );
     if (context === 'power') {
         return [pulse, mobilisation, shoulder, dynamicStretch];
