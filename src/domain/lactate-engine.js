@@ -41,27 +41,27 @@ export function clampSessionRpe(rpe) {
  * Machine modalities use resistance 7 (disclaimer in UI).
  */
 export const HIT_MODALITY_META = {
-    treadmill_sprints: {
-        label: 'Treadmill sprints',
-        intensityKind: 'speed',
-        unitLabel: 'm/s',
+    interval_sprints: {
+        label: 'Interval sprints',
+        intensityKind: 'lengths',
+        unitLabel: 'sec',
         machineResistance: null,
-        tests: [
-            { id: 'm400', label: '400 m time (track preferred)', unit: 'sec', distanceM: 400, hint: 'Advise a track for the 400 m to reduce injury risk.' },
-            { id: 'm100', label: '100 m time', unit: 'sec', distanceM: 100 },
-            { id: 'm200', label: '200 m time', unit: 'sec', distanceM: 200 }
-        ]
+        lengthBased: true,
+        defaultLengthM: 40,
+        lengthPrompt: 'How long is your track?',
+        lengthHint: 'Recommended under 50 m',
+        tests: []
     },
-    incline_treadmill: {
-        label: 'Incline treadmill sprints',
-        intensityKind: 'speed',
-        unitLabel: 'm/s',
+    hill_sprints: {
+        label: 'Hill sprints',
+        intensityKind: 'lengths',
+        unitLabel: 'sec',
         machineResistance: null,
-        tests: [
-            { id: 'm400', label: '400 m time (track preferred)', unit: 'sec', distanceM: 400 },
-            { id: 'm100', label: '100 m time', unit: 'sec', distanceM: 100 },
-            { id: 'm200', label: '200 m time', unit: 'sec', distanceM: 200 }
-        ]
+        lengthBased: true,
+        defaultLengthM: 25,
+        lengthPrompt: 'How long is one hill rep?',
+        lengthHint: 'Recommended 25 m (two lengths = 50 m)',
+        tests: []
     },
     swimming: {
         label: 'Swimming intervals',
@@ -137,8 +137,9 @@ export const HIT_MODALITY_META = {
 
 /** Legacy id aliases → current modality ids. */
 const TYPE_ALIASES = {
-    interval_sprints: 'treadmill_sprints',
-    hill_sprint: 'incline_treadmill',
+    treadmill_sprints: 'interval_sprints',
+    incline_treadmill: 'hill_sprints',
+    hill_sprint: 'hill_sprints',
     spinning: 'cycling'
 };
 
@@ -156,6 +157,66 @@ export const HIT_FLEXIBLE_INPUT_META = {
 export function normalizeHitTypeId(id) {
     if (!id || id === 'hit_class') return id;
     return TYPE_ALIASES[id] || id;
+}
+
+export function isLengthBasedModality(typeId) {
+    const meta = HIT_MODALITY_META[normalizeHitTypeId(typeId)];
+    return !!meta?.lengthBased;
+}
+
+function formatMetresLabel(m) {
+    const n = Number(m);
+    if (!(n > 0)) return '0 m';
+    const rounded = Math.round(n * 10) / 10;
+    return Number.isInteger(rounded) ? `${rounded} m` : `${rounded} m`;
+}
+
+export function defaultTrackLengthM(typeId) {
+    const meta = HIT_MODALITY_META[normalizeHitTypeId(typeId)];
+    return Number(meta?.defaultLengthM) > 0 ? Number(meta.defaultLengthM) : 0;
+}
+
+export function getModalityTrackLength(typeId) {
+    const stored = Number(getModalityBaselines(typeId)?.trackLengthM);
+    if (stored > 0) return stored;
+    return defaultTrackLengthM(typeId);
+}
+
+export function getModalityTests(typeId) {
+    const id = normalizeHitTypeId(typeId);
+    const meta = HIT_MODALITY_META[id];
+    if (!meta) return [];
+    if (!meta.lengthBased) return meta.tests || [];
+    const lengthM = getModalityTrackLength(id);
+    const twoM = lengthM * 2;
+    return [
+        { id: 'len1', label: `1 length (${formatMetresLabel(lengthM)}) time`, unit: 'sec', distanceM: lengthM },
+        { id: 'len2', label: `2 lengths (${formatMetresLabel(twoM)}) time`, unit: 'sec', distanceM: twoM }
+    ];
+}
+
+/** Turning time: 2-length time minus twice 1-length time. */
+export function lengthTurnTimeSec(typeId, baselinesOverride = null) {
+    const stored = baselinesOverride || getModalityBaselines(typeId);
+    const t1 = Number(stored?.tests?.len1);
+    const t2 = Number(stored?.tests?.len2);
+    if (!(t1 > 0) || !(t2 > 0)) return 0;
+    return t2 - (2 * t1);
+}
+
+export function minTimeForLengths(n, t1, turnSec) {
+    const count = Math.max(1, Math.round(Number(n) || 1));
+    const t = (count * Number(t1 || 0)) + ((count - 1) * Number(turnSec || 0));
+    return Math.max(0.25, t);
+}
+
+export function lengthsFittingWindow(workSec, t1, turnSec, speedFactor) {
+    const factor = Number(speedFactor) > 0 ? Number(speedFactor) : 1;
+    const window = Math.max(1, Number(workSec) || 20);
+    const timeN = (n) => minTimeForLengths(n, t1, turnSec) / factor;
+    let n = 1;
+    while (n < 40 && timeN(n + 1) <= window + 0.05) n += 1;
+    return n;
 }
 
 export function modalityUsesFlexibleBaselineInput(typeId) {
@@ -299,9 +360,9 @@ export const BASELINE_REST_AFTER_LONG_SEC = 120;
 
 /** In-session tests, shortest first (20 s before 40 s; 100 m before 400 m). */
 export function getBaselineTestSequence(typeId) {
-    const meta = HIT_MODALITY_META[normalizeHitTypeId(typeId)];
-    if (!meta?.tests?.length) return [];
-    return [...meta.tests].sort((a, b) => {
+    const tests = getModalityTests(typeId);
+    if (!tests.length) return [];
+    return [...tests].sort((a, b) => {
         const ka = Number(a.durationSec || a.distanceM || 0);
         const kb = Number(b.durationSec || b.distanceM || 0);
         return ka - kb;
@@ -319,6 +380,7 @@ export function estimateBaselineWorkSec(typeId, test) {
     if (!(dist > 0)) return 20;
     const id = normalizeHitTypeId(typeId);
     if (id === 'swimming') return Math.max(20, Math.round(dist * 0.9));
+    if (isLengthBasedModality(id)) return Math.max(8, Math.round(dist * 0.25));
     return Math.max(15, Math.round(dist * 0.2));
 }
 
@@ -388,7 +450,8 @@ export function mergeModalityBaselineTest(typeId, testId, rawValue, prefs = null
     existing[testId] = n;
     return saveModalityBaselines(typeId, existing, {
         inputKind: prefs?.inputKind ?? prev.inputKind,
-        speedUnit: prefs?.speedUnit ?? prev.speedUnit
+        speedUnit: prefs?.speedUnit ?? prev.speedUnit,
+        trackLengthM: prefs?.trackLengthM ?? prev.trackLengthM
     });
 }
 
@@ -406,6 +469,9 @@ export function lactateLogSetFromRow(row) {
         targetDisplay: row?.targetDisplay || undefined,
         targetRate: row?.targetRate || undefined,
         targetValue: row?.targetValue || undefined,
+        targetLengths: row?.targetLengths || undefined,
+        lengthM: row?.lengthM || undefined,
+        hitWorkSec: row?.hitWorkSec || undefined,
         isBaselineTest: !!row?.isBaselineTest,
         baselineTestId: row?.baselineTestId || null,
         baselineKind: row?.baselineKind || null,
@@ -487,10 +553,15 @@ export function saveModalityBaselines(typeId, testsObj, prefs = null) {
     const speedUnit = flexible
         ? normalizeSpeedUnit(prefs?.speedUnit ?? prev.speedUnit)
         : 'ms';
+    const trackLengthM = (() => {
+        const t = Number(prefs?.trackLengthM ?? prev.trackLengthM);
+        return t > 0 ? t : undefined;
+    })();
     all[id] = {
         tests: cleaned,
         inputKind,
         speedUnit,
+        ...(trackLengthM ? { trackLengthM } : {}),
         updatedAt: new Date().toISOString()
     };
     saveLactateBaselines(all);
@@ -509,14 +580,34 @@ export function saveModalityBaselineInputPrefs(typeId, { inputKind, speedUnit } 
     const incompatible = nextKind !== prevKind || (nextKind === 'speed' && nextUnit !== prevUnit);
     return saveModalityBaselines(id, incompatible ? {} : (prev.tests || {}), {
         inputKind: nextKind,
-        speedUnit: nextUnit
+        speedUnit: nextUnit,
+        trackLengthM: prev.trackLengthM
+    });
+}
+
+export function setModalityTrackLength(typeId, metres) {
+    const id = normalizeHitTypeId(typeId);
+    const n = Number(metres);
+    if (!(n > 0)) return getModalityBaselines(id);
+    const prev = getModalityBaselines(id) || { tests: {} };
+    const prevLen = Number(prev.trackLengthM) || defaultTrackLengthM(id);
+    const lengthChanged = Math.abs(n - prevLen) > 0.05;
+    return saveModalityBaselines(id, lengthChanged ? {} : (prev.tests || {}), {
+        inputKind: prev.inputKind,
+        speedUnit: prev.speedUnit,
+        trackLengthM: n
     });
 }
 
 export function clearModalityBaselines(typeId) {
     const id = normalizeHitTypeId(typeId);
     const all = loadLactateBaselines();
-    delete all[id];
+    const keepLen = Number(all[id]?.trackLengthM);
+    if (keepLen > 0) {
+        all[id] = { tests: {}, trackLengthM: keepLen, updatedAt: new Date().toISOString() };
+    } else {
+        delete all[id];
+    }
     saveLactateBaselines(all);
 }
 
@@ -527,7 +618,7 @@ export function baselineTestToRate(typeId, testId, rawValue, prefs = null) {
     const id = normalizeHitTypeId(typeId);
     const meta = HIT_MODALITY_META[id];
     if (!meta) return 0;
-    const test = meta.tests.find(t => t.id === testId);
+    const test = getModalityTests(id).find(t => t.id === testId);
     const v = Number(rawValue);
     if (!test || !(v > 0)) return 0;
 
@@ -567,8 +658,24 @@ export function resolveBaselineRate(typeId, workSec, baselinesOverride = null) {
         : (meta.intensityKind === 'chops' ? 'chops' : 'distance');
     const speedUnit = normalizeSpeedUnit(stored.speedUnit);
 
+    if (isLengthBasedModality(id)) {
+        const t1 = Number(stored.tests.len1);
+        const lengthM = getModalityTrackLength(id);
+        if (t1 > 0 && lengthM > 0) {
+            const rate = lengthM / t1;
+            return {
+                rate,
+                refDurationSec: t1,
+                points: [{ testId: 'len1', rate, durationSec: t1, raw: t1 }],
+                inputKind,
+                speedUnit
+            };
+        }
+        return { rate: 0, refDurationSec: 20, points: [], inputKind, speedUnit };
+    }
+
     const points = [];
-    meta.tests.forEach(test => {
+    getModalityTests(id).forEach(test => {
         const raw = Number(stored.tests[test.id]);
         if (!(raw > 0)) return;
         const rate = baselineTestToRate(id, test.id, raw, stored);
@@ -700,6 +807,15 @@ export function formatIntensityDisplay(typeId, rate, workSec = 20, prefs = null)
     if (kind === 'speed') {
         const ms = Math.round(rate * 100) / 100;
         return { display: `${ms.toFixed(2)} m/s`, displayUnit: 'm/s', targetValue: ms };
+    }
+    if (kind === 'lengths') {
+        const lengthM = getModalityTrackLength(id);
+        const timeForLen = lengthM > 0 ? lengthM / rate : 0;
+        return {
+            display: `${timeForLen.toFixed(1)}s / length`,
+            displayUnit: 'sec',
+            targetValue: Math.round(timeForLen * 10) / 10
+        };
     }
     if (kind === 'time') {
         const dist = rate * Math.max(5, Number(workSec) || 20);
@@ -844,35 +960,72 @@ export function applyIntensityToRows(rows, sessionRpe, baselinesByType = null) {
                 notes: baseNotes
             };
         }
+        const hitWorkSec = Number(row.hitWorkSec || row.workSec) || 0;
         const prev = prevByType[typeId] || null;
         const baselines = baselinesByType?.[typeId] || null;
+        // Rest used for set N is the rest *before* it (after the previous set of this type).
         const intensity = computeSetIntensity({
             typeId,
-            workSec: row.workSec,
-            restSec: row.restSec,
+            workSec: hitWorkSec,
+            restSec: prev ? prev.restSec : 0,
             rpe: sessionRpe,
             setIndex: prev ? (prev.setIndex + 1) : 1,
             prevRate: prev?.rate,
             prevWorkSec: prev?.workSec,
             baselinesOverride: baselines
         });
+
+        let workSec = hitWorkSec;
+        let display = intensity.display;
+        let displayUnit = intensity.displayUnit;
+        let targetValue = intensity.targetValue;
+        let targetLengths = null;
+        let lengthM = null;
+        let repsLabel = row.repsLabel;
+
+        if (isLengthBasedModality(typeId) && intensity.rate > 0) {
+            const stored = baselines || getModalityBaselines(typeId);
+            const t1 = Number(stored?.tests?.len1);
+            const turnSec = lengthTurnTimeSec(typeId, stored);
+            lengthM = getModalityTrackLength(typeId);
+            if (t1 > 0 && lengthM > 0) {
+                const vmax = lengthM / t1;
+                const speedFactor = vmax > 0 ? (intensity.rate / vmax) : 1;
+                const n = lengthsFittingWindow(hitWorkSec, t1, turnSec, speedFactor);
+                const allowed = minTimeForLengths(n, t1, turnSec) / Math.max(0.05, speedFactor);
+                workSec = Math.max(1, Math.round(allowed));
+                targetLengths = n;
+                targetValue = n;
+                displayUnit = 'lengths';
+                display = `${n} length${n === 1 ? '' : 's'} in ${allowed.toFixed(1)}s`;
+                repsLabel = `${n} length${n === 1 ? '' : 's'}`;
+            }
+        }
+
         prevByType[typeId] = {
             rate: intensity.rate,
-            workSec: row.workSec,
-            setIndex: (prev?.setIndex || 0) + 1
+            workSec,
+            setIndex: (prev?.setIndex || 0) + 1,
+            restSec: Number(row.restSec) || 0
         };
-        const intensityNote = intensity.display && intensity.display !== '—'
-            ? `Target ${intensity.display}`
+        const intensityNote = display && display !== '—'
+            ? `Target ${display}`
             : (intensity.notes || '');
         const baseNotes = row._baseNotes || (row.notes || '').split(' · Target')[0];
         return {
             ...row,
             typeId,
+            hitWorkSec,
+            workSec,
+            durationSec: workSec,
+            repsLabel,
             _baseNotes: baseNotes,
             targetRate: intensity.rate,
-            targetDisplay: intensity.display,
-            targetUnit: intensity.displayUnit,
-            targetValue: intensity.targetValue,
+            targetDisplay: display,
+            targetUnit: displayUnit,
+            targetValue,
+            targetLengths,
+            lengthM,
             notes: [baseNotes, intensityNote].filter(Boolean).join(' · ')
         };
     });
@@ -923,7 +1076,7 @@ export function buildLactateIntervalPlan({
 
     const seed = Date.now() ^ (getLactateMonthKey(date) * 1009) ^ (slot === 'B' ? 77 : 13) ^ (initialRpe * 17);
     const rng = mulberry32(seed);
-    const modalities = intervalTypes.length ? intervalTypes : ['treadmill_sprints'];
+    const modalities = intervalTypes.length ? intervalTypes : ['interval_sprints'];
 
     const testRows = [];
     modalities.forEach((typeId) => {
@@ -1072,7 +1225,7 @@ export function resolveHitClassRecovery(rpe) {
     if (r > 6) {
         return {
             nextDayOverride: null,
-            message: 'HIT class RPE > 6 counts as this week’s Lactate/HIT credit.'
+            message: 'HIT class RPE > 6 counts as this week’s HIT credit.'
         };
     }
     return {

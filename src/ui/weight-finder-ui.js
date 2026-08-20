@@ -228,43 +228,17 @@ function renderFinderEntry(exIdx) {
             <button type="button" onclick="dismissWeightFinder()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
         <p style="font-size:13px; color:var(--text-silver); line-height:1.5; margin:0 0 14px;">
-            Warm up, then find a weight you can do for <strong style="color:var(--text-main);">10 reps with 5 reps in reserve</strong> (RIR 5). Enter that finder weight below. Work weight will be set <strong style="color:var(--text-main);">${finderForStrength() ? '10% higher, then +15% for strength' : '10% higher'}</strong>.
+            Find a weight you can do for <strong style="color:var(--text-main);">10 reps with 5 RIR</strong>.
         </p>
-        <label style="display:block; font-size:11px; color:var(--text-muted); font-family:'Roboto Mono',monospace; margin-bottom:6px;">FINDER WEIGHT — 10 REPS @ 5 RIR (KG)</label>
+        <label style="display:block; font-size:11px; color:var(--text-muted); font-family:'Roboto Mono',monospace; margin-bottom:6px;">WEIGHT — 10 REPS @ 5 RIR (KG)</label>
         <input id="weight-finder-input" type="number" inputmode="decimal" min="0" step="0.5" placeholder="e.g. 50"
             style="width:100%; box-sizing:border-box; padding:12px; border-radius:8px; border:1px solid var(--border-subtle); background:rgba(255,255,255,0.04); color:var(--text-main); font-size:16px; font-weight:700; margin-bottom:8px;" />
-        <div id="weight-finder-preview" style="font-size:12px; color:var(--gold-accent); font-family:'Roboto Mono',monospace; margin-bottom:8px; min-height:16px;"></div>
         <div id="weight-finder-error" style="display:none; font-size:12px; color:#ff6b6b; margin-bottom:10px;"></div>
         <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;" class="weight-finder-actions">
-            <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="${submitFn}">Set work weight (+10%)</button>
+            <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="${submitFn}">Use this weight</button>
             <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="${knowFn}">${knowLabel}</button>
         </div>`;
-    const input = document.getElementById('weight-finder-input');
-    if (input) {
-        input.addEventListener('input', updateFinderPreview);
-        setTimeout(() => input.focus(), 50);
-    }
-}
-
-function updateFinderPreview() {
-    const preview = document.getElementById('weight-finder-preview');
-    const input = document.getElementById('weight-finder-input');
-    if (!preview || !input) return;
-    const exIdx = _finderExIdx;
-    const name = exerciseNameForIdx(exIdx);
-    const finder = parseFloat(input.value);
-    if (!Number.isFinite(finder) || finder < 0) {
-        preview.textContent = '';
-        return;
-    }
-    if (finder === 0) {
-        preview.textContent = 'Work weight → 0 kg (bodyweight)';
-        return;
-    }
-    const work = workWeightFromFinder(finder, name, { forStrength: finderForStrength() });
-    preview.textContent = finderForStrength()
-        ? `Strength work weight → ${work} kg (+10% finder, then +15%)`
-        : `Work weight → ${work} kg`;
+    setTimeout(() => document.getElementById('weight-finder-input')?.focus(), 50);
 }
 
 function openSheet(exIdx, renderFn) {

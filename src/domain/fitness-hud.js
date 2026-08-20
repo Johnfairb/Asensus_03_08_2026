@@ -76,9 +76,9 @@ export function getTodayFocus() {
             try {
                 const slot = getLactateSlotForDate(dateToISO(new Date()));
                 const proto = getLactateProtocolForSlot(slot);
-                descEl.innerText = `Lactate/HIT (~45 min). Session ${slot}: ${proto.summary}. Search HIT type(s) when you start.`;
+                descEl.innerText = `HIT (~45 min). Session ${slot}: ${proto.summary}. Search HIT type(s) when you start.`;
             } catch (e) {
-                descEl.innerText = "Lactate/HIT session (~45 min). 10 min HIT — search type(s) when you start.";
+                descEl.innerText = "HIT session (~45 min). 10 min HIT — search type(s) when you start.";
             }
         }
         else if (focus === 'Auxiliary' && !isHypertrophyPhase() && !getGymPlanPrefs().strengthPhase) {
@@ -157,7 +157,7 @@ export function getWorkoutSessionAdvice(focus) {
         footerNote = 'No recommended session. Use Log manual workout in the Log tab, or switch Workout back on in Tracker.';
         showCoachTip = false;
     } else if (focus === 'Rest') {
-        footerNote = 'Active rest recommended. Prioritize sleep and hydration.';
+        footerNote = '';
         showCoachTip = false;
     } else if (focus === 'Rest (Cardio Only)') {
         footerNote = 'High-RPE practice recovery. Steady cardio permitted — no lifting.';
@@ -931,7 +931,7 @@ export function generateDailyExerciseLog() {
 
         if (cardioOrphans.length) {
             const isLactate = cardioOrphans.some(l => /lactate|sprint|interval/i.test(l.exercise || ''));
-            renderOrphanSession(cardioOrphans, isLactate ? 'Lactate/HIT' : 'Steady State');
+            renderOrphanSession(cardioOrphans, isLactate ? 'HIT' : 'Steady State');
         }
 
         if (strengthOrphans.length) {
@@ -1106,8 +1106,8 @@ export function getWorkoutExerciseRows(focus) {
         const proto = getLactateProtocolForSlot(slot);
         const other = getLactateProtocolForSlot(slot === 'A' ? 'B' : 'A');
         return {
-            sessionType: 'Lactate/HIT',
-            sessionName: `Lactate/HIT Session ${slot}`,
+            sessionType: 'HIT',
+            sessionName: `HIT Session ${slot}`,
             exercises: withPhaseReps([
                 { name: 'Warmup (~10 min)', sets: 1 },
                 { name: proto.summary, sets: proto.sets },
@@ -1385,7 +1385,7 @@ export function showBreakdown(type) {
             </p>
             <p style="font-size:12px; color:var(--text-muted); line-height:1.5; margin:10px 0 0;">
                 Rule: RPE 10 → 8.5 h; each extra RPE point → +5 min.
-                Gym: 45 min = 5 RPE (+1 per extra 15 min). Steady = 2 RPE. Lactate/HIT = your RPE.
+                Gym: 45 min = 5 RPE (+1 per extra 15 min). Steady = 2 RPE. HIT = your RPE.
             </p>
             <button type="button" class="btn-primary is-secondary" style="margin:14px 0 0; width:100%;" onclick="closeMacroBreakdown(); openRpeGuidanceTab()">View RPE guidance</button>`;
         sheet.classList.remove('hidden');

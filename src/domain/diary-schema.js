@@ -16,13 +16,13 @@ const HYDRATION_FIELD = {
 
 const DEFAULTS = {
   practice: [
-    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 triggers Lactate/HIT tracking)', min: 1, max: 10 },
+    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 triggers HIT tracking)', min: 1, max: 10 },
     { id: 'athletic', label: 'Athletic Performance', type: 'scale10', hint: '', min: 1, max: 10 },
     { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '', min: 1, max: 10 },
     { ...HYDRATION_FIELD, label: 'Hydration (ml)', hint: 'Counts toward your daily hydration goal' }
   ],
   match: [
-    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 replaces a Lactate/HIT this week)', min: 1, max: 10 },
+    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: '1 = Rest, 10 = Absolute Maximum Effort. (>6 replaces a HIT this week)', min: 1, max: 10 },
     { id: 'athletic', label: 'Athletic Performance', type: 'scale10', hint: '', min: 1, max: 10 },
     { id: 'mental', label: 'Mental Fatigue', type: 'scale10', hint: '', min: 1, max: 10 },
     { id: 'matchPerformance', label: 'Match Performance', type: 'scale10', hint: 'How did you play overall?', min: 1, max: 10 },
@@ -33,7 +33,7 @@ const DEFAULTS = {
     { ...HYDRATION_FIELD }
   ],
   lactate: [
-    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: 'Rate the Lactate/HIT work. HIT class recovery uses this score.', min: 1, max: 10 },
+    { id: 'rpe', label: 'Session RPE', type: 'scale10', hint: 'Rate the HIT work. HIT class recovery uses this score.', min: 1, max: 10 },
     { ...HYDRATION_FIELD }
   ]
 };

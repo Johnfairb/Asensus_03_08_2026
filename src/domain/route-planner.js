@@ -175,6 +175,34 @@ function sessionIsPrepOnlyTail(sess) {
     });
 }
 
+function itemLooksLikeStretch(it) {
+    if (!it) return false;
+    const name = it.exercise?.name || it.name || '';
+    return !!(it.isStretchGroup || it.isCustomStretch || /stretch/i.test(name));
+}
+
+function itemLooksLikeWarmup(it) {
+    if (!it) return false;
+    const name = it.exercise?.name || it.name || '';
+    return !!(it.isWarmupGroup || /warmup/i.test(name));
+}
+
+/** True when the session's completed/present work is stretching (warmup ignored). */
+export function sessionItemsAreStretchOnly(items) {
+    const list = (items || []).filter(Boolean);
+    if (!list.length) return false;
+    let sawStretch = false;
+    for (const it of list) {
+        if (itemLooksLikeWarmup(it)) continue;
+        if (itemLooksLikeStretch(it)) {
+            sawStretch = true;
+            continue;
+        }
+        return false;
+    }
+    return sawStretch;
+}
+
 /** Generic leftover labels — not Strength A/B, hypertrophy, power, lactate, or named cardio. */
 function sessionIsGenericWorkoutKind(kind) {
     const n = normalizeLoggedSessionKind(kind);
@@ -241,7 +269,10 @@ export function foldMisfiledGymTailSessions(sessions) {
     return list;
 }
 
-export function isLactateEvent(e) { return e === 'Lactate' || e === 'Cardio (Lactate)'; }
+export function isLactateEvent(e) {
+    const s = String(e || '');
+    return s === 'Lactate' || s === 'Cardio (Lactate)' || s === 'Lactate/HIT' || s === 'HIT';
+}
 export function isAuxEvent(e) {
     if (!e || typeof e !== 'string') return false;
     if (e === 'Auxiliary' || e === 'Band Auxiliary') return true;
@@ -323,7 +354,7 @@ const COMPLETED_PLAN_SLOTS_KEY = 'ascensus_completed_plan_slots';
 /** Canonical kinds that count toward the weekly plan. */
 export const WORKOUT_TYPE_OPTIONS = [
     { kind: 'Cardio (Steady)', label: 'Steady State', blurb: 'Zone 2 aerobic base' },
-    { kind: 'Lactate', label: 'Lactate/HIT', blurb: '~45 min · 10 min HIT block' },
+    { kind: 'Lactate', label: 'HIT', blurb: '~45 min · 10 min HIT block' },
     { kind: 'Full Body / Strength', label: 'Gym Workout', blurb: 'Strength / lifting session' },
     { kind: 'Full Body / Power', label: 'Power', blurb: 'Plyometrics · maximal effort · 3 min rest' }
 ];
@@ -386,10 +417,19 @@ function forEachCreditOnDate(dateIso, fn) {
     if (!dateIso || typeof fn !== 'function') return;
     const map = loadLoggedSessionsMap();
     (Array.isArray(map[dateIso]) ? map[dateIso] : []).forEach((entry) => {
+        const snap = entry?.sessionId ? (loadWorkoutSessionSnapshots()[entry.sessionId] || null) : null;
+        if (snap && sessionItemsAreStretchOnly(snap.items)) {
+            fn('Stretching', [entry?.sessionId, entry?.planSlotKey]);
+            return;
+        }
         fn(entry?.kind || entry, [entry?.sessionId, entry?.planSlotKey]);
     });
     Object.values(loadWorkoutSessionSnapshots() || {}).forEach((snap) => {
         if (snap?.dateIso !== dateIso) return;
+        if (sessionItemsAreStretchOnly(snap.items)) {
+            fn('Stretching', [snap.id]);
+            return;
+        }
         fn(snap.kind, [snap.id]);
     });
     Object.entries(loadCompletedPlanSlots() || {}).forEach(([slotKey, meta]) => {
@@ -687,11 +727,13 @@ export function prettyWorkoutTypeLabel(kind) {
     if (kind === 'Full Body / Strength A' || /Strength\s*A/i.test(kind || '')) return 'Strength Session A';
     if (kind === 'Full Body / Strength B' || /Strength\s*B/i.test(kind || '')) return 'Strength Session B';
     if (/steady(\s*state)?/i.test(kind || '')) return 'Steady State';
+    if (/^stretch/i.test(kind || '')) return 'Stretching';
     const normalized = normalizeLoggedSessionKind(kind) || kind;
     if (normalized === 'Cardio (Steady)') return 'Steady State';
-    if (normalized === 'Lactate') return 'Lactate/HIT';
+    if (normalized === 'Lactate') return 'HIT';
     if (normalized === 'Full Body / Strength') return 'Strength Session';
     if (normalized === 'Auxiliary' || isAuxEvent(normalized)) return 'Auxiliary';
+    if (typeof normalized === 'string' && /^stretch/i.test(normalized)) return 'Stretching';
     if (typeof normalized === 'string' && normalized.includes('Power')) return 'Power';
     if (normalized === 'Workout') return 'Workout';
     return prettyFocusName(kind || 'Workout');
@@ -2314,7 +2356,8 @@ export function prettyFocusName(focus) {
     if (focus === 'Full Body / Strength') return 'Strength Session';
     if (isPowerEvent(focus)) return 'Power';
     if (isSteadyCardio(focus)) return 'Steady Cardio';
-    if (isLactateEvent(focus)) return 'Lactate/HIT';
+    if (isLactateEvent(focus)) return 'HIT';
+    if (/^stretch/i.test(focus)) return 'Stretching';
     if (isAuxEvent(focus)) {
         const bandOn = !!(typeof getGymPlanPrefs === 'function' ? getGymPlanPrefs().band : store.userConfig.bandAuxiliary);
         return bandOn ? 'Band Auxiliary' : 'Auxiliary';
@@ -2794,7 +2837,7 @@ export async function commitPracticeSession() {
     }
     if (rpe > 6) {
         invalidateWeekPlanCache();
-        if (!isEdit) alert('Practice RPE > 6 counts as a Lactate session — one Lactate removed from this week\'s plan.');
+        if (!isEdit) alert('Practice RPE > 6 counts as a HIT session — one HIT removed from this week\'s plan.');
     }
     if (ath < 4) {
         localStorage.setItem('ascensus_gps_index', '2');
@@ -2898,7 +2941,7 @@ export async function commitMatchSession() {
     }
     if (rpe > 6) {
         invalidateWeekPlanCache();
-        if (!isEdit) alert('Match RPE > 6 counts as a Lactate session — one Lactate removed from this week\'s plan.');
+        if (!isEdit) alert('Match RPE > 6 counts as a HIT session — one HIT removed from this week\'s plan.');
     }
     if (ath < 4 && !isEdit) alert('Athletic Performance < 4: Prioritize recovery.');
     if (ment < 4 && !isEdit) alert('Mental Fatigue < 4: Prioritize sleep tonight.');
@@ -3266,6 +3309,20 @@ export function closeVideoModal() {
     window._videoModalFormUrl = null;
     window._videoModalTitle = null;
     syncVideoModalWatchLink('');
-    document.getElementById('video-modal').classList.add('hidden');
+    document.getElementById('video-modal')?.classList.add('hidden');
+    // YouTube playback can break the warmup sheet's overflow on iOS; rebuild it.
+    try {
+        const sheet = document.querySelector('#exercise-sets-modal .modal-content');
+        if (sheet) {
+            const y = sheet.scrollTop;
+            sheet.style.overflowY = 'hidden';
+            void sheet.offsetHeight;
+            sheet.style.overflowY = 'auto';
+            sheet.scrollTop = y;
+        }
+        if (window.currentModalExIdx != null && typeof window.renderExerciseSets === 'function') {
+            window.renderExerciseSets();
+        }
+    } catch (e) { /* ignore */ }
 }
 

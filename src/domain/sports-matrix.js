@@ -510,7 +510,7 @@ export function sportEventSelectOptionsHtml({
 }
 
 const TRAINING_EVENT_OPTIONS = [
-    { value: 'Lactate', label: 'Lactate/HIT' },
+    { value: 'Lactate', label: 'HIT' },
     { value: 'Cardio (Steady)', label: 'Steady State' },
     { value: 'Full Body / Strength', label: 'Gym / Strength' },
     { value: 'Full Body / Power', label: 'Power' }

@@ -2,10 +2,10 @@ import { store } from '../state/store.js';
 import { getEquivalentExercises, resolveItemSlotLabel } from '../domain/exercise-slots.js';
 import { sessionTypeIdFromFocus, updateLockedExerciseInPlan } from '../domain/workout-cycle.js';
 import { resolveSessionRpe, getTonightSleepTargetHours } from '../domain/sleep-rpe.js';
-import { calculateLiveFitnessScores, generateDailyExerciseLog, getSeasonPhase, getTodayFocus, getWeeklyCoachTip, getWorkoutSessionAdvice, isGuidanceOff } from '../domain/fitness-hud.js';
+import { calculateLiveFitnessScores, generateDailyExerciseLog, getSeasonPhase, getTodayFocus, getWorkoutSessionAdvice, isGuidanceOff } from '../domain/fitness-hud.js';
 import { applyInjuryPainFollowUpFromJournal, injuryAreaLabel, needsInjuryPainFollowUp } from '../domain/periodization.js';
 import { HIT_TYPE_OPTIONS, HIT_FLEXIBLE_INPUT_META, mergeModalityBaselineTest, recalculateLactatePlanIntensities, resolveHitClassRecovery, modalityUsesFlexibleBaselineInput, getModalityBaselineInputKind, getModalitySpeedUnit, saveModalityBaselineInputPrefs, parseBaselineResultInput, formatBaselineStoredValue, baselineResultUnit, baselineTestDisplayLabel, getBaselineTestSequence } from '../domain/lactate-engine.js';
-import { commitMatchSession, commitPracticeSession, dateToISO, generateFutureTimeline, getWorkoutSessionSnapshot, loadWorkoutSessionSnapshots, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, isLastPlannedSessionOfDay, looksLikeSteadyCardioExercise, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, resolveStrengthEventLetter, setRouteOverride, addDaysISO, isPowerEvent, strengthLabelForLetter } from '../domain/route-planner.js';
+import { commitMatchSession, commitPracticeSession, dateToISO, generateFutureTimeline, getWorkoutSessionSnapshot, loadWorkoutSessionSnapshots, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, isLastPlannedSessionOfDay, looksLikeSteadyCardioExercise, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, resolveStrengthEventLetter, sessionItemsAreStretchOnly, setRouteOverride, addDaysISO, isPowerEvent, strengthLabelForLetter } from '../domain/route-planner.js';
 import { lactateSessionRpeBarHtml, openLactateHitPicker, shouldPromptLactateHitTypes, syncLactateIntensitiesIntoActiveLog } from './lactate-ui.js';
 
 const HIT_TYPE_LABELS_RE = new RegExp(
@@ -13,7 +13,7 @@ const HIT_TYPE_LABELS_RE = new RegExp(
     'i'
 );
 import { saveSettings } from '../domain/thermodynamics.js';
-import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, canSupersetPair, createSupersetFromIndices, mergeLocalWorkoutHistory, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
+import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, applySwappedLiftToItem, canSupersetPair, createSupersetFromIndices, mergeLocalWorkoutHistory, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
 import { populateSportSelects } from '../domain/sports-matrix.js';
 import { applyPowerExerciseToItem } from '../domain/power-engine.js';
 import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase, sessionAppliesMuscleLockout } from '../domain/hypertrophy-engine.js';
@@ -31,7 +31,7 @@ import { switchLoadEquipment } from './equipment-ui.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
 import { getPrepVideos } from '../domain/session-prep.js';
-import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, exerciseLogNamesMatch, lastCompletedWorkingWeight } from '../domain/periodization-logs.js';
+import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, exerciseLogNamesMatch } from '../domain/periodization-logs.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry, idbPutJournalMedia, escapeHtml, buildJournalMediaGalleryHtml } from './journey.js';
@@ -72,6 +72,7 @@ import {
     currentHitStep,
     getHitTimerState,
     hitStepHeading,
+    hitStepTargetLine,
     hitTimerRestOverrideHtml,
     hitTimerStatusSubtitle,
     isHitTimerRunning,
@@ -236,22 +237,14 @@ export function calculatePlates(targetWeight = null) {
 
 export function renderWorkoutLog() {
     const focus = getTodayFocus();
-    const { footerNote, showCoachTip } = getWorkoutSessionAdvice(focus);
+    const { footerNote } = getWorkoutSessionAdvice(focus);
     const rest = findActiveRestOnItems(store.activeLog?.items);
     let html = rest
         ? `<div id="workout-log-rest-timer" class="session-rest-timer">${restBannerInnerHtml(rest, { withControls: true })}</div>`
         : `<div id="workout-log-rest-timer" class="session-rest-timer hidden"></div>`;
 
-    if (footerNote || showCoachTip) {
-        html += `<div style="margin-bottom:12px;">`;
-        if (footerNote) {
-            html += `<div style="font-size:9px; color:var(--text-stealth); font-style:italic; margin-bottom:${showCoachTip ? '10px' : '0'};">${footerNote}</div>`;
-        }
-        if (showCoachTip) {
-            const weekTip = getWeeklyCoachTip();
-            html += `<div style="font-size:10px; color:var(--gold-accent); padding:10px; border:1px solid rgba(212,175,55,0.25); border-radius:8px; background:rgba(212,175,55,0.05); font-family:'Roboto Mono'; line-height:1.45;"><strong>Coach tip · this week:</strong> ${weekTip.title} — ${weekTip.body}</div>`;
-        }
-        html += `</div>`;
+    if (footerNote) {
+        html += `<div style="margin-bottom:12px; font-size:9px; color:var(--text-stealth); font-style:italic;">${footerNote}</div>`;
     }
 
     // Lactate/HIT: live session RPE adjuster at top of the workout log
@@ -305,7 +298,7 @@ export function renderWorkoutLog() {
         if (isLactateHit) {
             domainTag = (item.isBaselineTest || ((item.sets || []).length && (item.sets || []).every(s => s.isBaselineTest)))
                 ? 'BASELINE TEST'
-                : 'LACTATE/HIT';
+                : 'HIT';
             domainColor = 'var(--gold-accent)';
             unitLabel = 'Intervals';
             totalSets = (item.sets || []).length;
@@ -314,7 +307,7 @@ export function renderWorkoutLog() {
 
         let subtitle = `${completedSets} / ${totalSets} ${unitLabel} Logged`;
         if (item.isStretchGroup || isStaticStretchingLogItem(item)) {
-            if (item.isCustomStretch) {
+            if (item.isCustomStretch && !isPlannedTimedStretchItem(item)) {
                 subtitle = isAllCompleted ? 'Done' : 'Tap Log when finished';
             } else {
                 subtitle = stretchTimerStatusSubtitle(item);
@@ -614,7 +607,7 @@ function warmupChildVideoHtml(child) {
         const url = String(clip.videoUrl || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const label = String(clip.label || child?.name || '').replace(/</g, '&lt;');
         return `<div style="border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.2);">
-            <button type="button" onclick="openVideoModal('${title}', '${url}')"
+            <button type="button" onclick="event.stopPropagation(); openVideoModal('${title}', '${url}')"
                 style="width:100%; padding:14px; background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:11px; cursor:pointer;">
                 🎥 ${label}
             </button>
@@ -631,6 +624,17 @@ export function updateCoreChildWeight(exIdx, setIdx, childIdx, value) {
     const n = parseFloat(value);
     child.weight = Number.isFinite(n) && n > 0 ? n : 0;
     persistCoreExerciseLoad(child.name, child.weight);
+    const key = String(child.name || '').toLowerCase();
+    (item.sets || []).forEach((other, i) => {
+        if (i <= setIdx || !other) return;
+        (other.children || []).forEach((ch) => {
+            if (String(ch?.name || '').toLowerCase() === key) ch.weight = child.weight;
+        });
+    });
+    if (window.currentModalExIdx != null) renderExerciseSets();
+    if (window._workoutSessionConfirmed) {
+        try { saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() }); } catch (e) { /* ignore */ }
+    }
 }
 
 function persistUserConfigMaps() {
@@ -927,9 +931,9 @@ export function closeExerciseSetsModal() {
                 });
             }
         } else if (isStaticStretchingLogItem(item)) {
-            // Planned timed stretch: leave completion to the timer / manual checks.
-            // Custom stretch: closing still counts as logged.
-            if (item.isCustomStretch) {
+            // Timed stretch (planned or custom with muscles): leave completion to the timer.
+            // Legacy custom (single mark-done row): closing still counts as logged.
+            if (item.isCustomStretch && !isPlannedTimedStretchItem(item)) {
                 (item.sets || []).forEach(set => {
                     if (set) set.completed = true;
                 });
@@ -1024,6 +1028,7 @@ function lactateRestSlotHtml(item, exIdx) {
         }
         return `<div id="lactate-rest-slot-${exIdx}" style="width:100%; margin-top:10px; padding:10px 12px; border-radius:6px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
             <div data-hit-timer-label style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px;">${escapeHtmlSafe(heading)}</div>
+            ${step?.kind === 'work' && hitStepTargetLine(step) ? `<div data-hit-timer-target style="font-size:11px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:700; margin-bottom:6px;">Target · ${escapeHtmlSafe(hitStepTargetLine(step))}</div>` : ''}
             <div data-hit-timer-countdown style="font-size:18px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono';">${left}s</div>
             ${step?.kind === 'rest' ? hitTimerRestOverrideHtml() : (step?.kind === 'work' ? `<button type="button" onclick="logHitWorkNow()" style="margin-top:8px; background:none; border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 10px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">LOG NOW</button>` : '')}
         </div>`;
@@ -1167,7 +1172,8 @@ export function submitLactateBaselineResult(exIdx, setIdx) {
     if (!resumeHitTimerAfterBaselineResult(exIdx, setIdx)) {
         startLactateRestAfterSet(exIdx, setIdx);
     }
-    renderExerciseSets();
+    window._workoutLogFilter = 'todo';
+    closeExerciseSetsModal();
     renderWorkoutLog();
 }
 
@@ -2064,26 +2070,17 @@ export function swapExerciseInLog(newId) {
         return;
     }
     const slotLabel = resolveItemSlotLabel(item);
-    const oldSets = item.sets || [];
-    const workSets = oldSets.filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
-    const workWeight = Number(workSets.find(s => Number(s.weight) > 0)?.weight)
-        || lastCompletedWorkingWeight(
-            (store.globalGroupedHistory && Object.values(store.globalGroupedHistory).flatMap(d => d?.items || [])) || [],
-            newEx.name
-        )
-        || 0;
 
     store.activeLog.items[exIdx].exercise = newEx;
     if (slotLabel && !store.activeLog.items[exIdx].slotLabel) {
         store.activeLog.items[exIdx].slotLabel = slotLabel;
     }
-    store.activeLog.items[exIdx].needsWeightFind = false;
     if (isPowerLogItem(item) || String(newEx.domain || '').toLowerCase() === 'power') {
         applyPowerExerciseToItem(store.activeLog.items[exIdx], newEx.name);
         store.activeLog.items[exIdx].exercise = newEx;
+        store.activeLog.items[exIdx].needsWeightFind = false;
     } else {
-        store.activeLog.items[exIdx].sets = oldSets.map(s => ({ ...s, completed: false, locked: false }));
-        maybeRebuildLiftWarmups(store.activeLog.items[exIdx], workWeight);
+        applySwappedLiftToItem(store.activeLog.items[exIdx], newEx);
     }
 
     // Mid-month swap updates the locked monthly plan for this session type
@@ -2106,6 +2103,7 @@ export function swapExerciseInLog(newId) {
     populateSwapDropdown(exIdx);
     populateCardioTypePicker(exIdx);
     renderWorkoutLog();
+    maybePromptWeightFinder(exIdx, { openLogAfter: false });
     if (window._workoutSessionConfirmed) {
         try { saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() }); } catch (e) { /* ignore */ }
     }
@@ -2353,7 +2351,7 @@ export function renderExerciseSets() {
             ${item.isCustomWarmup ? '' : `<button type="button" onclick="dismissPlannedWarmupFromLog(${exIdx})" style="background:none; border:none; color:var(--text-stealth); font-size:22px; cursor:pointer; line-height:1;" aria-label="Dismiss warmup">&times;</button>`}
         </div>`;
         item.sets.forEach((set, setIdx) => {
-            const kids = Array.isArray(set.children) ? set.children : null;
+            const kids = Array.isArray(set.children) ? set.children.slice() : null;
             const expanded = !!set._uiExpanded;
             const hasKids = !!(kids && kids.length);
             const chevron = hasKids ? (expanded ? '−' : '+') : '';
@@ -2431,11 +2429,16 @@ export function renderExerciseSets() {
         const hitLeft = remainingHitStepSeconds(hitTimer);
         html += hasBaseline
             ? `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">All-out <strong style="color:var(--text-main);">baseline tests</strong> come first and count toward the HIT block. Save each result, then rest starts (1 min after shorter tests, 2 min after the last). Then the usual intervals.</div>`
-            : `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">Hit each interval’s <strong style="color:var(--text-main);">target intensity</strong> for the work time. Start the timer to auto-log work and rest, like stretching.</div>`;
+            : `<div style="font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">${
+                (item.sets || []).some(s => Number(s?.targetLengths) > 0)
+                    ? 'Complete the prescribed lengths within the countdown. Speed is remembered from your baselines and used to set that time.'
+                    : 'Hit each interval’s <strong style="color:var(--text-main);">target intensity</strong> for the work time. Start the timer to auto-log work and rest, like stretching.'
+            }</div>`;
 
         if (hitRunning && hitStep) {
             html += `<div style="margin-bottom:14px; padding:16px; border-radius:12px; border:1px solid rgba(212,175,55,0.35); background:rgba(212,175,55,0.08); text-align:center;">
                 <div data-hit-timer-label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">${escapeHtmlSafe(hitStepHeading(hitStep))}</div>
+                ${hitStep.kind === 'work' && hitStepTargetLine(hitStep) ? `<div data-hit-timer-target style="font-size:13px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; margin-bottom:8px;">Target · ${escapeHtmlSafe(hitStepTargetLine(hitStep))}</div>` : ''}
                 <div data-hit-timer-countdown style="font-size:36px; font-weight:800; color:var(--gold-accent); font-family:'Roboto Mono'; line-height:1;">${hitTimer.pausedForResult || hitStep.kind === 'result' ? '—' : `${hitLeft}s`}</div>
                 <div style="font-size:10px; color:var(--text-stealth); margin-top:8px; font-family:'Roboto Mono';">${hitStep.kind === 'result' ? 'Enter the baseline result below to continue' : 'Runs in background if you leave this screen'}</div>
                 ${hitStep.kind === 'work' ? `<button type="button" onclick="logHitWorkNow()" class="btn-primary is-secondary" style="margin:10px 0 0; padding:8px 12px; font-size:11px;">Log now</button>` : ''}
@@ -2457,6 +2460,9 @@ export function renderExerciseSets() {
             const dur = set.duration_sec != null ? set.duration_sec : (parseInt(set.reps, 10) || 30);
             const restLabel = set.restTime > 0 ? formatDurationSecLabel(set.restTime) : '—';
             const target = set.targetDisplay || rowMeta?.targetDisplay || '';
+            const lengths = Number(set.targetLengths || rowMeta?.targetLengths) || 0;
+            const durStep = lengths > 0 ? 1 : 5;
+            const durMin = lengths > 0 ? 1 : 20;
             let lockOutClass = set.locked || hitRunning ? 'locked disabled' : '';
             let btnText = remainingRestSeconds(set) > 0 ? remainingRestSeconds(set) + 's' : '✓';
             let overridesHtml = '';
@@ -2468,7 +2474,7 @@ export function renderExerciseSets() {
                 <div class="set-row" style="margin-bottom:0;">
                     <div class="set-num">${setIdx + 1}</div>
                     <div class="set-input-group">
-                        <input type="number" step="5" min="20" class="set-input" style="flex:1;" value="${dur}" ${durDisabled} onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'duration_sec', this.value)">
+                        <input type="number" step="${durStep}" min="${durMin}" class="set-input" style="flex:1;" value="${dur}" ${durDisabled} onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'duration_sec', this.value)">
                         <div style="flex:1; text-align:center; color:var(--text-muted); font-size:12px; font-weight:700; align-self:center; font-family:'Roboto Mono';">${restLabel}</div>
                     </div>
                     <div class="set-check"><div class="check-btn ${set.completed ? 'completed' : ''} ${lockOutClass}" id="btn-check-${exIdx}-${setIdx}" onclick="toggleSetComplete(${exIdx}, ${setIdx})">${btnText}</div></div>
@@ -3681,8 +3687,9 @@ function withStrengthSessionLetter(kind) {
     return kind;
 }
 
-export function resolveActiveSessionKind() {
-    const items = store.activeLog?.items || [];
+export function resolveActiveSessionKind(itemsArg) {
+    const items = itemsArg || store.activeLog?.items || [];
+    if (sessionItemsAreStretchOnly(items)) return 'Stretching';
     const inferred = inferSessionKindFromItems(items);
     // Prefer the exact planned label (e.g. Hypertrophy / Push, Strength A) — do not
     // collapse to Full Body / Strength here; week-plan credits normalize separately.
@@ -3715,9 +3722,13 @@ export function resolveActiveSessionKind() {
         return 'Cardio (Steady)';
     }
     if (items.some(i => /auxiliar|prehab|band/i.test(i.exercise?.name || '') || isAuxEvent(i.exercise?.name))) return 'Auxiliary';
-    if (items.some(i => isStrengthEvent(i.exercise?.name) || (i.exercise?.domain || '').toLowerCase() === 'strength')) {
+    if (items.some(i => {
+        if (i.isStretchGroup || i.isCustomStretch || /stretch/i.test(i.exercise?.name || i.name || '')) return false;
+        return isStrengthEvent(i.exercise?.name) || (i.exercise?.domain || '').toLowerCase() === 'strength';
+    })) {
         return withStrengthSessionLetter('Full Body / Strength');
     }
+    if (inferred === 'Stretching') return 'Stretching';
     if (items.length) return withStrengthSessionLetter(inferred || 'Full Body / Strength');
     return withStrengthSessionLetter('Full Body / Strength');
 }
@@ -3732,6 +3743,9 @@ function inferSessionKindFromItems(items) {
     const skip = (i) => !!(i.isWarmupGroup || i.isStretchGroup || i.isCustomStretch || i.isSportSessionBlock
         || /stretch|warmup/i.test(i.exercise?.name || i.name || ''));
     const work = list.filter(i => !skip(i));
+    if (!work.length && list.some(i => i.isStretchGroup || i.isCustomStretch || /stretch/i.test(i.exercise?.name || i.name || ''))) {
+        return 'Stretching';
+    }
     const hasSteady = work.some(i => isSteadyCardioLogItem(i));
     const hasLift = work.some(i => {
         const d = (i.exercise?.domain || '').toLowerCase();
@@ -3792,7 +3806,7 @@ export function editOrphanWorkoutLogs(exerciseNamesCsv, logIdsCsv) {
         const dbEx = (store.globalExerciseDB || []).find(e => e.name === exName);
         const looksCardio = rows.some(r => isCardioWorkoutLogRow({ ...r, exercise: exName }))
             || looksLikeSteadyCardioExercise(exName);
-        const isStretch = /static\s*stretch/i.test(exName);
+        const isStretch = /stretch/i.test(exName);
         const isLactate = /lactate|sprint|interval|attack bike|skier|battle rope|rower|hill sprint|^spinning$|cycling|elliptical|treadmill|hit\s*class/i.test(exName)
             || HIT_TYPE_LABELS_RE.test(exName);
         const sets = rows.map(log => {
@@ -3836,16 +3850,19 @@ export function editOrphanWorkoutLogs(exerciseNamesCsv, logIdsCsv) {
             exercise: dbEx || {
                 id: `orphan_${exName}`,
                 name: exName,
-                domain: looksCardio || isLactate ? 'cardio' : 'strength',
+                domain: isStretch ? 'mobility' : (looksCardio || isLactate ? 'cardio' : 'strength'),
                 muscle_group: dbEx?.muscle_group || ''
             },
             note: '',
             sets,
-            isLactateHit: isLactate
+            isLactateHit: isLactate,
+            isStretchGroup: !!isStretch,
+            isCustomStretch: /custom\s*stretch/i.test(exName)
         };
     });
 
     const kind = (() => {
+        if (sessionItemsAreStretchOnly(items)) return 'Stretching';
         if (items.some(i => i.isLactateHit || /lactate|sprint|interval|hit\s*class/i.test(i.exercise?.name || ''))) return 'Lactate';
         const hasLift = items.some(i => {
             const d = (i.exercise?.domain || '').toLowerCase();
@@ -4021,7 +4038,7 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
     document.getElementById('log-type-selector').value = type;
     const titleMap = { bodyfat: 'Body fat', weight: 'Weight' };
     const lactateTitle = window._lactateHitSelection?.summary
-        ? `Lactate/HIT · ${window._lactateHitSelection.isHitClass
+        ? `HIT · ${window._lactateHitSelection.isHitClass
             ? 'HIT class'
             : `RPE ${window._lactateHitSelection.sessionRpe ?? window._lactateHitSelection.desiredRpe ?? ''} · ${window._lactateHitSelection.blockMinutes || ''} min`}`
         : null;
@@ -4310,6 +4327,57 @@ export function closeWeightModal() {
     hideMetricSheet('weight-modal');
 }
 
+export function openHydrationModal() {
+    const input = document.getElementById('hydration-input-ml');
+    const warn = document.getElementById('hydration-input-warning');
+    if (input) input.value = '';
+    if (warn) warn.classList.add('hidden');
+    showMetricSheet('hydration-modal');
+    setTimeout(() => { input?.focus(); }, 80);
+}
+
+export function closeHydrationModal() {
+    hideMetricSheet('hydration-modal');
+}
+
+export async function submitHydrationLog() {
+    const input = document.getElementById('hydration-input-ml');
+    const warn = document.getElementById('hydration-input-warning');
+    const ml = Math.round(parseFloat(input?.value));
+    if (!ml || ml <= 0) {
+        if (warn) { warn.textContent = 'Enter millilitres drank.'; warn.classList.remove('hidden'); }
+        return;
+    }
+    if (ml > 10000) {
+        if (warn) { warn.textContent = 'Maximum is 10,000 ml.'; warn.classList.remove('hidden'); }
+        return;
+    }
+    if (warn) warn.classList.add('hidden');
+
+    const dateIso = dateToISO(new Date());
+    recordHydrationMl(ml, 'hydration', dateIso);
+    const payload = [{
+        meal_name: 'HYDRATION',
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+        cost: 0,
+        food_details: JSON.stringify({ items: [], hydration_ml: ml })
+    }];
+    try {
+        if (!navigator.onLine) throw new Error('Offline');
+        const { error } = await store.supabaseClient.from('food_logs').insert(payload);
+        if (error) throw error;
+    } catch (e) {
+        store.offlineQueue.push({ table: 'food_logs', payload });
+        localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
+    }
+    document.getElementById('status-badge-hydration')?.classList.add('completed');
+    closeHydrationModal();
+    try { await loadHistory(); } catch (e) { /* ignore */ }
+}
+
 export async function submitWeightLog() {
     const input = document.getElementById('weight-input-kg');
     const warn = document.getElementById('weight-input-warning');
@@ -4433,7 +4501,7 @@ export async function submitLog() {
             configureJournalModal('lactate');
             const eyebrow = document.getElementById('journal-modal-eyebrow');
             const title = document.getElementById('journal-modal-title');
-            if (eyebrow) eyebrow.innerText = 'Lactate/HIT Session';
+            if (eyebrow) eyebrow.innerText = 'HIT Session';
             if (title) title.innerText = 'RATE THE SESSION';
             ['journal-rpe','journal-athletic','journal-mental','journal-notes','journal-match-perf','journal-injury-pain'].forEach(id => {
                 const el = document.getElementById(id);
@@ -4590,7 +4658,6 @@ export async function commitWorkoutSession() {
 
     let logsToSave = [];
     let saveError = null;
-    const sessionKind = resolveActiveSessionKind();
     const sessionId = window.editingSessionId || (`sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     const previousSnap = window.editingSessionId ? getWorkoutSessionSnapshot(window.editingSessionId) : null;
     const dateIso = (previousSnap?.dateIso && /^\d{4}-\d{2}-\d{2}$/.test(previousSnap.dateIso))
@@ -4671,6 +4738,8 @@ export async function commitWorkoutSession() {
             return { ...item, sets };
         })
         .filter(item => (item.sets || []).length > 0);
+
+    const sessionKind = resolveActiveSessionKind(sessionItemsSnapshot);
 
     const wasEditing = !!window.editingSessionId;
     const wrapExerciseMs = sumExerciseDurationMs(store.activeLog.items);
@@ -4778,6 +4847,7 @@ export async function commitWorkoutSession() {
                     ? Math.max(1, Math.round(durationSec / 60))
                     : (Math.round(set.time_minutes) || 0);
                 const exName = item.exercise?.name || item.name || 'Exercise';
+                const isStretchRow = !!(item.isStretchGroup || item.isCustomStretch || /stretch/i.test(exName));
                 logsToSave.push({
                     exercise: exName,
                     sets: workSetNo,
@@ -4786,9 +4856,9 @@ export async function commitWorkoutSession() {
                     distance_km: set.distance_km || 0,
                     time_minutes: timeMins,
                     rpe: set.isLactateHit ? 0 : rpeVal,
-                    type: isCardio || set.isLactateHit ? 'cardio' : (baseDomain || 'strength'),
+                    type: isStretchRow ? 'mobility' : (isCardio || set.isLactateHit ? 'cardio' : (baseDomain || 'strength')),
                     session_duration_min: timedMinutes || 0,
-                    ...(liftPhase && !isCardio && !set.isLactateHit ? { periodization_phase: liftPhase } : {})
+                    ...(liftPhase && !isCardio && !set.isLactateHit && !isStretchRow ? { periodization_phase: liftPhase } : {})
                 });
 
                 if (!isCardio && set.rpe <= 1 && sessionAppliesMuscleLockout(sessionKind)) {
@@ -4814,7 +4884,7 @@ export async function commitWorkoutSession() {
                     distance_km: 0,
                     time_minutes: 0,
                     rpe: 0,
-                    type: isCardio ? 'cardio' : (baseDomain || 'strength'),
+                    type: isStretch ? 'mobility' : (isCardio ? 'cardio' : (baseDomain || 'strength')),
                     session_duration_min: timedMinutes || 0
                 });
             }
@@ -4835,7 +4905,7 @@ export async function commitWorkoutSession() {
         }
         // Synthetic placeholder so Log/calendar still get a session card
         logsToSave.push({
-            exercise: 'Lactate/HIT',
+            exercise: 'HIT',
             sets: 1,
             reps: 0,
             weight_kg: 0,
@@ -4907,7 +4977,7 @@ export async function commitWorkoutSession() {
         try {
             recordLoggedWorkoutSession({
                 dateIso,
-                kind: sessionKind || resolveActiveSessionKind() || 'Full Body / Strength',
+                kind: sessionKind || resolveActiveSessionKind(sessionItemsSnapshot) || 'Full Body / Strength',
                 sessionId,
                 logIds,
                 items: sessionItemsSnapshot,
@@ -4922,8 +4992,8 @@ export async function commitWorkoutSession() {
                     : (previousSnap?.isHitClass || null),
                 lactateSummary: window._lactateHitSelection?.summary || previousSnap?.lactateSummary || null,
                 miscellaneousMs: wrapMiscMs,
-                planSlotKey: window.plannedGpsSlot?.slotKey || null,
-                skipCredit: !!(window.plannedGpsSlot?.completed)
+                planSlotKey: (sessionKind === 'Stretching') ? null : (window.plannedGpsSlot?.slotKey || null),
+                skipCredit: sessionKind === 'Stretching' || !!(window.plannedGpsSlot?.completed)
             });
             window.plannedGpsSlot = null;
             invalidateWeekPlanCache();
@@ -5181,7 +5251,7 @@ export async function finalizeWorkoutLog() {
             rpeNum = Number(document.getElementById('journal-rpe')?.value);
         }
         if (!Number.isFinite(rpeNum) || rpeNum < 1 || rpeNum > 10) {
-            alert('Please rate Lactate/HIT session RPE (1–10).');
+            alert('Please rate HIT session RPE (1–10).');
             window._finalizeInProgress = false;
             return;
         }
@@ -5270,7 +5340,7 @@ export function configureJournalModal(mode, prefillEntry = null) {
     if (mode === 'gym') {
         if (notes) notes.placeholder = 'How did the session feel? Any form notes for next time.';
     } else if (mode === 'lactate') {
-        if (notes) notes.placeholder = 'Optional notes — how hard did the Lactate/HIT work feel?';
+        if (notes) notes.placeholder = 'Optional notes — how hard did the HIT work feel?';
     } else if (mode === 'match') {
         if (notes) notes.placeholder = 'What broke down in the match? What went well?';
     } else if (mode === 'pain-only') {

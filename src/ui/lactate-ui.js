@@ -14,19 +14,23 @@ import {
     clampDesiredRpe,
     clampSessionRpe,
     clearModalityBaselines,
+    defaultTrackLengthM,
     getBaselineTestSequence,
     getLactateProtocolForSlot,
+    getModalityTrackLength,
     hasAnyBaseline,
     hasCompleteBaseline,
+    isLengthBasedModality,
     lactateLogSetFromRow,
     needsLowRpeDisclaimer,
     normalizeHitTypeId,
-    recalculateLactatePlanIntensities
+    recalculateLactatePlanIntensities,
+    setModalityTrackLength
 } from '../domain/lactate-engine.js';
 import { dateToISO, getLactateSlotForDate, isLactateEvent } from '../domain/route-planner.js';
 
 let _pendingContinue = null;
-let _selectedHitIds = new Set(['treadmill_sprints']);
+let _selectedHitIds = new Set(['interval_sprints']);
 let _wizardStep = 'types';
 let _desiredRpe = null; // user must choose (min 7)
 let _redoMode = false;
@@ -67,6 +71,7 @@ function renderWizard() {
     const body = document.getElementById('lactate-hit-wizard-body');
     if (!body) return;
     if (_wizardStep === 'rpe') renderRpeStep(body);
+    else if (_wizardStep === 'track') renderTrackLengthStep(body);
     else if (_wizardStep === 'redo') renderRedoPicker(body);
     else renderTypesStep(body);
 }
@@ -86,7 +91,7 @@ function renderTypesStep(body) {
     body.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:8px;">
             <div style="min-width:0;">
-                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing:0.4px; margin:0; font-size:14px;">Lactate/HIT type</h2>
+                <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing:0.4px; margin:0; font-size:14px;">HIT type</h2>
                 <p style="font-size:11px; color:var(--text-muted); margin:6px 0 0; line-height:1.4;">Session ${escapeHtml(slot)} · ${escapeHtml(protocolSummary)}</p>
             </div>
             <button type="button" onclick="closeLactateHitPicker(false)" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
@@ -108,7 +113,7 @@ function renderRpeStep(body) {
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <div>
                 <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">Desired RPE</div>
-                <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">How hard should this Lactate/HIT session feel?</div>
+                <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">How hard should this HIT session feel?</div>
             </div>
             <button type="button" onclick="closeLactateHitPicker(false)" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
         </div>
@@ -124,6 +129,47 @@ function renderRpeStep(body) {
         <div style="display:flex; flex-direction:column; gap:8px;">
             <button type="button" class="btn-primary is-primary" style="margin:0; opacity:${hasPick ? '1' : '0.5'};" onclick="confirmLactateDesiredRpe()" ${hasPick ? '' : 'disabled'}>Continue</button>
             <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="lactateWizardBackToTypes()">Back</button>
+        </div>`;
+}
+
+function selectedLengthBasedTypes() {
+    return [..._selectedHitIds].map(normalizeHitTypeId).filter(isLengthBasedModality);
+}
+
+function renderTrackLengthStep(body) {
+    const types = selectedLengthBasedTypes();
+    const fields = types.map((id) => {
+        const meta = HIT_MODALITY_META[id] || {};
+        const prefill = getModalityTrackLength(id) || defaultTrackLengthM(id) || '';
+        const warn = id === 'interval_sprints'
+            ? 'Keep it under 50 m so turns stay realistic.'
+            : '25 m and 50 m are the recommended 1-length / 2-length distances.';
+        return `
+            <label style="display:block; margin-bottom:12px;">
+                <div style="font-size:13px; font-weight:700; color:var(--text-main); margin-bottom:4px;">${escapeHtml(meta.lengthPrompt || 'Track length')}</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.4;">${escapeHtml(meta.lengthHint || '')} ${escapeHtml(warn)}</div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="number" min="5" max="200" step="1" inputmode="decimal"
+                        id="lactate-track-len-${escapeHtml(id)}"
+                        class="input-field" value="${escapeHtml(String(prefill))}"
+                        style="flex:1; margin:0;">
+                    <span style="font-size:12px; color:var(--text-silver); font-family:'Roboto Mono';">m</span>
+                </div>
+            </label>`;
+    }).join('');
+    body.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
+            <div>
+                <div style="font-family:'Roboto Mono',monospace; font-size:10px; color:var(--gold-accent); font-weight:800; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">Length</div>
+                <div style="font-size:16px; font-weight:800; color:var(--text-main); line-height:1.35;">Set the rep distance</div>
+            </div>
+            <button type="button" onclick="closeLactateHitPicker(false)" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer; line-height:1; padding:0;" aria-label="Close">&times;</button>
+        </div>
+        <p style="font-size:12px; color:var(--text-silver); line-height:1.45; margin:0 0 14px;">Baselines are 1 length and 2 lengths. Changing the distance clears old times so you retest.</p>
+        ${fields}
+        <div style="display:flex; flex-direction:column; gap:8px;">
+            <button type="button" class="btn-primary is-primary" style="margin:0;" onclick="confirmLactateTrackLength()">Continue</button>
+            <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="lactateWizardBackToRpe()">Back</button>
         </div>`;
 }
 
@@ -321,6 +367,29 @@ export function confirmLactateDesiredRpe() {
     if (_desiredRpe == null) {
         alert('Choose a desired RPE (7–10) for this session.');
         return;
+    }
+    if (selectedLengthBasedTypes().length) {
+        _wizardStep = 'track';
+        renderWizard();
+        return;
+    }
+    finishLactateWizardAndContinue();
+}
+
+export function confirmLactateTrackLength() {
+    const types = selectedLengthBasedTypes();
+    for (const id of types) {
+        const el = document.getElementById(`lactate-track-len-${id}`);
+        const n = Number(el?.value);
+        if (!(n > 0)) {
+            alert('Enter a length in metres.');
+            return;
+        }
+        if (id === 'interval_sprints' && n > 50) {
+            const ok = confirm(`Recommended under 50 m. Use ${n} m anyway?`);
+            if (!ok) return;
+        }
+        setModalityTrackLength(id, n);
     }
     finishLactateWizardAndContinue();
 }
@@ -529,7 +598,7 @@ export function openLactateHitPicker(onContinue) {
     _desiredRpe = null;
     _redoMode = false;
     _forceRedoTypes = null;
-    _selectedHitIds = new Set(['treadmill_sprints']);
+    _selectedHitIds = new Set(['interval_sprints']);
     const modal = ensureLactateHitModal();
     renderWizard();
     modal.classList.remove('hidden');
@@ -573,7 +642,7 @@ export function adjustLactateSessionRpe(delta) {
     }
     const title = document.getElementById('current-route-title');
     if (title && window._lactateHitSelection?.summary) {
-        title.innerText = `Lactate/HIT · live RPE ${window._lactateHitSelection.sessionRpe}`;
+        title.innerText = `HIT · live RPE ${window._lactateHitSelection.sessionRpe}`;
     }
 }
 
@@ -602,6 +671,9 @@ export function syncLactateIntensitiesIntoActiveLog() {
                 set.notes = fresh.notes;
                 set.targetDisplay = fresh.targetDisplay;
                 set.targetRate = fresh.targetRate;
+                set.targetLengths = fresh.targetLengths;
+                set.lengthM = fresh.lengthM;
+                set.hitWorkSec = fresh.hitWorkSec;
                 set.duration_sec = fresh.workSec || set.duration_sec;
                 set.restTime = fresh.restSec != null ? fresh.restSec : set.restTime;
             });
@@ -614,7 +686,6 @@ export function lactateSessionRpeBarHtml() {
     const sel = window._lactateHitSelection;
     if (!sel || sel.isHitClass) return '';
     const live = sel.sessionRpe ?? sel.desiredRpe ?? 7;
-    const block = sel.blockMinutes || LACTATE_DURATION_BY_RPE[sel.desiredRpe] || 20;
     const warn = needsLowRpeDisclaimer(live)
         ? `<div style="font-size:10px; color:#ff6b6b; margin-top:6px; line-height:1.35;">Low RPE — likely drifting toward steady-state cardio.</div>`
         : '';
@@ -623,7 +694,6 @@ export function lactateSessionRpeBarHtml() {
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
                 <div style="min-width:0;">
                     <div style="font-size:9px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; letter-spacing:0.5px; text-transform:uppercase;">Session RPE</div>
-                    <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">HIT block ${block} min (from start RPE ${sel.desiredRpe ?? live})${sel.hasBaselineTests ? ' · includes baseline tests' : ''}. Raising/lowering adjusts targets.</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
                     <button type="button" onclick="adjustLactateSessionRpe(-1)" style="width:36px; height:36px; border-radius:8px; border:1px solid var(--border-highlight); background:var(--bg-surface-elevated); color:var(--text-main); font-size:18px; font-weight:700; cursor:pointer;">−</button>

@@ -17,11 +17,12 @@ import {
     listWorkoutSessionsForDate,
     loadWorkoutSessionSnapshots,
     normalizeLoggedSessionKind,
-    prettyWorkoutTypeLabel
+    prettyWorkoutTypeLabel,
+    sessionItemsAreStretchOnly
 } from '../domain/route-planner.js';
 import { formatDurationMs, formatExerciseDurationLabel } from './workout-timer.js';
 import { buildStructuredStretchParts, stretchPartDisplayLabel } from '../domain/session-prep.js';
-import { estimateFoodWaterMl, getHydrationLitersForDate, parseFoodLogDetails } from '../lib/food-parse.js';
+import { estimateFoodWaterMl, getHydrationLitersForDate, isHydrationMealName, parseFoodLogDetails } from '../lib/food-parse.js';
 import { computeAimBarLayout, formatMacroAimLabel, getMacroRange } from '../lib/macro-range.js';
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from '../domain/meal-planner.js';
 import { resolveLogPeriodization } from '../domain/periodization-logs.js';
@@ -37,6 +38,7 @@ export function updateLiveDashboard(todayFoods) {
     
     if (window.weightLoggedToday) document.getElementById('status-badge-weight')?.classList.add('completed');
     if (localStorage.getItem(`sleep_${new Date().toLocaleDateString()}`)) document.getElementById('status-badge-sleep')?.classList.add('completed');
+    if (getHydrationLitersForDate() > 0) document.getElementById('status-badge-hydration')?.classList.add('completed');
 
     let uniqueMeals = new Set();
     let foodWaterLiters = 0;
@@ -51,7 +53,7 @@ export function updateLiveDashboard(todayFoods) {
             });
         } catch(e) {}
 
-        if(log.meal_name !== 'SNACK') uniqueMeals.add(log.meal_name);
+        if (log.meal_name !== 'SNACK' && !isHydrationMealName(log.meal_name)) uniqueMeals.add(log.meal_name);
         if(log.meal_name === 'BREAKFAST') completed.BRK = true;
         if(log.meal_name === 'LUNCH') completed.LUN = true;
         if(log.meal_name === 'DINNER') completed.DIN = true;
@@ -396,7 +398,7 @@ export async function openDayDetail(dateStr, isoHint) {
             const costColor = data.macros.cost > store.userConfig.budget ? 'var(--text-stealth)' : 'var(--text-silver)';
             document.getElementById('modal-summary').innerHTML = `<span style="color:var(--text-main);">${data.macros.cals} kcal</span> | ${data.macros.pro}g pro | <span style="color:${costColor}">£${data.macros.cost.toFixed(2)}</span>`;
         } else if (sessions.some(s => isLactateEvent(s.kind) || s.kind === 'Lactate') || gymJournal?.type === 'lactate' || gymJournal?.hitTypes?.length) {
-            document.getElementById('modal-summary').innerHTML = `<span style="color:var(--gold-accent);">Lactate/HIT session on file</span>`;
+            document.getElementById('modal-summary').innerHTML = `<span style="color:var(--gold-accent);">HIT session on file</span>`;
         } else if (sessions.length) {
             document.getElementById('modal-summary').innerHTML = `<span style="color:var(--gold-accent);">Logged sessions on file</span>`;
         } else if (matchJournal) {
@@ -591,7 +593,7 @@ function renderLactateSessionCardsHtml(lactateBlocks, dateStr) {
         const sid = String(block.sessionId || '').replace(/'/g, "\\'");
         const safeDate = String(dateStr).replace(/'/g, "\\'");
         html += `<button type="button" onclick="openLactateSessionDetail('${sid}', '${safeDate}', ${idx})" style="display:block; width:100%; text-align:left; background:none; border:none; padding:0; margin-bottom:16px; padding-bottom:12px; border-bottom: 1px dashed var(--border-highlight); cursor:pointer;">
-            <div style="color:var(--gold-accent); font-weight:800; font-family:'Roboto Mono'; font-size:10px; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">[ Lactate/HIT session ]</div>
+            <div style="color:var(--gold-accent); font-weight:800; font-family:'Roboto Mono'; font-size:10px; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">[ HIT session ]</div>
             <div style="font-size:13px; color:var(--text-main); font-weight:700; margin-bottom:6px;">${escapeHtml(typesLabel)}</div>
             <div style="font-size:11px; color:var(--text-silver); font-family:'Roboto Mono';">${escapeHtml(durLabel)}${block.rpe != null ? ` · RPE ${block.rpe}` : ''}</div>
             <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-top:6px;">Tap for details</div>
@@ -736,7 +738,7 @@ function renderGymDiaryBlockHtml(journal) {
         metaBits.push(journal.hitTypes.map(String).join(' · '));
     }
 
-    const title = isLactate ? 'LACTATE DIARY' : 'WORKOUT DIARY';
+    const title = isLactate ? 'HIT DIARY' : 'WORKOUT DIARY';
     return `<div style="margin-bottom:16px; padding:14px; border:1px solid rgba(212,175,55,0.35); border-radius:10px; background:rgba(212,175,55,0.06);">
         <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">[ ${title} ]</div>
         <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:${journal.notes || fieldLines || journal.lactateSummary ? '10px' : '0'}; font-family:'Roboto Mono'; font-size:11px; color:var(--text-silver);">
@@ -1021,10 +1023,12 @@ function sessionKindFromAdherenceItems(items) {
 }
 
 function resolveAdherenceSessionKind(snap) {
+    if (sessionItemsAreStretchOnly(snap?.items)) return 'Stretching';
     const kind = snap?.kind;
     const inferred = sessionKindFromAdherenceItems(snap?.items);
     const norm = normalizeLoggedSessionKind(kind);
     const hasLift = (snap?.items || []).some(it => {
+        if (it?.isStretchGroup || it?.isCustomStretch || /stretch/i.test(it?.exercise?.name || it?.name || '')) return false;
         const d = (it?.exercise?.domain || '').toLowerCase();
         return d === 'strength' || d === 'power' || d === 'hypertrophy' || it?.isPower;
     });
@@ -1062,8 +1066,8 @@ function synthesizeAdherenceSessionFromLogs(dateStr, iso, logs) {
     const hasStretchOnly = items.length > 0 && items.every(it => /stretch/i.test(it.name || '') || it.isStretchGroup);
     const inferred = sessionKindFromAdherenceItems(items);
     const hasCardioLogs = (logs || []).some(l => isCardioWorkoutLogRow(l));
-    const kind = hasStretchOnly
-        ? 'Workout'
+    const kind = hasStretchOnly || sessionItemsAreStretchOnly(items)
+        ? 'Stretching'
         : (inferred || (hasCardioLogs ? 'Cardio (Steady)' : 'Full Body / Strength'));
     const snap = {
         id: `orphan-day-${iso || dateStr}`,
@@ -1810,7 +1814,7 @@ function diaryFieldDisplayLabel(fieldId, schemaMode) {
 function buildLactateDiaryHtml(journal) {
     if (!journal || (journal.type !== 'lactate' && journal.source !== 'gym' && !journal.hitTypes?.length && journal.rpe == null && !journal.notes)) {
         // Still show gym journal if it's the day's lactate diary
-        if (!journal) return `<div style="font-size:12px; color:var(--text-muted);">No diary entry for this Lactate/HIT session.</div>`;
+        if (!journal) return `<div style="font-size:12px; color:var(--text-muted);">No diary entry for this HIT session.</div>`;
     }
     const schemaMode = journal.type === 'lactate' ? 'lactate' : 'gym';
     const fields = journal.fields || {};
@@ -1849,7 +1853,7 @@ export function openLactateSessionDetail(sessionId, dateStr, blockIndex = 0) {
         block = split.lactateBlocks[blockIndex] || split.lactateBlocks[0];
     }
     if (!block) {
-        alert('Could not find that Lactate/HIT session.');
+        alert('Could not find that HIT session.');
         return;
     }
 
@@ -1873,7 +1877,7 @@ export function openLactateSessionDetail(sessionId, dateStr, blockIndex = 0) {
     const actionsEl = document.getElementById('meal-detail-actions');
     if (!sheet || !foodsEl) return;
 
-    if (titleEl) titleEl.textContent = 'Lactate/HIT session';
+    if (titleEl) titleEl.textContent = 'HIT session';
     if (subEl) subEl.textContent = dateStr || block.dateIso || '';
     if (macrosEl) {
         macrosEl.innerHTML = `
@@ -1991,7 +1995,7 @@ export function editLactateSessionFromCalendar(sessionId, dateStr) {
     // Orphan path — rebuild from log ids / names
     const logs = block?.logs || [];
     if (!logs.length) {
-        alert('No editable sets found for this Lactate/HIT session.');
+        alert('No editable sets found for this HIT session.');
         return;
     }
     const names = [...new Set(logs.map(l => l.exercise).filter(Boolean))];

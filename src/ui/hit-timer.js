@@ -137,13 +137,18 @@ export function buildHitTimerSteps(items = liveItems()) {
                 ? Math.max(1, Number(set.baselineFixedWorkSec) || Number(set.duration_sec) || 20)
                 : Math.max(1, Number(set.duration_sec) || 20);
             const name = item.exercise?.name || item.name || 'HIT';
+            const lengthLabel = Number(set.targetLengths) > 0
+                ? `${set.targetLengths} length${Number(set.targetLengths) === 1 ? '' : 's'}`
+                : null;
+            const targetDisplay = String(set.targetDisplay || '').trim();
             steps.push({
                 kind: 'work',
                 exIdx,
                 setIdx,
                 durationSec: workSec,
                 isBaseline: !!set.isBaselineTest,
-                label: set.isBaselineTest ? (set.baselineLabel || 'Baseline') : name
+                targetDisplay,
+                label: set.isBaselineTest ? (set.baselineLabel || 'Baseline') : (lengthLabel || name)
             });
             if (set.isBaselineTest && set.baselineKind === 'duration') {
                 steps.push({
@@ -183,6 +188,12 @@ export function hitStepHeading(step) {
     return `Work · ${step.label || 'interval'}`;
 }
 
+export function hitStepTargetLine(step) {
+    if (!step || step.kind !== 'work') return '';
+    const set = liveItems()[step.exIdx]?.sets?.[step.setIdx];
+    return String(set?.targetDisplay || step.targetDisplay || '').trim();
+}
+
 export function hitStepStatusLine(step, leftSec) {
     const left = Math.max(0, Number(leftSec) || 0);
     if (!step) return `${left}s`;
@@ -217,6 +228,16 @@ function updateHitCountdownDom() {
     });
     document.querySelectorAll('[data-hit-timer-label]').forEach((el) => {
         el.textContent = label;
+    });
+    const target = hitStepTargetLine(step);
+    document.querySelectorAll('[data-hit-timer-target]').forEach((el) => {
+        if (target) {
+            el.textContent = `Target · ${target}`;
+            el.style.display = '';
+        } else {
+            el.textContent = '';
+            el.style.display = 'none';
+        }
     });
     if (step?.exIdx != null) {
         const cardSub = document.getElementById(`hit-card-sub-${step.exIdx}`);

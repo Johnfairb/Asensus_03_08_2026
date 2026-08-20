@@ -7,11 +7,21 @@ import { isGuidanceOff } from '../domain/fitness-hud.js';
 import { getVisualPortion, resolveDayMealItems } from '../domain/meal-planner.js';
 import { smartRoundMass } from '../domain/thermodynamics.js';
 import { generateWorkoutTemplate, renderGhostWorkoutFromItems } from '../domain/workout-generator.js';
+import { isLactateEvent, isSteadyCardio } from '../domain/route-planner.js';
 import { renderWorkoutLog } from './drive.js';
 import { clearWorkoutDraft, saveWorkoutDraft } from '../domain/workout-draft.js';
 import { resetWorkoutTimer, armWorkoutTimer } from './workout-timer.js';
 import { sessionTypeIdFromFocus, confirmSessionExercises } from '../domain/workout-cycle.js';
 import { gateConfirmForEquipmentPicks } from './equipment-ui.js';
+
+/** Steady State and HIT have nothing useful to swap — skip the confirm screen. */
+export function shouldSkipWorkoutConfirm(focus = null) {
+    const f = focus
+        || window.manualSessionKind
+        || document.getElementById('today-focus')?.value
+        || '';
+    return isLactateEvent(f) || isSteadyCardio(f) || f === 'Cardio';
+}
 
 // ==========================================
 // 7. TEMPLATE MANAGER & GHOST PLANNER
@@ -466,7 +476,16 @@ export function loadGhostTemplate() {
             if (lockBtnWorkout) lockBtnWorkout.style.display = 'none';
             return;
         }
-        if (typeof generateWorkoutTemplate === "function") generateWorkoutTemplate();
+        if (typeof generateWorkoutTemplate === "function") {
+            const skip = shouldSkipWorkoutConfirm();
+            if (skip && lockBtnWorkout) lockBtnWorkout.style.display = 'none';
+            Promise.resolve(generateWorkoutTemplate({ skipGhostUi: skip })).then(() => {
+                if (skip && (store.currentGhostItems || []).length) {
+                    window._workoutLogFilter = 'todo';
+                    acceptGhostTemplate();
+                }
+            });
+        }
         return;
     }
     if (isGuidanceOff('food') && ['breakfast','lunch','dinner','snack'].includes(store.activeLog.type)) {
@@ -622,7 +641,8 @@ export function setConfirmRouteButtons(confirmed) {
     if (confirmed) {
         if (loadRecipeBtn) loadRecipeBtn.classList.add('hidden');
         if (loadWorkoutBtn) loadWorkoutBtn.classList.add('hidden');
-        const hideUnconfirm = isWorkout && sessionHasCompletedWorkingSet(store.activeLog.items);
+        const hideUnconfirm = (isWorkout && sessionHasCompletedWorkingSet(store.activeLog.items))
+            || (isWorkout && shouldSkipWorkoutConfirm());
         if (unconfirmBtn) {
             if (hideUnconfirm) unconfirmBtn.classList.add('hidden');
             else unconfirmBtn.classList.remove('hidden');
@@ -673,6 +693,7 @@ function acceptGhostTemplateAfterEquipment() {
     }
     document.getElementById('ghost-template-container').classList.add('hidden');
     store.ghostOverrides = {};
+    if (store.activeLog.type === 'workout') window._workoutLogFilter = 'todo';
     renderActiveLog();
     setConfirmRouteButtons(true);
     // Workout clock starts on first exercise Log tap (not on Confirm)

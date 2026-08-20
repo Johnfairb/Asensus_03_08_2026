@@ -6,6 +6,7 @@ import { excludeBannedExercises } from '../domain/bans.js';
 import { getLibraryMuscleGroup, LIBRARY_MUSCLE_ORDER } from '../domain/bodyweight-lifts.js';
 import { getExerciseMeta } from '../domain/exercise-catalog.js';
 import { isExerciseMuscleLocked } from '../domain/hypertrophy-engine.js';
+import { allowsWeightInput } from '../domain/load-increments.js';
 import { addExercisesByIds } from '../domain/workout-generator.js';
 
 function groupExercisesForPicker() {
@@ -41,6 +42,23 @@ function groupExercisesForPicker() {
     return { grouped, headings };
 }
 
+function isStrengthPickerExercise(ex) {
+    const domain = String(ex?.domain || '').toLowerCase();
+    if (domain === 'cardio' || domain === 'power' || domain === 'warmup') return false;
+    if (/stretch|lactate|hit\s*class|steady/i.test(ex?.name || '')) return false;
+    return allowsWeightInput(ex?.name);
+}
+
+const PARAM_INPUT_STYLE = "width:42px;margin:0;padding:6px 2px;font-size:10px;text-align:center;font-family:'Roboto Mono',monospace;";
+
+function parseOptionalNumber(raw, { integer = false, min = 0 } = {}) {
+    const s = String(raw ?? '').trim();
+    if (s === '') return null;
+    const n = integer ? parseInt(s, 10) : parseFloat(s);
+    if (!Number.isFinite(n) || n < min) return null;
+    return n;
+}
+
 export function openAddExercisesModal() {
     let modal = document.getElementById('add-exercises-modal');
     if (!modal) return;
@@ -52,16 +70,34 @@ export function openAddExercisesModal() {
         const rows = (grouped.get(heading) || []).map(({ ex, displayName }) => {
             const safeName = String(displayName || ex.name || '').replace(/</g, '&lt;');
             const id = String(ex.id).replace(/"/g, '&quot;');
-            return `<label style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border-subtle);cursor:pointer;">
-                <input type="checkbox" class="add-ex-check" value="${id}" style="width:16px;height:16px;accent-color:var(--gold-accent);">
-                <span style="font-size:13px;color:var(--text-main);">${safeName}</span>
-            </label>`;
+            const strength = isStrengthPickerExercise(ex);
+            const params = strength
+                ? `<div class="add-ex-params" style="display:none;align-items:center;gap:4px;flex-shrink:0;">
+                    <input type="number" min="1" step="1" inputmode="numeric" class="input-field add-ex-sets" placeholder="Sets" aria-label="Sets" style="${PARAM_INPUT_STYLE}" onclick="event.stopPropagation()">
+                    <input type="number" min="0" step="0.5" inputmode="decimal" class="input-field add-ex-kg" placeholder="kg" aria-label="Work weight kg" style="${PARAM_INPUT_STYLE}width:48px;" onclick="event.stopPropagation()">
+                    <input type="number" min="1" step="1" inputmode="numeric" class="input-field add-ex-reps" placeholder="Reps" aria-label="Reps" style="${PARAM_INPUT_STYLE}" onclick="event.stopPropagation()">
+                </div>`
+                : '';
+            return `<div data-add-ex-row style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--border-subtle);">
+                ${params}
+                <label style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;cursor:pointer;">
+                    <input type="checkbox" class="add-ex-check" value="${id}" data-strength="${strength ? '1' : '0'}" style="width:16px;height:16px;accent-color:var(--gold-accent);flex-shrink:0;">
+                    <span style="font-size:13px;color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${safeName}</span>
+                </label>
+            </div>`;
         }).join('');
         return `<details style="margin-bottom:12px;">
             <summary style="font-family:'Roboto Mono';font-size:11px;font-weight:800;color:var(--gold-accent);text-transform:uppercase;letter-spacing:0.5px;cursor:pointer;padding:6px 0;">${heading}</summary>
             <div>${rows || `<div style="font-size:11px;color:var(--text-muted);padding:8px 0;">None</div>`}</div>
         </details>`;
     }).join('') || `<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:24px;">No exercises available.</div>`;
+
+    list.querySelectorAll('.add-ex-check').forEach((cb) => {
+        cb.addEventListener('change', () => {
+            const params = cb.closest('[data-add-ex-row]')?.querySelector('.add-ex-params');
+            if (params) params.style.display = cb.checked ? 'flex' : 'none';
+        });
+    });
 
     modal.classList.remove('hidden');
     modal.style.display = 'flex';
@@ -74,6 +110,20 @@ export function closeAddExercisesModal() {
     modal.style.display = 'none';
 }
 
+function specFromCheckbox(check) {
+    const row = check.closest('[data-add-ex-row]');
+    if (!row) return {};
+    const kgEl = row.querySelector('.add-ex-kg');
+    const kgRaw = kgEl ? String(kgEl.value || '').trim() : '';
+    const weight = parseOptionalNumber(kgRaw, { min: 0 });
+    return {
+        sets: parseOptionalNumber(row.querySelector('.add-ex-sets')?.value, { integer: true, min: 1 }),
+        reps: parseOptionalNumber(row.querySelector('.add-ex-reps')?.value, { integer: true, min: 1 }),
+        weight,
+        weightProvided: kgRaw !== '' && weight != null
+    };
+}
+
 export function confirmAddExercisesModal() {
     const checks = [...document.querySelectorAll('#add-exercises-list .add-ex-check:checked')];
     const ids = checks.map((c) => c.value).filter(Boolean);
@@ -81,7 +131,11 @@ export function confirmAddExercisesModal() {
         closeAddExercisesModal();
         return;
     }
-    addExercisesByIds(ids);
+    const specsById = {};
+    checks.forEach((c) => {
+        specsById[c.value] = specFromCheckbox(c);
+    });
+    addExercisesByIds(ids, specsById);
     closeAddExercisesModal();
     const menu = document.getElementById('tools-menu');
     if (menu) menu.classList.add('hidden');

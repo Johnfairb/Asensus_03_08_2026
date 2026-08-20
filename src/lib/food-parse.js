@@ -67,6 +67,10 @@ export function getHydrationLitersForDate(isoDate) {
     return ml / 1000;
 }
 
+export function isHydrationMealName(name) {
+    return /^(hydration|fluid|drink)$/i.test(String(name || '').trim());
+}
+
 export function recordHydrationMl(ml, source, isoDate) {
     const amount = Math.max(0, Number(ml) || 0);
     if (!amount) return;

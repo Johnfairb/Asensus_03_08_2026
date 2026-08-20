@@ -396,6 +396,7 @@
                 <div id="status-badge-weight" class="status-badge exe-btn" onclick="openWeightModal()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M3 9l9-6 9 6"/><path d="M3 9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2"/><path d="M3 15h18"/></svg> Weight</div>
                 <div id="status-badge-bodyfat" class="status-badge exe-btn" onclick="openBodyFatModal()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> Body fat</div>
                 <div id="status-badge-sleep" class="status-badge exe-btn" onclick="openSleepModal()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> Sleep</div>
+                <div id="status-badge-hydration" class="status-badge exe-btn" onclick="openHydrationModal()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg> Hydration</div>
                 <div id="status-badge-snack" class="status-badge exe-btn" onclick="startExecution('snack', this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" y1="2" x2="6" y2="4"/><line x1="10" y1="2" x2="10" y2="4"/><line x1="14" y1="2" x2="14" y2="4"/></svg> Snack</div>
                 <div class="status-badge" style="border-style: dashed; justify-content: center;" onclick="document.getElementById('quick-add-modal').classList.remove('hidden')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Something else</div>
             </div>
@@ -590,8 +591,8 @@
         </div>
 
         <div id="plan-panel-week">
-            <div id="future-timeline-container" style="margin-bottom: 20px;"></div>
             <button type="button" class="btn-primary is-secondary" style="margin:0 0 20px 0; padding:10px; font-size:11px; border-color: var(--gold-accent); color: var(--gold-accent);" onclick="openSpontaneousEventModal()">Log spontaneous event</button>
+            <div id="future-timeline-container" style="margin-bottom: 20px;"></div>
         </div>
 
         <div id="plan-panel-future" class="hidden">
@@ -912,6 +913,12 @@
                     <option value="none">No — I don’t stretch</option>
                 </select>
 
+                <div id="custom-stretch-setup" class="hidden" style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border-subtle);">
+                    <div class="hud-label" style="margin:0 0 8px 0;">Which muscles do you stretch?</div>
+                    <div style="font-size:10px; color:var(--text-muted); margin:0 0 10px; font-family:'Roboto Mono'; line-height:1.4;">Deselect any you skip. Default hold applies to every selected muscle; override a muscle if it needs a different time.</div>
+                    <div id="custom-stretch-muscle-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+                </div>
+
                 <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border-subtle);">
                     <div class="hud-label" style="margin:0 0 10px 0;">Stretch timers</div>
                     <label>Default hold (seconds)</label>
@@ -920,8 +927,10 @@
                     <input type="number" id="set-stretch-adductor-hold-sec" class="input-field" min="1" step="1" value="45" onchange="saveSessionPrepSettings()">
                     <label>Between stretches (seconds)</label>
                     <input type="number" id="set-stretch-gap-sec" class="input-field" min="0" step="1" value="5" onchange="saveSessionPrepSettings()">
-                    <div style="font-size:10px; color:var(--text-muted); margin:10px 0 8px; font-family:'Roboto Mono';">Cool-down muscles — uncheck to ban until re-enabled</div>
-                    <div id="stretch-ban-list" style="display:grid; grid-template-columns:1fr 1fr; gap:8px 10px;"></div>
+                    <div id="planned-stretch-ban-wrap">
+                        <div style="font-size:10px; color:var(--text-muted); margin:10px 0 8px; font-family:'Roboto Mono';">Cool-down muscles — uncheck to ban until re-enabled</div>
+                        <div id="stretch-ban-list" style="display:grid; grid-template-columns:1fr 1fr; gap:8px 10px;"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1362,7 +1371,7 @@
 
     <!-- FORM VIDEO MODAL -->
     ...
-    <div id="video-modal" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 3000; display: flex; justify-content: center; align-items: center; padding: 20px;">
+    <div id="video-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 100001; display: flex; justify-content: center; align-items: center; padding: 20px;">
         <div class="modal-content stealth-panel" style="width: 100%; max-width: 390px; background: var(--bg-surface); padding:0; overflow:hidden;">
             <div style="display:flex; justify-content:space-between; align-items:center; padding:16px; border-bottom:1px solid #222;">
                 <h2 id="video-modal-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; font-size:12px; text-transform:uppercase; margin:0;">Form Video</h2>
@@ -1420,6 +1429,16 @@
         <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Body fat %</div>
         <div id="bodyfat-input-warning" class="hidden" style="font-size:12px; color:#FF3B30; font-family:'Roboto Mono', monospace; margin-bottom:12px; font-weight:700;">Enter a valid body fat %.</div>
         <button class="btn-primary is-primary" style="margin-top:0;" onclick="submitBodyFatLog()">Save body fat</button>
+    </div>
+
+    <!-- HYDRATION / FLUID LOG MODAL -->
+    <div id="hydration-modal" class="bottom-sheet hidden" style="z-index: 3000; text-align:center;">
+        <div class="sheet-handle" onclick="closeHydrationModal()"></div>
+        <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; letter-spacing:0.4px; margin-bottom:15px;">Log fluid</h2>
+        <input type="number" step="50" min="1" max="10000" id="hydration-input-ml" class="input-field" style="font-size:32px; font-weight:800; text-align:center; padding:20px; border-color:var(--gold-accent);" placeholder="350" inputmode="numeric">
+        <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Millilitres (ml) — counts toward your 3.0 L hydration goal</div>
+        <div id="hydration-input-warning" class="hidden" style="font-size:12px; color:#FF3B30; font-family:'Roboto Mono', monospace; margin-bottom:12px; font-weight:700;">Enter millilitres drank.</div>
+        <button class="btn-primary is-primary" style="margin-top:0;" onclick="submitHydrationLog()">Save fluid</button>
     </div>
 
 
@@ -1690,7 +1709,7 @@
                 <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform: uppercase; letter-spacing: 1px; margin:0; font-size:14px;">Spontaneous Event</h2>
                 <button onclick="document.getElementById('spontaneous-event-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
             </div>
-            <p style="font-size:11px; color:var(--text-muted); line-height:1.45; margin:0 0 14px 0;">Adds an event to your Route for the next 3 days. Log it later from Exercise — RPE&gt;8 triggers rest; practice-type events with RPE&gt;6 count as a lactate credit.</p>
+            <p style="font-size:11px; color:var(--text-muted); line-height:1.45; margin:0 0 14px 0;">Adds an event to your Route for the next 3 days. Log it later from Exercise — RPE&gt;8 triggers rest; practice-type events with RPE&gt;6 count as a HIT credit.</p>
 
             <label style="margin-top:0;">Day</label>
             <select id="spontaneous-day" class="input-field"></select>
@@ -1739,8 +1758,8 @@
                     <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">Zone 2 aerobic base — counts as one steady session this week.</div>
                 </button>
                 <button type="button" onclick="selectWorkoutType('Lactate')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
-                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Lactate/HIT</div>
-                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">~45 min · 10 min HIT block with variable work:rest. Search modalities next — counts as one of this week’s two Lactate/HIT sessions.</div>
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">HIT</div>
+                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">~45 min · 10 min HIT block with variable work:rest. Search modalities next — counts as one of this week’s two HIT sessions.</div>
                 </button>
                 <button type="button" onclick="selectWorkoutType('Full Body / Strength')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
                     <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Gym Workout</div>
@@ -1761,7 +1780,6 @@
                 <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:15px;">Rest times</h2>
                 <button type="button" onclick="closeManualGymRestModal()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
             </div>
-            <p style="font-size:11px; color:var(--text-muted); margin:0 0 14px 0; line-height:1.4;">Set work-set rest for this gym session. Warmups use ¼ after the first and ½ after the second (compounds only). Custom skips rest timers.</p>
             <label style="display:flex; align-items:center; gap:10px; margin-bottom:14px; font-size:12px; color:var(--text-main); cursor:pointer;">
                 <input type="checkbox" id="manual-rest-custom" onchange="toggleManualRestCustomFields()" style="width:16px; height:16px;">
                 Custom — no rest timers

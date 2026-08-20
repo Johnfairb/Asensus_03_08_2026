@@ -28,9 +28,10 @@ import {
     prepContextForFocus,
     resolveStretchBlock,
     resolveWarmupBlock,
-    buildSportSessionBlock
+    buildSportSessionBlock,
+    cloneWarmupPartChildren
 } from './session-prep.js';
-import { formatCoreRepLabel, isUnilateralCompound } from './exercise-catalog.js';
+import { formatCoreRepLabel, formatMuscleList, getExerciseMeta, isUnilateralCompound } from './exercise-catalog.js';
 import { hasCoreStrengthRating } from './core-programming.js';
 import {
     applyPowerExerciseToItem,
@@ -42,8 +43,8 @@ import {
 
 import { renderActiveLog } from '../ui/templates.js';
 import { syncExerciseTimer } from '../ui/workout-timer.js';
-import { ensureCycleStarted, ensureCyclePlansForProgramme, sessionTypeIdFromFocus, confirmSessionExercises } from './workout-cycle.js';
-import { getEquivalentExercises, resolveItemSlotLabel } from './exercise-slots.js';
+import { ensureCycleStarted, ensureCyclePlansForProgramme, confirmSessionExercises } from './workout-cycle.js';
+import { getEquivalentExercises } from './exercise-slots.js';
 import { latestPhaseWeight, lastCompletedWorkingWeight, latestWorkingLog, strengthLoadFromHypertrophy, resolveLogPeriodization, exerciseLogNamesMatch } from './periodization-logs.js';
 
 // ==========================================
@@ -84,8 +85,159 @@ function savedCoreLoad(name) {
     return 0;
 }
 
+/** GPS planned session, loaded GPS planned session, or generated template — not an empty manual gym. */
+export function isPlannedSessionContext() {
+    if (window.editingSessionId) return false;
+    if (window.plannedGpsSlot || window._forceGpsTemplateLoad) return true;
+    return !window.manualWorkoutMode;
+}
+
+function historyForWeights() {
+    const grouped = Object.values(store.globalGroupedHistory || {}).flatMap(d => d?.items || []);
+    return mergeLocalWorkoutHistory(grouped);
+}
+
+/** Last logged working-set kg, or null when this exercise has never been logged. */
+export function resolveLastLoggedWorkKg(exName) {
+    const w = lastCompletedWorkingWeight(historyForWeights(), exName);
+    if (w == null || !Number.isFinite(Number(w))) return null;
+    return Number(w);
+}
+
+function isLiftingExtraExercise(ex) {
+    const domain = String(ex?.domain || '').toLowerCase();
+    if (domain === 'cardio' || domain === 'power' || domain === 'warmup') return false;
+    if (/stretch|lactate|hit\s*class|steady/i.test(ex?.name || '')) return false;
+    return true;
+}
+
+function defaultExtraReps(exName, isIso) {
+    const focus = document.getElementById('today-focus')?.value || window.manualSessionKind || '';
+    if (isHypertrophyFocus(focus)) return 10;
+    if (isIso) return 8;
+    return 6;
+}
+
+function buildLiftWorkSets({ exName, isIso, nSets, weight, reps, includeWarmups }) {
+    const restOpts = resolveWarmupRestOptions(isIso, exName);
+    const workRest = restOpts.mode === 'none' ? 0 : restOpts.workRestSec;
+    const workReps = Number(reps) > 0 ? Number(reps) : defaultExtraReps(exName, isIso);
+    const workKg = Number(weight) || 0;
+    const count = Math.max(1, Math.round(Number(nSets) || 1));
+    const work = [];
+    for (let i = 0; i < count; i++) {
+        work.push({
+            weight: workKg,
+            reps: workReps,
+            distance_km: 0,
+            time_minutes: 0,
+            rpe: 2,
+            completed: false,
+            restTime: workRest
+        });
+    }
+    if (includeWarmups && workKg > 0) {
+        const wu = buildHypertrophyWarmupSets(exName, workKg, workReps, isIso, {
+            workRestSec: workRest,
+            mode: restOpts.mode
+        });
+        return [...wu, ...work];
+    }
+    return work;
+}
+
+function resolveExtraLiftLoad(exName, spec = {}) {
+    if (spec.weightProvided) {
+        return { weight: Number(spec.weight) || 0, needsWeightFind: false };
+    }
+    if (isPlannedSessionContext()) {
+        const known = resolveLastLoggedWorkKg(exName);
+        if (known == null) return { weight: 0, needsWeightFind: true };
+        return { weight: known, needsWeightFind: false };
+    }
+    return { weight: 0, needsWeightFind: true };
+}
+
+function buildExtraLogEntry(ex, spec = {}) {
+    const isIso = !!(HYPERTROPHY_EXERCISE_META[ex.name]?.role === 'isolation');
+    if (!isLiftingExtraExercise(ex)) {
+        const restOpts = resolveWarmupRestOptions(isIso, ex.name);
+        const workRest = restOpts.mode === 'none' ? 0 : restOpts.workRestSec;
+        return {
+            exercise: ex,
+            sets: [{ weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, completed: false, restTime: workRest }],
+            plannedSets: 1,
+            slotLabel: null,
+            isExtra: true,
+            isIsolation: isIso,
+            note: 'Extra'
+        };
+    }
+    const nSets = Number(spec.sets) > 0 ? Math.round(Number(spec.sets)) : 1;
+    const reps = Number(spec.reps) > 0 ? Math.round(Number(spec.reps)) : defaultExtraReps(ex.name, isIso);
+    const { weight, needsWeightFind } = resolveExtraLiftLoad(ex.name, spec);
+    const sets = buildLiftWorkSets({
+        exName: ex.name,
+        isIso,
+        nSets,
+        weight,
+        reps,
+        includeWarmups: !needsWeightFind && weight > 0
+    });
+    return {
+        exercise: ex,
+        sets,
+        plannedSets: nSets,
+        slotLabel: null,
+        isExtra: true,
+        isIsolation: isIso,
+        note: 'Extra',
+        needsWeightFind,
+        weightFinderResolved: !needsWeightFind,
+        workWeightKg: weight > 0 ? weight : undefined
+    };
+}
+
+/** Rebuild a swapped lift from the new exercise's last logged weight (planned sessions) or "new exercise". */
+export function applySwappedLiftToItem(item, newEx) {
+    if (!item || !newEx) return;
+    const isIso = !!(HYPERTROPHY_EXERCISE_META[newEx.name]?.role === 'isolation');
+    const oldWork = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit && !s.isDropSet);
+    const nSets = Math.max(1, typeof item.plannedSets === 'number' ? item.plannedSets : (oldWork.length || 1));
+    const reps = Number(oldWork.find(s => Number(s.reps) > 0)?.reps) || defaultExtraReps(newEx.name, isIso);
+    let weight = 0;
+    let needsWeightFind = false;
+    if (isPlannedSessionContext()) {
+        const known = resolveLastLoggedWorkKg(newEx.name);
+        if (known == null) {
+            needsWeightFind = true;
+            weight = 0;
+        } else {
+            weight = known;
+        }
+    } else {
+        weight = Number(oldWork.find(s => Number(s.weight) > 0)?.weight)
+            || resolveLastLoggedWorkKg(newEx.name)
+            || 0;
+    }
+    item.exercise = newEx;
+    item.isIsolation = isIso;
+    item.needsWeightFind = needsWeightFind;
+    item.weightFinderResolved = !needsWeightFind;
+    item.plannedSets = nSets;
+    item.sets = buildLiftWorkSets({
+        exName: newEx.name,
+        isIso,
+        nSets,
+        weight,
+        reps,
+        includeWarmups: !needsWeightFind && weight > 0
+    });
+    item.workWeightKg = weight > 0 ? weight : undefined;
+}
+
 /** Add one or more exercises (by id). Before Confirm workout → ghost; after → active log. */
-export function addExercisesByIds(ids) {
+export function addExercisesByIds(ids, specsById = {}) {
     const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
     if (!list.length) return;
 
@@ -102,27 +254,12 @@ export function addExercisesByIds(ids) {
                 return;
             }
         }
-        const isIso = !!(HYPERTROPHY_EXERCISE_META[ex.name]?.role === 'isolation');
-        const restOpts = resolveWarmupRestOptions(isIso, ex.name);
-        const workRest = restOpts.mode === 'none' ? 0 : restOpts.workRestSec;
-        const entry = {
-            exercise: ex,
-            sets: [{ weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, completed: false, restTime: workRest }],
-            plannedSets: 1,
-            slotLabel: null,
-            isExtra: true,
-            isIsolation: isIso,
-            note: 'Extra'
-        };
+        const spec = (specsById && (specsById[id] || specsById[String(id)])) || {};
+        const entry = buildExtraLogEntry(ex, spec);
         if (ghostOpen) {
             store.currentGhostItems.push(entry);
         } else {
-            store.activeLog.items.push({
-                exercise: ex,
-                sets: [{ weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, completed: false, restTime: workRest }],
-                isExtra: true,
-                isIsolation: isIso
-            });
+            store.activeLog.items.push(entry);
         }
     });
 
@@ -154,12 +291,11 @@ export function swapGhostExercise(ghostIdx, newId) {
     if (!item || !item.exercise) return;
     const newEx = store.globalExerciseDB.find(e => e.id == newId || String(e.id) === String(newId));
     if (!newEx) return;
-    item.exercise = newEx;
     if (item.isPower || /power/i.test(item.slotLabel || '')) {
         applyPowerExerciseToItem(item, newEx.name);
         item.exercise = newEx;
-    } else if (item.sets) {
-        item.sets = item.sets.map(s => ({ ...s, completed: false, locked: false }));
+    } else {
+        applySwappedLiftToItem(item, newEx);
     }
     renderGhostWorkoutFromItems();
 }
@@ -172,27 +308,28 @@ export function removeGhostExercise(ghostIdx) {
     renderGhostWorkoutFromItems();
 }
 
+function primaryMusclesLabel(item) {
+    const name = item?.exercise?.name;
+    const meta = getExerciseMeta(name);
+    if (meta?.primary?.length) return formatMuscleList(meta.primary);
+    const mg = String(meta?.muscle_group || item?.exercise?.muscle_group || '').trim();
+    if (!mg || /^(custom|full|cardio)$/i.test(mg)) return '';
+    return mg.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function renderGhostWorkoutFromItems() {
     const content = document.getElementById('ghost-content');
     const container = document.getElementById('ghost-template-container');
     if (!content || !container) return;
 
     const focus = document.getElementById('today-focus')?.value || window.manualSessionKind || '';
-    const sessionTypeId = sessionTypeIdFromFocus(focus) || sessionTypeIdFromFocus(window.manualSessionKind || '');
-    const allowEdit = !!sessionTypeId || store.currentGhostItems.some(canRemoveGhostItem);
 
     let html = '';
-    if (allowEdit) {
-        html += `<div style="margin-bottom:12px; padding:10px 12px; border:1px solid rgba(212,175,55,0.35); border-radius:8px; background:rgba(212,175,55,0.06); font-family:'Roboto Mono'; font-size:11px; color:var(--gold-accent); line-height:1.45;">
-            Review exercises — swap any for an equivalent in the same slot, or remove any you don't want. Confirm workout to keep this list until you change it again.
-        </div>`;
-    }
 
     store.currentGhostItems.forEach((item, idx) => {
         if (item.isWarmupGroup) {
             html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
                 <div style="font-size: 12px; color:#D4AF37; font-weight:800; margin-bottom: 4px; text-transform:uppercase;">Warmup</div>
-                <div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note || 'Session warmup'}</div>
             </div>`;
             return;
         }
@@ -220,8 +357,8 @@ export function renderGhostWorkoutFromItems() {
             return;
         }
 
-        const slot = resolveItemSlotLabel(item);
         const equivalents = !item.isExtra ? getEquivalentExercises(item) : [];
+        const muscles = primaryMusclesLabel(item);
         html += `<div style="margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px;">
             <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom: 4px;">
                 <div style="font-size: 12px; color:#D4AF37; font-weight:800; text-transform:uppercase;">${item.exercise.name}</div>
@@ -230,23 +367,18 @@ export function renderGhostWorkoutFromItems() {
                     <button type="button" onclick="removeGhostExercise(${idx})" style="background:rgba(255,59,48,0.08); border:1px solid rgba(255,59,48,0.28); padding:4px 8px; border-radius:4px; color:#FF3B30; font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">REMOVE</button>
                 </div>
             </div>`;
-        if (slot) {
-            html += `<div style="font-size:9px; color:var(--text-muted); margin-bottom:6px; font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.5px;">${slot}${item.isExtra ? ' · Extra' : ''}</div>`;
-        } else if (item.isExtra) {
-            html += `<div style="font-size:9px; color:var(--text-muted); margin-bottom:6px; font-family:'Roboto Mono';">EXTRA</div>`;
+        if (muscles) {
+            html += `<div style="font-size:9px; color:var(--text-muted); margin-bottom:6px; font-family:'Roboto Mono';">${muscles}</div>`;
         }
-        if (item.note) html += `<div style="font-size: 9px; color:#aaa; margin-bottom: 8px; font-style:italic;">${item.note}</div>`;
         if (equivalents.length) {
-            html += `<label style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; display:block; margin-bottom:4px;">Swap equivalent</label>
+            html += `<label style="font-size:9px; color:var(--text-muted); font-family:'Roboto Mono'; display:block; margin-bottom:4px;">Exchange</label>
                 <select class="input-field" style="font-size:12px; padding:8px; margin-bottom:8px;" onchange="swapGhostExercise(${idx}, this.value)">
                     <option value="">Keep: ${item.exercise.name}</option>
                     ${equivalents.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
                 </select>`;
         }
         const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
-        if (item.isSteadyCardio || (item.exercise?.domain || '').toLowerCase() === 'cardio') {
-            html += `<div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:4px;">Choose type · timer + distance</div>`;
-        } else if (workSets.length) {
+        if (workSets.length) {
             const sample = workSets[0];
             const nSets = typeof item.plannedSets === 'number' ? item.plannedSets : workSets.length;
             const reps = sample.reps || 10;
@@ -718,7 +850,7 @@ export function supersetRestAfterB(setA, setB) {
     return rest;
 }
 
-export async function generateWorkoutTemplate() {
+export async function generateWorkoutTemplate(opts = {}) {
     const content = document.getElementById('ghost-content');
     const container = document.getElementById('ghost-template-container');
     if (!content || !container) return;
@@ -928,7 +1060,7 @@ export async function generateWorkoutTemplate() {
         const plan = (sel && Array.isArray(sel.rows) && sel.rows.length)
             ? sel
             : buildLactateIntervalPlan({
-                types: sel?.types || ['treadmill_sprints'],
+                types: sel?.types || ['interval_sprints'],
                 slot,
                 date: new Date(),
                 desiredRpe: sel?.desiredRpe || 7,
@@ -948,7 +1080,7 @@ export async function generateWorkoutTemplate() {
         } else if ((plan.types || []).length <= 1) {
             const rows = plan.rows || [];
             mainRoutine.push({
-                name: rows[0]?.name || 'Treadmill sprints',
+                name: rows[0]?.name || 'Interval sprints',
                 isLactateHit: true,
                 notes: plan.summary || `Variable work:rest · ${plan.blockMinutes || 10} min HIT block`,
                 sets: rows.length || 1,
@@ -1014,7 +1146,7 @@ export async function generateWorkoutTemplate() {
                 isText: true,
                 partName: part.name,
                 notes: part.notes,
-                children: Array.isArray(part.children) ? part.children : null
+                children: cloneWarmupPartChildren(part.children)
             }));
             store.currentGhostItems.push({
                 exercise: { id: item.isCustomWarmup ? 'CUSTOM_WARMUP' : 'WARMUP_GROUP', name: item.name || 'Warmup', domain: 'warmup', muscle_group: 'full' },
@@ -1234,7 +1366,6 @@ export async function generateWorkoutTemplate() {
             const lastW = lastWork != null ? Number(lastWork.weight_kg) : null;
             if (lastTag === 'hypertrophy' && lastW != null && Number.isFinite(lastW)) {
                 tWeight = strengthLoadFromHypertrophy(lastW, exObj.name);
-                itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + 'Strength load = hypertrophy +15% (bodyweight included for BW lifts).';
                 latestLog = null; // first strength prescription from hyp — progression starts next session
             } else if (lastW != null && Number.isFinite(lastW)) {
                 tWeight = lastW;
@@ -1292,15 +1423,9 @@ export async function generateWorkoutTemplate() {
                 tWeight = 0;
             } else if (!needsBwGate && !hasStrengthOrHyp && !hasHist && !hasLocal && !latestLog && !hasSavedSeed) {
                 needsWeightFind = true;
-                itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '')
-                    + (inStrengthPhase
-                        ? 'First time on this exercise in strength: find 10 reps @ 5 RIR (hypertrophy protocol), then we set strength at +15%.'
-                        : 'First time on this exercise: we will ask for your work weight (or help you find 10 reps @ 5 RIR).');
             } else if (inStrengthPhase && !hasStrengthOrHyp && tWeight <= 0 && !needsBwGate && !hasSavedSeed) {
                 // No 1RM fallback — must find via hypertrophy protocol
                 needsWeightFind = true;
-                itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '')
-                    + 'Find 10 reps @ 5 RIR (hypertrophy protocol), then strength is set at +15%.';
             }
         }
 
@@ -1457,7 +1582,7 @@ export async function generateWorkoutTemplate() {
         });
     });
 
-    renderGhostWorkoutFromItems();
+    if (!opts.skipGhostUi) renderGhostWorkoutFromItems();
     } catch (err) {
         console.error('generateWorkoutTemplate failed:', err);
         const content = document.getElementById('ghost-content');

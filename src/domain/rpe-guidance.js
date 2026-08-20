@@ -28,7 +28,7 @@ export const GUIDANCE_TOPICS = [
     {
         id: 'lactate',
         label: 'LACTATE / HIT',
-        body: 'A Lactate/HIT session is geared around improving the athlete’s anaerobic cardio. Improving anaerobic cardio allows the athlete to perform high-intensity activity for longer periods of time.'
+        body: 'A HIT session is geared around improving the athlete’s anaerobic cardio. Improving anaerobic cardio allows the athlete to perform high-intensity activity for longer periods of time.'
     },
     {
         id: 'steady',

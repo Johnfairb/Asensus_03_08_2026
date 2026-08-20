@@ -4,7 +4,7 @@ import { generateFutureTimeline, invalidateWeekPlanCache, isGameEvent, isPractic
 import { persistUserConfigToCloud } from '../domain/thermodynamics.js';
 import { specificEventName } from '../lib/food-parse.js';
 import { populateSportSelects } from '../domain/sports-matrix.js';
-import { loadSavedTemplate, parseTemplateDetails, parseTemplateMeta, renderActiveLog, switchLogType, updateExecutionAuxBlocks, updateSaveTemplateButtonLabel } from './templates.js';
+import { loadSavedTemplate, parseTemplateDetails, parseTemplateMeta, renderActiveLog, shouldSkipWorkoutConfirm, switchLogType, updateExecutionAuxBlocks, updateSaveTemplateButtonLabel } from './templates.js';
 import { generateWorkoutTemplate } from '../domain/workout-generator.js';
 
 // ==========================================
@@ -355,7 +355,12 @@ export async function selectLoadedGpsSession(slotKey) {
 
     const finishLoad = async () => {
         try {
-            await generateWorkoutTemplate();
+            const skip = shouldSkipWorkoutConfirm(session.event);
+            await generateWorkoutTemplate({ skipGhostUi: skip });
+            if (skip && (store.currentGhostItems || []).length && typeof window.acceptGhostTemplate === 'function') {
+                window._workoutLogFilter = 'todo';
+                window.acceptGhostTemplate();
+            }
         } catch (e) {
             console.warn(e);
             alert('Could not load that planned workout.');

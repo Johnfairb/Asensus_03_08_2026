@@ -131,19 +131,20 @@ export function isWorkoutTimerRunning() {
   return _running;
 }
 
-/** True for lifts / supersets / lactate / core — not session warmup, stretch, or steady cardio. */
+/** True for gym lifts / supersets / core — not warmup, stretch, steady cardio, or lactate. */
 export function itemUsesExerciseTimer(item) {
   if (!item) return false;
   if (item.isWarmupGroup || item.isCustomWarmup) return false;
   if (item.isStretchGroup || item.isCustomStretch) return false;
   if (item.isSportSessionBlock) return false;
   if (item.isSteadyCardio) return false;
+  if (item.isLactateHit || (item.sets || []).some(s => s && s.isLactateHit)) return false;
   const name = String(item.exercise?.name || item.name || '');
   if (/static\s*stretch/i.test(name)) return false;
   if (/hit\s*class/i.test(name)) return false;
+  if (/steady\s*state\s*cardio/i.test(name)) return false;
   const domain = String(item.exercise?.domain || '').toLowerCase();
-  const hasLactate = !!(item.isLactateHit || (item.sets || []).some(s => s && s.isLactateHit));
-  if (domain === 'cardio' && !hasLactate && !item.isSuperset) return false;
+  if (domain === 'cardio' && !item.isSuperset) return false;
   return Array.isArray(item.sets) && item.sets.length > 0;
 }
 

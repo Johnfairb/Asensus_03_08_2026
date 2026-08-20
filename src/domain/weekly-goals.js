@@ -143,24 +143,66 @@ function historyLogsHaveStretch(logs) {
     });
 }
 
-function gymSetFraction(snap) {
-    const items = (snap?.items || []).filter(it => {
-        if (it.isWarmupGroup || it.isStretchGroup || it.isSportSessionBlock) return false;
-        const name = String(it.exercise?.name || '');
-        if (/warmup|stretch|practice|match/i.test(name)) return false;
-        const domain = String(it.exercise?.domain || '').toLowerCase();
-        if (domain === 'cardio' || domain === 'warmup') return false;
-        return true;
-    });
+function itemIsGymWork(it) {
+    if (!it) return false;
+    if (it.isWarmupGroup || it.isStretchGroup || it.isCustomStretch || it.isSportSessionBlock) return false;
+    const name = String(it.exercise?.name || it.name || '');
+    if (/warmup|stretch|practice|match/i.test(name)) return false;
+    const domain = String(it.exercise?.domain || '').toLowerCase();
+    if (domain === 'cardio' || domain === 'warmup' || domain === 'mobility' || domain === 'sport') return false;
+    return true;
+}
+
+function setLooksLikeGymWork(set) {
+    if (!set || set.isWarmup || set.isLactateHit || set._sessionSkipped) return false;
+    if (!set.isText) return true;
+    return Number(set.weight) > 0 || Number(set.reps) > 0
+        || Number(set.duration_sec) > 0 || Number(set.time_minutes) > 0;
+}
+
+function gymSetCountsFromItems(items) {
     let done = 0;
     let total = 0;
-    items.forEach(it => {
-        const sets = (it.sets || []).filter(s => !s.isWarmup && !s.isText);
+    (items || []).filter(itemIsGymWork).forEach(it => {
+        const sets = (it.sets || []).filter(setLooksLikeGymWork);
         total += sets.length;
         done += sets.filter(s => s.completed).length;
     });
-    if (total <= 0) return 0;
-    return done / total;
+    return { done, total };
+}
+
+function gymLogRowIsLift(log) {
+    if (!log) return false;
+    const name = String(log.exercise || '');
+    if (/stretch|warmup/i.test(name)) return false;
+    const type = String(log.type || '').toLowerCase();
+    if (type === 'cardio' || type === 'mobility' || type === 'warmup' || type === 'sport') return false;
+    if (type === 'strength' || type === 'power' || type === 'hypertrophy') return true;
+    if (type === 'workout' || !type) {
+        return Number(log.weight_kg) > 0 || Number(log.reps) > 0 || Number(log.time_minutes) > 0;
+    }
+    return false;
+}
+
+function gymSetFraction(snap, dayLogs) {
+    const fromItems = gymSetCountsFromItems(snap?.items);
+    if (fromItems.total > 0) return fromItems.done / fromItems.total;
+
+    // Snapshots only keep ticked sets; if work was filtered out as isText / warmup,
+    // recover from the session's workout_log rows so a completed gym day still fills.
+    const idSet = new Set((snap?.logIds || []).map(String));
+    if (!idSet.size) return 0;
+    const lifts = (dayLogs || []).filter(l => idSet.has(String(l.id)) && gymLogRowIsLift(l));
+    if (lifts.length > 0) return 1;
+    return 0;
+}
+
+function snapCountsAsStrength(snap) {
+    const kind = String(snap?.kind || '');
+    if (isGymStrengthKind(kind)) return true;
+    const credit = normalizeLoggedSessionKind(kind);
+    if (credit && credit !== 'Full Body / Strength') return false;
+    return gymSetCountsFromItems(snap?.items).total > 0;
 }
 
 function lactateBlockFraction(snap) {
@@ -312,9 +354,13 @@ export function computeWeeklyGoalScores(weekStartISO = getMondayISO(new Date()))
             }
             if (sessionHasCompletedWarmup(snap)) warmupDone += 1;
 
-            if (isGymStrengthKind(kind)) {
-                strengthFracSum += gymSetFraction(snap);
-                strengthSessionCount += 1;
+            if (snapCountsAsStrength(snap)) {
+                const frac = gymSetFraction(snap, dayLogs);
+                const hasWork = gymSetCountsFromItems(snap.items).total > 0 || frac > 0;
+                if (hasWork) {
+                    strengthFracSum += frac;
+                    strengthSessionCount += 1;
+                }
             }
         });
 

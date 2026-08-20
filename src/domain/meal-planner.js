@@ -1,6 +1,6 @@
 import { store } from '../state/store.js';
 import { DAILY_HYDRATION_TARGET_L } from '../config/constants.js';
-import { estimateFoodWaterMl, parseFoodLogDetails } from '../lib/food-parse.js';
+import { estimateFoodWaterMl, isHydrationMealName, parseFoodLogDetails } from '../lib/food-parse.js';
 import { computeMacroBarLayout, formatMacroAimLabel } from '../lib/macro-range.js';
 import { excludeBannedFoods } from './bans.js';
 import { applyDietFilter } from './food-catalog.js';
@@ -619,10 +619,14 @@ export function openLoggedMealDetail(logId, opts = {}) {
     const waterL = mWaterMl / 1000;
     const targets = store.userConfig.targets || {};
     const mealLabel = (log.meal_name || 'Meal');
-    const prettyMeal = mealLabel.charAt(0).toUpperCase() + String(mealLabel).slice(1).toLowerCase();
+    const prettyMeal = isHydrationMealName(mealLabel)
+        ? 'Hydration'
+        : (mealLabel.charAt(0).toUpperCase() + String(mealLabel).slice(1).toLowerCase());
 
     if (titleEl) titleEl.textContent = prettyMeal;
-    if (subEl) subEl.textContent = allowEdit ? 'Tap quantities to edit' : 'Logged meal';
+    if (subEl) subEl.textContent = isHydrationMealName(mealLabel)
+        ? 'Fluid drank'
+        : (allowEdit ? 'Tap quantities to edit' : 'Logged meal');
 
     macrosEl.innerHTML = [
         detailMetricRow('cals', 'Calories', mCals, targets.cals),
@@ -633,7 +637,9 @@ export function openLoggedMealDetail(logId, opts = {}) {
         detailMetricRow('cost', 'Cost', mCost, store.userConfig.budget || 0)
     ].join('');
 
-    foodsEl.innerHTML = foodHtml || `<div style="font-size:12px; color:var(--text-muted);">No foods</div>`;
+    foodsEl.innerHTML = foodHtml || (Number(parsed.hydration_ml) > 0
+        ? `<div style="font-size:12px; color:var(--text-main); font-weight:600;">${Math.round(parsed.hydration_ml)} ml</div>`
+        : `<div style="font-size:12px; color:var(--text-muted);">No foods</div>`);
     if (actionsEl) {
         actionsEl.classList.add('hidden');
         actionsEl.innerHTML = '';
@@ -641,7 +647,7 @@ export function openLoggedMealDetail(logId, opts = {}) {
     sheet.classList.remove('hidden');
 }
 
-/** Today's food log under Fuel → Log (Weight / Sleep / Snack / Something else). */
+/** Today's food log under Fuel → Log (Weight / Sleep / Hydration / Snack / Something else). */
 export function generateDailyFoodLog() {
     const container = document.getElementById('daily-food-log');
     if (!container) return;
@@ -662,7 +668,7 @@ export function generateDailyFoodLog() {
         return acc;
     }, {});
 
-    const order = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'];
+    const order = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK', 'HYDRATION'];
     const keys = [
         ...order.filter(k => grouped[k]),
         ...Object.keys(grouped).filter(k => !order.includes(k))
@@ -670,25 +676,29 @@ export function generateDailyFoodLog() {
 
     let html = '';
     keys.forEach(mealKey => {
-        const label = mealKey.charAt(0) + mealKey.slice(1).toLowerCase();
+        const label = isHydrationMealName(mealKey) ? 'Hydration' : (mealKey.charAt(0) + mealKey.slice(1).toLowerCase());
         html += `<div class="card" style="padding:16px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid var(--border-subtle); padding-bottom:6px;">
                 <strong style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; text-transform:uppercase;">${label}</strong>
             </div>`;
         grouped[mealKey].forEach(log => {
             let itemNames = [];
+            let hydraMl = 0;
             try {
-                const items = parseFoodLogDetails(log.food_details).items || [];
-                itemNames = items.map(it => it.food?._cleanName || it.food?.name).filter(Boolean);
+                const parsed = parseFoodLogDetails(log.food_details);
+                itemNames = (parsed.items || []).map(it => it.food?._cleanName || it.food?.name).filter(Boolean);
+                hydraMl = Number(parsed.hydration_ml) || 0;
             } catch (_) { /* ignore */ }
 
             const cals = Math.round(log.calories || 0);
+            const drinkOnly = isHydrationMealName(mealKey) || (hydraMl > 0 && !itemNames.length);
             const detail = itemNames.length
                 ? itemNames.slice(0, 4).join(', ') + (itemNames.length > 4 ? '…' : '')
-                : `${cals} kcal`;
+                : (drinkOnly ? `${Math.round(hydraMl)} ml` : `${cals} kcal`);
+            const right = drinkOnly ? `${Math.round(hydraMl)} ml` : `${cals} kcal`;
             html += `<button type="button" onclick="openLoggedMealDetail(${log.id})" style="display:flex; justify-content:space-between; align-items:flex-start; width:100%; font-size:13px; color:var(--text-silver); margin-bottom:8px; gap:10px; background:none; border:none; padding:0; text-align:left; cursor:pointer;">
                 <span style="font-weight:600; color:var(--text-main); min-width:0; line-height:1.35;">${detail}</span>
-                <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-stealth); white-space:nowrap; flex-shrink:0;">${cals} kcal</span>
+                <span style="font-family:'Roboto Mono'; font-size:11px; color:var(--text-stealth); white-space:nowrap; flex-shrink:0;">${right}</span>
             </button>`;
         });
         html += `</div>`;

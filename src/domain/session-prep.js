@@ -55,6 +55,24 @@ export function getPrepVideos(name) {
     return Array.isArray(clips) ? clips.map(c => ({ ...c })) : [];
 }
 
+/** Deep-copy warmup children so video playback cannot mutate the shared part tree. */
+export function cloneWarmupPartChildren(children) {
+    if (!Array.isArray(children) || !children.length) return null;
+    return children.map((ch) => {
+        if (!ch || typeof ch !== 'object') return ch;
+        const fromChild = Array.isArray(ch.videos) ? ch.videos.filter(Boolean) : [];
+        const videos = (fromChild.length ? fromChild : getPrepVideos(ch.name)).map((v) => ({ ...v }));
+        return {
+            name: ch.name,
+            reps: ch.reps,
+            notes: ch.notes,
+            videoUrl: ch.videoUrl || videos[0]?.videoUrl || null,
+            videos,
+            children: cloneWarmupPartChildren(ch.children)
+        };
+    });
+}
+
 export const SHOULDER_WARMUP_DRILLS = [
     'Y raises', 'W raises', 'Wall slides'
 ];
@@ -93,7 +111,9 @@ function defaultPrefs() {
         stretchHoldSeconds: 30,
         stretchGapSeconds: 5,
         stretchAdductorHoldSeconds: 45,
-        bannedStretches: []
+        bannedStretches: [],
+        customStretchMuscles: COOLDOWN_STRETCHES.slice(),
+        customStretchHoldOverrides: {}
     };
 }
 
@@ -112,6 +132,14 @@ export function loadSessionPrepPrefs() {
         merged.bannedStretches = Array.isArray(merged.bannedStretches)
             ? merged.bannedStretches.map(s => String(s || '').trim()).filter(Boolean)
             : [];
+        merged.customStretchMuscles = Array.isArray(merged.customStretchMuscles)
+            ? merged.customStretchMuscles.map(s => String(s || '').trim()).filter(Boolean)
+            : COOLDOWN_STRETCHES.slice();
+        merged.customStretchHoldOverrides = (merged.customStretchHoldOverrides
+            && typeof merged.customStretchHoldOverrides === 'object'
+            && !Array.isArray(merged.customStretchHoldOverrides))
+            ? merged.customStretchHoldOverrides
+            : {};
         return merged;
     } catch (e) {
         return defaultPrefs();
@@ -133,12 +161,27 @@ export function cooldownStretchSides(name) {
     return [null];
 }
 
-export function getStretchHoldSeconds(muscleName) {
-    const p = loadSessionPrepPrefs();
+export function defaultHoldSecondsForMuscle(muscleName, prefs = null) {
+    const p = prefs || loadSessionPrepPrefs();
     if (/^adductors$/i.test(String(muscleName || ''))) {
         return Math.max(1, clampPositiveInt(p.stretchAdductorHoldSeconds, 45) || 45);
     }
     return Math.max(1, clampPositiveInt(p.stretchHoldSeconds, 30) || 30);
+}
+
+export function getStretchHoldSeconds(muscleName) {
+    const p = loadSessionPrepPrefs();
+    const customActive = p.gymStretch === 'custom' || p.practiceStretch === 'custom';
+    if (customActive) {
+        const key = String(muscleName || '').trim().toLowerCase();
+        const overrides = p.customStretchHoldOverrides || {};
+        const overrideKey = Object.keys(overrides).find(k => String(k).trim().toLowerCase() === key);
+        if (overrideKey) {
+            const n = clampPositiveInt(overrides[overrideKey], 0);
+            if (n > 0) return n;
+        }
+    }
+    return defaultHoldSecondsForMuscle(muscleName, p);
 }
 
 export function getStretchGapSeconds() {
@@ -265,20 +308,41 @@ export function buildStructuredStretchParts() {
     const parts = [];
     for (const s of COOLDOWN_STRETCHES) {
         if (isStretchBanned(s)) continue;
-        const hold = getStretchHoldSeconds(s);
-        const holdLabel = `Hold ${hold}s`;
-        const sides = cooldownStretchSides(s);
-        if (sides.length > 1 || (sides.length === 1 && sides[0])) {
-            sides.forEach((side) => {
-                parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
-                    side, baseName: s, holdSec: hold, unilateral: true
-                }));
-            });
-        } else {
+        parts.push(...stretchPartsForMuscle(s));
+    }
+    return parts;
+}
+
+export function selectedCustomStretchMuscles() {
+    const selected = new Set(
+        (loadSessionPrepPrefs().customStretchMuscles || []).map(s => String(s).trim().toLowerCase())
+    );
+    return COOLDOWN_STRETCHES.filter(name => selected.has(name.toLowerCase()));
+}
+
+export function buildCustomStretchParts() {
+    const parts = [];
+    selectedCustomStretchMuscles().forEach((s) => {
+        parts.push(...stretchPartsForMuscle(s));
+    });
+    return parts;
+}
+
+function stretchPartsForMuscle(s) {
+    const hold = getStretchHoldSeconds(s);
+    const holdLabel = `Hold ${hold}s`;
+    const sides = cooldownStretchSides(s);
+    const parts = [];
+    if (sides.length > 1 || (sides.length === 1 && sides[0])) {
+        sides.forEach((side) => {
             parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
-                baseName: s, holdSec: hold, unilateral: false
+                side, baseName: s, holdSec: hold, unilateral: true
             }));
-        }
+        });
+    } else {
+        parts.push(part(s, holdLabel, 'Teaching point video placeholder', null, {
+            baseName: s, holdSec: hold, unilateral: false
+        }));
     }
     return parts;
 }
@@ -331,14 +395,25 @@ export function resolveStretchBlock({ context = 'gym' } = {}) {
     const mode = getStretchMode(context);
     if (mode === 'none') return null;
     if (mode === 'custom') {
+        const stretchParts = buildCustomStretchParts();
+        if (!stretchParts.length) {
+            return {
+                name: 'Custom Stretching',
+                isText: true,
+                isStretchGroup: true,
+                isCustomStretch: true,
+                reps: 'Log when done',
+                notes: 'Your own stretching routine — mark complete when finished.',
+                stretchParts: null
+            };
+        }
         return {
             name: 'Custom Stretching',
             isText: true,
             isStretchGroup: true,
             isCustomStretch: true,
-            reps: 'Log when done',
-            notes: 'Your own stretching routine — mark complete when finished.',
-            stretchParts: null
+            notes: 'Your stretching routine',
+            stretchParts
         };
     }
     return {
@@ -405,7 +480,52 @@ export function saveSessionPrepSettings() {
         });
         partial.bannedStretches = banned;
     }
+
+    const customInputs = document.querySelectorAll('[data-custom-stretch]');
+    if (customInputs.length) {
+        const selected = [];
+        const overrides = {};
+        const holdDefault = partial.stretchHoldSeconds
+            || loadSessionPrepPrefs().stretchHoldSeconds || 30;
+        const addDefault = partial.stretchAdductorHoldSeconds
+            || loadSessionPrepPrefs().stretchAdductorHoldSeconds || 45;
+        customInputs.forEach(el => {
+            if (!(el instanceof HTMLInputElement) || !el.checked) return;
+            const name = el.getAttribute('data-custom-stretch');
+            if (!name) return;
+            selected.push(name);
+            const timeEl = document.querySelector(`[data-custom-stretch-hold="${cssAttrEscape(name)}"]`);
+            const t = clampPositiveInt(timeEl?.value, 0);
+            const fallback = /^adductors$/i.test(name) ? addDefault : holdDefault;
+            if (t > 0 && t !== fallback) overrides[name] = t;
+        });
+        partial.customStretchMuscles = selected;
+        partial.customStretchHoldOverrides = overrides;
+        customInputs.forEach(el => {
+            if (!(el instanceof HTMLInputElement)) return;
+            const name = el.getAttribute('data-custom-stretch');
+            const timeEl = document.querySelector(`[data-custom-stretch-hold="${cssAttrEscape(name)}"]`);
+            if (timeEl) {
+                timeEl.disabled = !el.checked;
+                timeEl.style.opacity = el.checked ? '1' : '0.4';
+            }
+        });
+    }
     saveSessionPrepPrefs(partial);
+    syncStretchSettingsVisibility();
+}
+
+function cssAttrEscape(value) {
+    return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function syncStretchSettingsVisibility() {
+    const gym = document.getElementById('set-gym-stretch')?.value || 'planned';
+    const practice = document.getElementById('set-practice-stretch')?.value || 'planned';
+    const customEl = document.getElementById('custom-stretch-setup');
+    const banWrap = document.getElementById('planned-stretch-ban-wrap');
+    if (customEl) customEl.classList.toggle('hidden', gym !== 'custom' && practice !== 'custom');
+    if (banWrap) banWrap.classList.toggle('hidden', gym !== 'planned' && practice !== 'planned');
 }
 
 /** Hydrate stretch timer + ban controls in Settings → Algorithms. */
@@ -420,16 +540,40 @@ export function hydrateStretchSettingsDom() {
     setNum('set-stretch-adductor-hold-sec', prefs.stretchAdductorHoldSeconds);
 
     const host = document.getElementById('stretch-ban-list');
-    if (!host) return;
-    const banned = new Set((prefs.bannedStretches || []).map(s => String(s).toLowerCase()));
-    host.innerHTML = COOLDOWN_STRETCHES.map(name => {
-        const checked = banned.has(name.toLowerCase()) ? '' : ' checked';
-        const sideNote = isUnilateralCooldownStretch(name) ? ' <span style="color:var(--text-stealth);">(L/R)</span>' : '';
-        return `<label style="display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-silver); margin:0; font-weight:500; cursor:pointer;">
+    if (host) {
+        const banned = new Set((prefs.bannedStretches || []).map(s => String(s).toLowerCase()));
+        host.innerHTML = COOLDOWN_STRETCHES.map(name => {
+            const checked = banned.has(name.toLowerCase()) ? '' : ' checked';
+            const sideNote = isUnilateralCooldownStretch(name) ? ' <span style="color:var(--text-stealth);">(L/R)</span>' : '';
+            return `<label style="display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-silver); margin:0; font-weight:500; cursor:pointer;">
             <input type="checkbox" data-stretch-ban="${name.replace(/"/g, '&quot;')}"${checked} onchange="saveSessionPrepSettings()" style="accent-color:var(--gold-accent);">
             <span>${name}${sideNote}</span>
         </label>`;
-    }).join('');
+        }).join('');
+    }
+
+    const customHost = document.getElementById('custom-stretch-muscle-list');
+    if (customHost) {
+        const selected = new Set((prefs.customStretchMuscles || []).map(s => String(s).toLowerCase()));
+        const overrides = prefs.customStretchHoldOverrides || {};
+        customHost.innerHTML = COOLDOWN_STRETCHES.map(name => {
+            const on = selected.has(name.toLowerCase());
+            const overrideKey = Object.keys(overrides).find(k => String(k).trim().toLowerCase() === name.toLowerCase());
+            const hold = overrideKey
+                ? (clampPositiveInt(overrides[overrideKey], 0) || defaultHoldSecondsForMuscle(name, prefs))
+                : defaultHoldSecondsForMuscle(name, prefs);
+            const sideNote = isUnilateralCooldownStretch(name) ? ' <span style="color:var(--text-stealth);">(L/R)</span>' : '';
+            return `<div style="display:flex; align-items:center; gap:10px;">
+            <label style="display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-silver); margin:0; font-weight:500; cursor:pointer; flex:1; min-width:0;">
+                <input type="checkbox" data-custom-stretch="${name.replace(/"/g, '&quot;')}"${on ? ' checked' : ''} onchange="saveSessionPrepSettings()" style="accent-color:var(--gold-accent);">
+                <span>${name}${sideNote}</span>
+            </label>
+            <input type="number" data-custom-stretch-hold="${name.replace(/"/g, '&quot;')}" class="input-field" min="1" step="1" value="${hold}" ${on ? '' : 'disabled'} onchange="saveSessionPrepSettings()" style="width:72px; margin:0; padding:8px; text-align:right; font-family:'Roboto Mono'; font-size:12px; opacity:${on ? '1' : '0.4'};" aria-label="${name} hold seconds">
+            <span style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">s</span>
+        </div>`;
+        }).join('');
+    }
+    syncStretchSettingsVisibility();
 }
 
 function refreshPrepLogUi(exIdx, { closeModal = false, reRenderSets = false } = {}) {
@@ -457,11 +601,29 @@ function applyStretchToCustom(item) {
     item.exercise = { id: 'CUSTOM_STRETCH', name: 'Custom Stretching', domain: 'mobility', muscle_group: 'full' };
     item.isCustomStretch = true;
     item.isStretchGroup = true;
-    item.note = 'Your own stretching routine';
-    item.sets = [{
-        weight: 0, reps: 'Log when done', rpe: 0, completed: false, isText: true,
-        partName: 'Custom Stretching', notes: 'Mark complete when finished.'
-    }];
+    const parts = buildCustomStretchParts();
+    if (!parts.length) {
+        item.note = 'Your own stretching routine';
+        item.sets = [{
+            weight: 0, reps: 'Log when done', rpe: 0, completed: false, isText: true,
+            partName: 'Custom Stretching', notes: 'Mark complete when finished.'
+        }];
+        return;
+    }
+    item.note = 'Your stretching routine';
+    item.sets = parts.map(partRow => ({
+        weight: 0,
+        reps: partRow.reps,
+        rpe: 0,
+        completed: false,
+        isText: true,
+        partName: partRow.name,
+        baseName: partRow.baseName || partRow.name,
+        side: partRow.side || null,
+        holdSec: partRow.holdSec || null,
+        unilateral: !!partRow.unilateral,
+        notes: partRow.notes
+    }));
 }
 
 /** Three-way chooser for dismissing planned warmup / stretching. */

@@ -157,8 +157,8 @@ export function getDraftSessionLabel(draft = loadWorkoutDraft()) {
     if (!draft) return 'Workout';
     if (draft.lactateHitSelection?.summary) {
         return draft.lactateHitSelection.isHitClass
-            ? 'Lactate/HIT · HIT class'
-            : `Lactate/HIT · Session ${draft.lactateHitSelection.slot || 'A'}`;
+            ? 'HIT · HIT class'
+            : `HIT · Session ${draft.lactateHitSelection.slot || 'A'}`;
     }
     // Prefer the title shown while training; fall back to the planned event label
     const titled = (draft.routeTitle || '').trim();

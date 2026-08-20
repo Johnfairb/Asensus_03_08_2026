@@ -40,7 +40,14 @@ export function resetStretchAudioHold() {
 }
 
 export function isPlannedTimedStretchItem(item) {
-    return !!(item && item.isStretchGroup && !item.isCustomStretch && Array.isArray(item.sets) && item.sets.length > 0);
+    if (!item || !item.isStretchGroup || !Array.isArray(item.sets) || item.sets.length === 0) return false;
+    const timed = item.sets.some(s => s && (
+        Number(s.holdSec) > 0
+        || s.baseName
+        || (s.partName && !/^custom stretching$/i.test(String(s.partName)))
+    ));
+    if (item.isCustomStretch && !timed) return false;
+    return true;
 }
 
 /**
@@ -48,7 +55,8 @@ export function isPlannedTimedStretchItem(item) {
  * before laterality existed (or holdSec is missing).
  */
 export function ensurePlannedStretchSetsShape(item) {
-    if (!item || !item.isStretchGroup || item.isCustomStretch) return;
+    if (!item || !item.isStretchGroup) return;
+    if (item.isCustomStretch && !isPlannedTimedStretchItem(item)) return;
     if (getStretchTimerState(item)?.running || getStretchTimerState(item)?.finished) return;
     const next = [];
     let changed = false;
