@@ -114,6 +114,7 @@ import {
     isWorkoutTimerRunning,
     itemUsesExerciseTimer,
     setWorkoutTimerTickHandler,
+    startExerciseTimerOnLog,
     syncExerciseTimer,
     freezeOpenExerciseTimers,
     computeMiscellaneousMs,
@@ -748,6 +749,7 @@ export function beginExerciseLog(exIdx) {
     }
 
     // Session clock starts on the first exercise Log tap (not while editing a past session)
+    try { startExerciseTimerOnLog(item, { editing: isEditingLoggedSession() }); } catch (e) { /* ignore */ }
     if (
         store.activeLog?.type === 'workout'
         && !window.editingSessionId
@@ -5178,8 +5180,8 @@ function ensureSessionWrapModal() {
     el.style.cssText = coverCss;
     el.innerHTML = `
         <div class="modal-content stealth-panel post-session-sheet" style="width:100%; background:var(--bg-surface); pointer-events:auto; border-radius:20px 20px 0 0; box-shadow:0 -8px 40px rgba(0,0,0,0.35); padding:20px 20px calc(16px + env(safe-area-inset-bottom, 0px));" onclick="event.stopPropagation()">
-            <div style="font-family:'Roboto Mono', monospace; font-size:10px; color:var(--gold-accent); font-weight:800; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Session complete</div>
-            <h2 style="color:var(--text-main); margin:0 0 14px; font-family:'Roboto Mono', monospace; letter-spacing:1px; text-transform:uppercase; font-size:16px;">Wrap-up</h2>
+            <div style="font-family:'Roboto Mono', monospace; font-size:10px; color:var(--gold-accent); font-weight:800; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;" id="session-wrap-eyebrow">Session complete</div>
+            <h2 id="session-wrap-title" style="color:var(--text-main); margin:0 0 14px; font-family:'Roboto Mono', monospace; letter-spacing:1px; text-transform:uppercase; font-size:16px;">Wrap-up</h2>
             <div id="session-wrap-times"></div>
             <div id="session-wrap-sleep" class="hidden" style="margin-top:14px; padding:12px 14px; border:1px solid rgba(212,175,55,0.28); border-radius:10px; background:rgba(212,175,55,0.06);"></div>
             <button type="button" class="btn-primary is-primary" style="margin-top:16px; width:100%;" onclick="dismissSessionWrapModal()">Done</button>
@@ -5196,6 +5198,7 @@ function maybeShowSessionWrap({ sessionMs = 0, exerciseMs = 0, miscMs = 0, showS
     if (!hasTimes && !showSleep) return;
     const el = ensureSessionWrapModal();
     const times = document.getElementById('session-wrap-times');
+    const sleep = document.getElementById('session-wrap-sleep');
     if (times) {
         times.innerHTML = `
             <div style="display:flex; flex-direction:column; gap:8px; font-family:'Roboto Mono'; font-size:12px;">
@@ -5205,25 +5208,42 @@ function maybeShowSessionWrap({ sessionMs = 0, exerciseMs = 0, miscMs = 0, showS
             </div>
             <div style="font-size:10px; color:var(--text-stealth); margin-top:8px; line-height:1.4;">Miscellaneous is total session time minus time spent on the exercises.</div>`;
     }
-    const sleep = document.getElementById('session-wrap-sleep');
     if (sleep) {
-        if (showSleep) {
-            sleep.classList.remove('hidden');
-            sleep.innerHTML = `
+        sleep.innerHTML = showSleep ? `
                 <div style="font-size:9px; color:var(--gold-accent); font-family:'Roboto Mono',monospace; font-weight:800; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">Tonight's recommended sleep</div>
                 <div style="font-size:22px; font-weight:800; color:var(--text-main); font-family:'Roboto Mono',monospace;">${formatSleepHoursLabel(sleepHours)}</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:6px; line-height:1.4;">Based on today's training load. Log it tomorrow morning on the Sleep badge.</div>`;
-        } else {
-            sleep.classList.add('hidden');
-            sleep.innerHTML = '';
-        }
+                <div style="font-size:11px; color:var(--text-muted); margin-top:6px; line-height:1.4;">Based on today's training load. Log it tomorrow morning on the Sleep badge.</div>` : '';
+    }
+    el.dataset.pendingSleep = showSleep ? '1' : '0';
+    const title = document.getElementById('session-wrap-title');
+    if (hasTimes) {
+        el.dataset.wrapStep = 'times';
+        if (times) times.classList.remove('hidden');
+        if (sleep) sleep.classList.add('hidden');
+        if (title) title.textContent = 'Wrap-up';
+    } else {
+        el.dataset.wrapStep = 'sleep';
+        if (times) times.classList.add('hidden');
+        if (sleep) sleep.classList.remove('hidden');
+        if (title) title.textContent = 'Sleep';
     }
     el.classList.remove('hidden');
 }
 
 export function dismissSessionWrapModal() {
     const el = document.getElementById('session-wrap-modal');
-    if (el) el.classList.add('hidden');
+    if (!el) return;
+    if (el.dataset.wrapStep !== 'sleep' && el.dataset.pendingSleep === '1') {
+        el.dataset.wrapStep = 'sleep';
+        const times = document.getElementById('session-wrap-times');
+        const sleep = document.getElementById('session-wrap-sleep');
+        const title = document.getElementById('session-wrap-title');
+        if (times) times.classList.add('hidden');
+        if (sleep) sleep.classList.remove('hidden');
+        if (title) title.textContent = 'Sleep';
+        return;
+    }
+    el.classList.add('hidden');
 }
 
 export async function finalizeWorkoutLog() {

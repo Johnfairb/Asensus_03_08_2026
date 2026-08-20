@@ -119,19 +119,30 @@ function sideNeedsBw(side) {
     return !side.bwGateResolved && (side.needsBwGate || needsBwCompetencyAsk(name));
 }
 
-function sideNeedsWeight(side) {
+function sideHasWorkWeight(side, item) {
     if (!side) return false;
+    if (Number(side.workWeightKg) > 0) return true;
+    return (item?.sets || []).some(s => s && s.side === side.key && !s.isWarmup && !s.isText && Number(s.weight) > 0);
+}
+
+function sideNeedsWeight(side, item) {
+    if (!side) return false;
+    if (sideHasWorkWeight(side, item)) {
+        side.needsWeightFind = false;
+        side.weightFinderResolved = true;
+        return false;
+    }
     return !side.weightFinderResolved && !!side.needsWeightFind;
 }
 
-function sideNeedsPrompt(side) {
-    return sideNeedsBw(side) || sideNeedsWeight(side);
+function sideNeedsPrompt(side, item) {
+    return sideNeedsBw(side) || sideNeedsWeight(side, item);
 }
 
 /** First unresolved side in A→B order. */
 function nextSupersetSideNeedingPrompt(item) {
     if (!item?.isSuperset) return null;
-    return (item.sides || []).find(sideNeedsPrompt) || null;
+    return (item.sides || []).find(s => sideNeedsPrompt(s, item)) || null;
 }
 
 function supersetEyebrow() {
@@ -249,6 +260,18 @@ function openSheet(exIdx, renderFn) {
     _finderOpen = true;
 }
 
+function itemHasWorkWeight(item) {
+    if (!item) return false;
+    if (Number(item.workWeightKg) > 0) return true;
+    return (item.sets || []).some(s => s && !s.isWarmup && !s.isText && Number(s.weight) > 0);
+}
+
+function markItemWeightResolved(item) {
+    if (!item) return;
+    item.needsWeightFind = false;
+    item.weightFinderResolved = true;
+}
+
 function openPromptForCurrentTarget(exIdx) {
     const item = exerciseItem(exIdx);
     if (!item) return false;
@@ -263,7 +286,7 @@ function openPromptForCurrentTarget(exIdx) {
             openSheet(exIdx, renderBwCompetencyQuestion);
             return true;
         }
-        if (sideNeedsWeight(side)) {
+        if (sideNeedsWeight(side, item)) {
             openSheet(exIdx, renderKnowWeightQuestion);
             return true;
         }
@@ -274,6 +297,7 @@ function openPromptForCurrentTarget(exIdx) {
     const isBwLift = isBwGateExercise(name);
     if (!isBwLift && item.needsBwGate) item.needsBwGate = false;
     const needsBw = isBwLift && !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
+    if (itemHasWorkWeight(item)) markItemWeightResolved(item);
     const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;
     if (needsBw) {
         openSheet(exIdx, renderBwCompetencyQuestion);
@@ -308,6 +332,7 @@ export function maybePromptWeightFinder(exIdx, opts = {}) {
     const isBwLift = isBwGateExercise(name);
     if (!isBwLift && item.needsBwGate) item.needsBwGate = false;
     const needsBw = isBwLift && !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
+    if (itemHasWorkWeight(item)) markItemWeightResolved(item);
     const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;
     if (!needsBw && !needsWeight) return false;
 
@@ -345,9 +370,13 @@ export function confirmBwGateYes() {
         const side = activeSideMeta(item);
         const name = side?.exercise?.name || '';
         recordBwCanDo(name);
-        markSideBwResolved(side, { needsWeight: !isPressUpVariant(name) });
-        if (isPressUpVariant(name)) {
-            applyWorkWeightToSupersetSide(item, _finderSide, 0);
+        markSideBwResolved(side, { needsWeight: !isPressUpVariant(name) && !sideHasWorkWeight(side, item) });
+        if (isPressUpVariant(name) || sideHasWorkWeight(side, item)) {
+            if (isPressUpVariant(name)) applyWorkWeightToSupersetSide(item, _finderSide, 0);
+            if (side) {
+                side.needsWeightFind = false;
+                side.weightFinderResolved = true;
+            }
             finishWeightFinderAndMaybeOpenLog();
             return;
         }
@@ -360,9 +389,9 @@ export function confirmBwGateYes() {
     item.needsBwGate = false;
     item.bwGateResolved = true;
 
-    if (isPressUpVariant(name)) {
-        applyHypertrophyWorkWeight(item, 0);
-        item.needsWeightFind = false;
+    if (isPressUpVariant(name) || itemHasWorkWeight(item)) {
+        if (isPressUpVariant(name)) applyHypertrophyWorkWeight(item, 0);
+        markItemWeightResolved(item);
         finishWeightFinderAndMaybeOpenLog();
         return;
     }

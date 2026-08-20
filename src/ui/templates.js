@@ -767,7 +767,15 @@ export function addFoodToActiveLog() {
 }
 
 export function updateActiveLogMass(index, newMass, isDA) { store.activeLog.items[index].mass = isDA ? (parseFloat(newMass) * 100) || 0 : parseFloat(newMass) || 0; renderActiveLog(); }
-export function removeFoodFromActiveLog(index) { store.activeLog.items.splice(index, 1); renderActiveLog(); }
+export function removeFoodFromActiveLog(index) {
+    const item = store.activeLog?.items?.[index];
+    if (store.activeLog?.type === 'workout') {
+        const name = item?.exercise?.name || item?.name || 'this exercise';
+        if (!confirm(`Remove ${name} from this session?`)) return;
+    }
+    store.activeLog.items.splice(index, 1);
+    renderActiveLog();
+}
 
 export function renderActiveLog() {
     if (store.activeLog.type === 'workout') return renderWorkoutLog(); 

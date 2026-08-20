@@ -752,8 +752,8 @@ export function generateDailyExerciseLog() {
     };
 
     const summarizeSnapshotSets = (sets) => {
-        // Only sets the user checked off
-        const rows = (sets || []).filter(s => s.completed === true);
+        // Only work sets the user checked off — per-lift warmups stay out of the Log overview
+        const rows = (sets || []).filter(s => s.completed === true && !s.isWarmup);
         if (!rows.length) return 'No checked sets';
         if (rows.some(s => s.isLactateHit || Number(s.duration_sec) > 0)) {
             return summarizeLactateSnapshotSets(rows);

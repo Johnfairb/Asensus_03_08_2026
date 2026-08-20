@@ -1209,10 +1209,7 @@ function renderAdherenceExerciseLogHtml(item, { lactate = false } = {}) {
         }).join('');
     }
     const stretch = isAdherenceStretchItem(item);
-    let rows = adherenceLogSets(item, { stretch });
-    if (!rows.length && !stretch) {
-        rows = adherenceCompletedSets(item);
-    }
+    const rows = adherenceLogSets(item, { stretch });
     if (!rows.length) return timeBanner || `<div style="font-size:12px; color:var(--text-muted);">No sets stored</div>`;
     return timeBanner + rows.map((set, i) => {
         const label = adherenceSetRowLabel(set, i, { stretch, item });

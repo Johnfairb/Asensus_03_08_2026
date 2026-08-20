@@ -148,14 +148,34 @@ function buildLiftWorkSets({ exName, isIso, nSets, weight, reps, includeWarmups 
 
 function resolveExtraLiftLoad(exName, spec = {}) {
     if (spec.weightProvided) {
-        return { weight: Number(spec.weight) || 0, needsWeightFind: false };
+        const w = Number(spec.weight);
+        return { weight: Number.isFinite(w) ? w : 0, needsWeightFind: false };
     }
-    if (isPlannedSessionContext()) {
-        const known = resolveLastLoggedWorkKg(exName);
-        if (known == null) return { weight: 0, needsWeightFind: true };
-        return { weight: known, needsWeightFind: false };
-    }
+    const known = resolveLastLoggedWorkKg(exName);
+    if (known != null) return { weight: known, needsWeightFind: false };
     return { weight: 0, needsWeightFind: true };
+}
+
+/** Stretch / core / cardio / HIT sit after the main lifts — extras belong with the lifts. */
+function isTrailingSessionBlock(item) {
+    if (!item) return false;
+    if (item.isStretchGroup || item.isCustomStretch || item.isCoreBlock) return true;
+    if (item.isSportSessionBlock || item.isSteadyCardio || item.isLactateHit) return true;
+    const name = String(item.exercise?.name || item.name || '');
+    if (/stretch/i.test(name)) return true;
+    if (/steady\s*state/i.test(name) || /lactate|hit\s*class/i.test(name)) return true;
+    const domain = String(item.exercise?.domain || '').toLowerCase();
+    return domain === 'cardio';
+}
+
+function extraExerciseInsertIndex(items) {
+    const list = Array.isArray(items) ? items : [];
+    let start = 0;
+    while (start < list.length && list[start]?.isWarmupGroup) start++;
+    for (let i = start; i < list.length; i++) {
+        if (isTrailingSessionBlock(list[i])) return i;
+    }
+    return list.length;
 }
 
 function buildExtraLogEntry(ex, spec = {}) {
@@ -257,9 +277,11 @@ export function addExercisesByIds(ids, specsById = {}) {
         const spec = (specsById && (specsById[id] || specsById[String(id)])) || {};
         const entry = buildExtraLogEntry(ex, spec);
         if (ghostOpen) {
-            store.currentGhostItems.push(entry);
+            const list = store.currentGhostItems;
+            list.splice(extraExerciseInsertIndex(list), 0, entry);
         } else {
-            store.activeLog.items.push(entry);
+            const list = store.activeLog.items;
+            list.splice(extraExerciseInsertIndex(list), 0, entry);
         }
     });
 

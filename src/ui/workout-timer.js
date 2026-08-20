@@ -156,7 +156,7 @@ export function isExerciseTimerRunning(item) {
   return !!(item?.exerciseTimerStartedAt && !item.exerciseTimerEndedAt);
 }
 
-/** Live or frozen time on this exercise (first logged set → last logged set). */
+/** Live or frozen time on this exercise (Log tap → last logged set). */
 export function getExerciseDurationMs(item) {
   if (!item) return 0;
   const started = Number(item.exerciseTimerStartedAt) || 0;
@@ -172,29 +172,26 @@ export function formatExerciseDurationLabel(item) {
   return ms > 0 ? formatDurationMs(ms) : '';
 }
 
+/** Start this exercise's clock when Log is pressed. No-op if already running/frozen or editing a past session. */
+export function startExerciseTimerOnLog(item, { editing = false } = {}) {
+  if (!item || editing || !itemUsesExerciseTimer(item)) return;
+  if (item.exerciseTimerStartedAt || item.exerciseTimerEndedAt) return;
+  item.exerciseTimerStartedAt = Date.now();
+  item.exerciseTimerEndedAt = null;
+}
+
 /**
- * Start on the first logged set (typically the first warmup) and freeze when
- * every remaining set is logged. Adding a set after finish resumes the clock.
+ * Freeze when every remaining set is logged. Adding a set after finish resumes the clock.
+ * Does not start the timer — that happens on Log tap via startExerciseTimerOnLog.
  * No-op while editing a past session so stored times are not rewritten.
  */
 export function syncExerciseTimer(item, { editing = false } = {}) {
   if (!item || editing || !itemUsesExerciseTimer(item)) return;
   const sets = timedExerciseSets(item);
   if (!sets.length) return;
-
-  const completed = sets.filter(s => s.completed);
-  if (!completed.length) {
-    item.exerciseTimerStartedAt = null;
-    item.exerciseTimerEndedAt = null;
-    item.exerciseDurationMs = 0;
-    return;
-  }
+  if (!item.exerciseTimerStartedAt) return;
 
   const now = Date.now();
-  if (!item.exerciseTimerStartedAt) {
-    item.exerciseTimerStartedAt = now;
-  }
-
   const allDone = sets.every(s => s.completed);
   if (allDone) {
     if (!item.exerciseTimerEndedAt) item.exerciseTimerEndedAt = now;

@@ -654,9 +654,9 @@ export const EXERCISE_CATALOG = {
     'Bulgarian Bag Circles': ex({
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '15', primary: ['Core'], secondary: [] }),
     'Standing Cable Rotation': ex({
-        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
+        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '15', primary: ['Core'], secondary: [] }),
     'Seated Cable Rotation': ex({
-        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
+        loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '15', primary: ['Core'], secondary: [] }),
 
     // —— Power / plyometrics (programmed by power-engine; library domain "power") ——
     'Box Jumps': ex({

@@ -132,9 +132,14 @@ export function confirmAddExercisesModal() {
         return;
     }
     const specsById = {};
-    checks.forEach((c) => {
-        specsById[c.value] = specFromCheckbox(c);
-    });
+    for (const c of checks) {
+        const spec = specFromCheckbox(c);
+        if (c.dataset.strength === '1' && (spec.sets == null || spec.reps == null)) {
+            window.alert('Enter sets and reps for each added exercise.');
+            return;
+        }
+        specsById[c.value] = spec;
+    }
     addExercisesByIds(ids, specsById);
     closeAddExercisesModal();
     const menu = document.getElementById('tools-menu');
