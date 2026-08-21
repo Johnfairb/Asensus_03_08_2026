@@ -292,15 +292,15 @@ export function buildStructuredWarmupParts(context = 'gym') {
         return [pulse, mobilisation, dynamicWarmup, dynamicStretch];
     }
 
+    if (context === 'power') {
+        return [pulse, mobilisation, dynamicStretch];
+    }
     const shoulder = part(
         'Shoulder Warmup',
         `${SHOULDER_WARMUP_DRILLS.length} drills`,
         'Tap a drill for its teaching video.',
         SHOULDER_WARMUP_DRILLS.map(s => videoPart(s))
     );
-    if (context === 'power') {
-        return [pulse, mobilisation, shoulder, dynamicStretch];
-    }
     return [pulse, mobilisation, shoulder];
 }
 
@@ -386,7 +386,7 @@ export function resolveWarmupBlock({ context = 'gym', isLactate = false } = {}) 
         warmupNote: context === 'practice'
             ? 'Pulse raising, mobilisation, dynamic warmup & dynamic stretching'
             : context === 'power'
-                ? 'Pulse raising, mobilisation, shoulder warmup & dynamic stretching'
+                ? 'Pulse raising, mobilisation & dynamic stretching'
                 : 'Pulse raising, mobilisation & shoulder warmup'
     };
 }

@@ -38,6 +38,7 @@ import {
     buildPowerSessionRoutine,
     buildPowerWarmupAndWorkSets,
     isPowerEvent,
+    powerMovementForName,
     POWER_REST_SEC
 } from './power-engine.js';
 
@@ -104,9 +105,23 @@ export function resolveLastLoggedWorkKg(exName) {
     return Number(w);
 }
 
+function isPowerExtraExercise(ex) {
+    if (!ex) return false;
+    if (String(ex.domain || '').toLowerCase() === 'power') return true;
+    if (String(getExerciseMeta(ex.name)?.domain || '').toLowerCase() === 'power') return true;
+    return !!powerMovementForName(ex.name);
+}
+
+function isPowerWorkoutItem(item) {
+    if (!item) return false;
+    if (item.isPower || item.skipHypertrophyWarmup) return true;
+    return isPowerExtraExercise(item.exercise);
+}
+
 function isLiftingExtraExercise(ex) {
     const domain = String(ex?.domain || '').toLowerCase();
     if (domain === 'cardio' || domain === 'power' || domain === 'warmup') return false;
+    if (isPowerExtraExercise(ex)) return false;
     if (/stretch|lactate|hit\s*class|steady/i.test(ex?.name || '')) return false;
     return true;
 }
@@ -179,6 +194,20 @@ function extraExerciseInsertIndex(items) {
 }
 
 function buildExtraLogEntry(ex, spec = {}) {
+    if (isPowerExtraExercise(ex)) {
+        const item = { exercise: ex, isExtra: true, note: 'Extra' };
+        applyPowerExerciseToItem(item, ex.name);
+        item.exercise = ex;
+        item.isExtra = true;
+        if (!Array.isArray(item.sets) || !item.sets.length) {
+            item.sets = buildPowerWarmupAndWorkSets(ex.name);
+            item.isPower = true;
+            item.hideRir = true;
+            item.skipHypertrophyWarmup = true;
+            item.plannedSets = 3;
+        }
+        return item;
+    }
     const isIso = !!(HYPERTROPHY_EXERCISE_META[ex.name]?.role === 'isolation');
     if (!isLiftingExtraExercise(ex)) {
         const restOpts = resolveWarmupRestOptions(isIso, ex.name);
@@ -441,6 +470,7 @@ export function addSetToExercise(exIdx) {
     }
     const domain = (exItem.exercise?.domain || '').toLowerCase();
     const name = exItem.exercise?.name || '';
+    const isPower = isPowerWorkoutItem(exItem);
     // Lactate/HIT intervals are protocol-fixed; steady cardio is a single session
     if (exItem.isLactateHit || (exItem.sets || []).some(s => s.isLactateHit)) return;
     if (domain === 'cardio' && !/sprint|lactate|interval|30s\s*on/i.test(name)) return;
@@ -449,16 +479,18 @@ export function addSetToExercise(exIdx) {
     const lastWork = workSets[workSets.length - 1]
         || (exItem.sets || []).filter(s => s && !s.isWarmup && !s.isText).slice(-1)[0]
         || { weight: 0, reps: 0, distance_km: 0, time_minutes: 0, rpe: 2, restTime: 90 };
+    if (isPower && lastWork) lastWork.restTime = POWER_REST_SEC;
     exItem.sets.push({
         weight: lastWork.weight || 0,
         reps: lastWork.reps || 0,
         distance_km: lastWork.distance_km || 0,
         time_minutes: lastWork.time_minutes || 0,
-        rpe: 2,
+        rpe: isPower ? '' : 2,
         completed: false,
         isDropSet: false,
         isWarmup: false,
-        restTime: lastWork.restTime != null ? lastWork.restTime : 90,
+        hideRir: isPower ? true : lastWork.hideRir,
+        restTime: isPower ? 0 : (lastWork.restTime != null ? lastWork.restTime : 90),
         prevWeight: lastWork.prevWeight || lastWork.weight || 0
     });
     try { syncExerciseTimer(exItem, { editing: !!(window.editingSessionId || window._editingPreservedDuration) }); } catch (e) { /* ignore */ }
@@ -473,6 +505,7 @@ export function addDropSetToExercise(exIdx) {
     const domain = (exItem.exercise?.domain || '').toLowerCase();
     const name = exItem.exercise?.name || '';
     if (exItem.isLactateHit || (exItem.sets || []).some(s => s.isLactateHit)) return;
+    if (isPowerWorkoutItem(exItem)) return;
     if (domain === 'cardio' || /static\s*stretch/i.test(name) || exItem.isWarmupGroup) return;
     const workSets = (exItem.sets || []).filter(s => !s.isWarmup && !s.isText);
     const last = workSets[workSets.length - 1] || exItem.sets[exItem.sets.length - 1];
@@ -839,10 +872,11 @@ export function addSupersetRound(exIdx) {
 export function addDropSetToSupersetSide(exIdx, side) {
     const item = store.activeLog.items[exIdx];
     if (!item?.isSuperset || (side !== 'A' && side !== 'B')) return;
+    const sideMeta = (item.sides || []).find(s => s.key === side);
+    if (isPowerExtraExercise(sideMeta?.exercise)) return;
     const sideSets = (item.sets || []).filter(s => s.side === side && !s.isWarmup && !s.isText);
     const last = sideSets[sideSets.length - 1];
     if (!last) return;
-    const sideMeta = (item.sides || []).find(s => s.key === side);
     const eq = equipmentForExercise(sideMeta?.exercise?.name || '');
     const dropW = roundUpLoad((Number(last.weight) || 0) * 0.8, eq);
     item.sets.push({

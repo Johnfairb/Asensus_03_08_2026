@@ -12,6 +12,10 @@ import { getSportWeeklyQuotas } from './sports-matrix.js';
 
 export const POWER_EVENT = 'Full Body / Power';
 export const POWER_REST_SEC = 180;
+/** Rest after the related-movement warmup (before technique warmup). */
+export const POWER_WARMUP1_REST_SEC = 30;
+/** Rest after the technique warmup (before the first work set). */
+export const POWER_WARMUP2_REST_SEC = 120;
 export const POWER_SETS = 3;
 export const POWER_WEEKLY_QUOTA = 1;
 /** Load for weighted squat jumps / pogos = this fraction of squat work weight. */
@@ -403,6 +407,8 @@ export function buildPowerWarmupAndWorkSets(name, opts = {}) {
     const halfReps = Math.max(1, Math.ceil(workReps / 2));
     const workWeight = opts.workWeight != null ? Number(opts.workWeight) : powerWorkWeightFor(name);
     const rest = opts.restSec != null ? Number(opts.restSec) : POWER_REST_SEC;
+    const wu1Rest = opts.warmup1RestSec != null ? Number(opts.warmup1RestSec) : POWER_WARMUP1_REST_SEC;
+    const wu2Rest = opts.warmup2RestSec != null ? Number(opts.warmup2RestSec) : POWER_WARMUP2_REST_SEC;
     const sets = [];
     sets.push({
         weight: 0,
@@ -411,7 +417,7 @@ export function buildPowerWarmupAndWorkSets(name, opts = {}) {
         completed: false,
         isWarmup: true,
         hideRir: true,
-        restTime: Math.round(rest / 2),
+        restTime: wu1Rest,
         partName: `Warmup · ${related}`,
         notes: `5 reps · ${related}`
     });
@@ -422,11 +428,12 @@ export function buildPowerWarmupAndWorkSets(name, opts = {}) {
         completed: false,
         isWarmup: true,
         hideRir: true,
-        restTime: rest,
+        restTime: wu2Rest,
         partName: 'Warmup · Technique',
         notes: LOWER_INTENSITY_NOTE
     });
     for (let i = 0; i < POWER_SETS; i++) {
+        const isLastWork = i === POWER_SETS - 1;
         sets.push({
             weight: workWeight,
             reps: workReps,
@@ -434,7 +441,7 @@ export function buildPowerWarmupAndWorkSets(name, opts = {}) {
             completed: false,
             isWarmup: false,
             hideRir: true,
-            restTime: rest,
+            restTime: isLastWork ? 0 : rest,
             prevWeight: workWeight
         });
     }

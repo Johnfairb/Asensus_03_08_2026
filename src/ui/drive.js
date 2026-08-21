@@ -2837,18 +2837,20 @@ export function renderExerciseSets() {
     const hypFixed = isHypertrophyPhase();
     const nameA = item.sides?.[0]?.exercise?.name || 'A';
     const nameB = item.sides?.[1]?.exercise?.name || 'B';
+    const dropA = item.sides?.[0] && !isPowerLogItem({ exercise: item.sides[0].exercise, isPower: item.sides[0].isPower });
+    const dropB = item.sides?.[1] && !isPowerLogItem({ exercise: item.sides[1].exercise, isPower: item.sides[1].isPower });
     if (item.isSuperset) {
         html += `<div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
             <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-align:center; line-height:1.4;">A · ${nameA}<br>B · ${nameB}<br>Rest after B only · 100s +10s per 0 RIR</div>
-            <button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'A')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · A</button>
-            <button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'B')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · B</button>
+            ${dropA ? `<button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'A')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · A</button>` : ''}
+            ${dropB ? `<button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'B')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · B</button>` : ''}
             <button type="button" onclick="addSupersetRound(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD ROUND (A+B)</button>
             <button type="button" onclick="unmergeSuperset(${exIdx})" style="width:100%; margin-top:8px; background:transparent; color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-family:'Roboto Mono';">Unmerge into two exercises</button>
         </div>`;
     } else {
         html += `<div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
             ${hypFixed ? `<div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-align:center;">Hypertrophy · 3 working sets prescribed</div>` : ''}
-            <button type="button" onclick="addDropSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET (80%)</button>
+            ${isPowerLogItem(item) ? '' : `<button type="button" onclick="addDropSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET (80%)</button>`}
             <button type="button" onclick="addSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD SET</button>
         </div>`;
     }

@@ -1,5 +1,6 @@
 /**
  * Multi-select add-exercises popup grouped like My Exercises (library headings).
+ * Strength muscle groups first, then plyos with no heading, then Cardio / Other.
  */
 import { store } from '../state/store.js';
 import { excludeBannedExercises } from '../domain/bans.js';
@@ -7,7 +8,18 @@ import { getLibraryMuscleGroup, LIBRARY_MUSCLE_ORDER } from '../domain/bodyweigh
 import { getExerciseMeta } from '../domain/exercise-catalog.js';
 import { isExerciseMuscleLocked } from '../domain/hypertrophy-engine.js';
 import { allowsWeightInput } from '../domain/load-increments.js';
+import { powerMovementForName } from '../domain/power-engine.js';
 import { addExercisesByIds } from '../domain/workout-generator.js';
+
+/** Sentinel: plyos sit after strength groups with no "Power" heading. */
+const POWER_FLAT_GROUP = '__power_flat__';
+
+function isPowerPickerExercise(ex) {
+    if (!ex) return false;
+    if (String(ex.domain || '').toLowerCase() === 'power') return true;
+    if (String(getExerciseMeta(ex.name)?.domain || '').toLowerCase() === 'power') return true;
+    return !!powerMovementForName(ex.name);
+}
 
 function groupExercisesForPicker() {
     const exercises = excludeBannedExercises(store.globalExerciseDB || []).filter((ex) => {
@@ -21,12 +33,16 @@ function groupExercisesForPicker() {
     const grouped = new Map();
     exercises.forEach((ex) => {
         const displayName = getExerciseMeta(ex.name)?.name || ex.name;
-        let heading = getLibraryMuscleGroup(displayName);
-        if (!heading) {
-            const domain = String(ex.domain || '').toLowerCase();
-            if (domain === 'power') heading = 'Power';
-            else if (domain === 'cardio') heading = 'Cardio';
-            else heading = 'Other';
+        let heading;
+        if (isPowerPickerExercise(ex)) {
+            heading = POWER_FLAT_GROUP;
+        } else {
+            heading = getLibraryMuscleGroup(displayName);
+            if (!heading) {
+                const domain = String(ex.domain || '').toLowerCase();
+                if (domain === 'cardio') heading = 'Cardio';
+                else heading = 'Other';
+            }
         }
         if (!grouped.has(heading)) grouped.set(heading, []);
         grouped.get(heading).push({ ex, displayName });
@@ -34,7 +50,7 @@ function groupExercisesForPicker() {
     grouped.forEach((list) => list.sort((a, b) =>
         String(a.displayName || '').localeCompare(String(b.displayName || ''))
     ));
-    const order = [...LIBRARY_MUSCLE_ORDER, 'Power', 'Cardio', 'Other'];
+    const order = [...LIBRARY_MUSCLE_ORDER, POWER_FLAT_GROUP, 'Cardio', 'Other'];
     const headings = [
         ...order.filter((h) => (grouped.get(h) || []).length > 0),
         ...[...grouped.keys()].filter((h) => !order.includes(h))
@@ -43,6 +59,7 @@ function groupExercisesForPicker() {
 }
 
 function isStrengthPickerExercise(ex) {
+    if (isPowerPickerExercise(ex)) return false;
     const domain = String(ex?.domain || '').toLowerCase();
     if (domain === 'cardio' || domain === 'power' || domain === 'warmup') return false;
     if (/stretch|lactate|hit\s*class|steady/i.test(ex?.name || '')) return false;
@@ -86,6 +103,9 @@ export function openAddExercisesModal() {
                 </label>
             </div>`;
         }).join('');
+        if (heading === POWER_FLAT_GROUP) {
+            return `<div style="margin:16px 0 12px;padding-top:8px;border-top:1px solid var(--border-subtle);">${rows}</div>`;
+        }
         return `<details style="margin-bottom:12px;">
             <summary style="font-family:'Roboto Mono';font-size:11px;font-weight:800;color:var(--gold-accent);text-transform:uppercase;letter-spacing:0.5px;cursor:pointer;padding:6px 0;">${heading}</summary>
             <div>${rows || `<div style="font-size:11px;color:var(--text-muted);padding:8px 0;">None</div>`}</div>
