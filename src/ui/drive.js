@@ -34,7 +34,7 @@ import { getPrepVideos } from '../domain/session-prep.js';
 import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, exerciseLogNamesMatch } from '../domain/periodization-logs.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
-import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry, idbPutJournalMedia, escapeHtml, buildJournalMediaGalleryHtml } from './journey.js';
+import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry, saveExerciseDiariesForDate, idbPutJournalMedia, escapeHtml, buildJournalMediaGalleryHtml } from './journey.js';
 import { calculateTDEE } from '../domain/thermodynamics.js';
 import { notifyRestTimerDone, ensureNotificationPermission } from './notifications.js';
 import {
@@ -3565,6 +3565,7 @@ export function beginManualWorkoutSession(kind, opts = {}) {
 
     window.manualSessionKind = normalized;
     window.editingSessionId = null;
+    rememberSessionDateIso(dateIsoFromPlanSlot(window.plannedGpsSlot) || dateToISO(new Date()));
 
     if (isLactateEvent(normalized) && !opts.afterHitPicker) {
         openLactateHitPicker(() => beginManualWorkoutSession(normalized, { afterHitPicker: true }));
@@ -3913,6 +3914,7 @@ export function editLoggedWorkoutSession(sessionId) {
 
     window.editingSessionId = sessionId;
     window.manualSessionKind = snap.kind || 'Full Body / Strength';
+    rememberSessionDateIso(snap.dateIso);
     window.manualWorkoutMode = true;
     const isLactateEdit = isLactateEvent(snap.kind) || snap.kind === 'Lactate';
     window.journalMode = isLactateEdit ? 'lactate' : 'workout';
@@ -4057,6 +4059,7 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
     if (type === 'workout') {
         fuelToggles.style.display = 'none';
         window.journalMode = 'workout';
+        rememberSessionDateIso(dateIsoFromPlanSlot(window.plannedGpsSlot) || dateToISO(new Date()));
     } else if (type === 'weight' || type === 'bodyfat') {
         fuelToggles.style.display = 'none';
         const tip = document.getElementById('fuel-toggle-tip');
@@ -4160,6 +4163,7 @@ export function resumeInProgressWorkout() {
     window._hitClassDiaryOnly = false;
     window._workoutSessionConfirmed = true;
     window._workoutLogFilter = draft.workoutLogFilter === 'logged' ? 'logged' : 'todo';
+    rememberSessionDateIso(draft.dateIso || dateIsoFromPlanSlot(window.plannedGpsSlot));
     if (draft.ghostBackup) {
         store._ghostBackupForUnconfirm = JSON.parse(JSON.stringify(draft.ghostBackup));
     }
@@ -4240,6 +4244,7 @@ export function discardInProgressWorkout() {
     window.plannedGpsSlot = null;
     window._forceGpsTemplateLoad = false;
     window.editingSessionId = null;
+    window._sessionDateIso = null;
     window._lactateHitSelection = null;
     window._hitClassDiaryOnly = false;
     if (store.activeLog?.type === 'workout') {
@@ -4650,6 +4655,47 @@ export async function submitLog() {
     }
 }
 
+function isIsoDate(value) {
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function dateIsoFromPlanSlot(slot) {
+    if (!slot) return null;
+    if (isIsoDate(slot.dateIso)) return slot.dateIso;
+    const fromKey = String(slot.slotKey || '').split('|')[0];
+    return isIsoDate(fromKey) ? fromKey : null;
+}
+
+/** Pin logs to the training day — never a leftover adherence-calendar tap. */
+function resolveCommitDateIso(previousSnap) {
+    if (isIsoDate(previousSnap?.dateIso)) return previousSnap.dateIso;
+    try {
+        const draft = loadWorkoutDraft();
+        if (isIsoDate(draft?.dateIso)) return draft.dateIso;
+        if (draft?.savedAt) {
+            const started = new Date(draft.savedAt);
+            if (!isNaN(started.getTime())) return dateToISO(started);
+        }
+    } catch (e) { /* ignore */ }
+    const fromSlot = dateIsoFromPlanSlot(window.plannedGpsSlot);
+    if (fromSlot) return fromSlot;
+    if (isIsoDate(window._sessionDateIso)) return window._sessionDateIso;
+    return dateToISO(new Date());
+}
+
+function rememberSessionDateIso(iso) {
+    if (!isIsoDate(iso)) return;
+    window._sessionDateIso = iso;
+}
+
+function sessionCreatedAtIso(dateIso) {
+    const now = new Date();
+    if (!isIsoDate(dateIso) || dateIso === dateToISO(now)) return now.toISOString();
+    const d = new Date(`${dateIso}T12:00:00`);
+    d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    return d.toISOString();
+}
+
 /** Saves the active workout after the post-session journal — does NOT re-open the journal. */
 export async function commitWorkoutSession() {
     const status = document.getElementById('log-status');
@@ -4662,11 +4708,9 @@ export async function commitWorkoutSession() {
     let saveError = null;
     const sessionId = window.editingSessionId || (`sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     const previousSnap = window.editingSessionId ? getWorkoutSessionSnapshot(window.editingSessionId) : null;
-    const dateIso = (previousSnap?.dateIso && /^\d{4}-\d{2}-\d{2}$/.test(previousSnap.dateIso))
-        ? previousSnap.dateIso
-        : ((window._adherenceDayIso && /^\d{4}-\d{2}-\d{2}$/.test(window._adherenceDayIso))
-            ? window._adherenceDayIso
-            : dateToISO(new Date()));
+    const dateIso = resolveCommitDateIso(previousSnap);
+    rememberSessionDateIso(dateIso);
+    const createdAtIso = sessionCreatedAtIso(dateIso);
 
     // Prefer timer frozen at Complete log; otherwise stop now
     const timerSnap = captureSessionTimerAtLog();
@@ -4709,6 +4753,11 @@ export async function commitWorkoutSession() {
     } catch (e) {
         console.warn('Exercise diary media save failed', e);
     }
+    try {
+        saveExerciseDiariesForDate(dateIso, store.activeLog.items);
+    } catch (e) {
+        console.warn('Exercise diary save failed', e);
+    }
     (store.activeLog.items || []).forEach(item => {
         if (!item) return;
         delete item._diaryPendingMedia;
@@ -4722,24 +4771,25 @@ export async function commitWorkoutSession() {
         });
     });
 
-    // Snapshot only exercises/sets the user checked off
+    // Snapshot ticked sets, plus any exercise that has diary notes/media
     const sessionItemsSnapshot = JSON.parse(JSON.stringify(store.activeLog.items || []))
         .map(item => {
             const sets = (item.sets || []).filter(s => s.completed).map(s => {
+                const { children, ...rest } = s || {};
                 if (!(item.isStretchGroup || item.isCustomStretch || /stretch/i.test(item.exercise?.name || item.name || ''))) {
-                    return s;
+                    return rest;
                 }
-                const label = stretchSetLabel(s);
-                const base = stretchSetBaseName(s) || s.partName || s.baseName;
+                const label = stretchSetLabel(rest);
+                const base = stretchSetBaseName(rest) || rest.partName || rest.baseName;
                 return {
-                    ...s,
-                    partName: s.partName || base || (label && !/^stretch/i.test(label) ? label : s.partName),
-                    baseName: s.baseName || base || s.partName
+                    ...rest,
+                    partName: rest.partName || base || (label && !/^stretch/i.test(label) ? label : rest.partName),
+                    baseName: rest.baseName || base || rest.partName
                 };
             });
             return { ...item, sets };
         })
-        .filter(item => (item.sets || []).length > 0);
+        .filter(item => (item.sets || []).length > 0 || exerciseDiaryHasContent(item));
 
     const sessionKind = resolveActiveSessionKind(sessionItemsSnapshot);
 
@@ -4919,6 +4969,8 @@ export async function commitWorkoutSession() {
         });
     }
 
+    logsToSave = logsToSave.map(row => ({ ...row, created_at: createdAtIso }));
+
     if (sessionAppliesMuscleLockout(sessionKind)) {
         const fat = applyHypertrophyFatigueFromSession(store.activeLog.items);
         if (fat?.warning && fat.message) alert(fat.message);
@@ -4948,6 +5000,12 @@ export async function commitWorkoutSession() {
                 error = retry.error;
                 if (!error && liftPhase) rememberLogPhasesByFingerprint(logsToSave.map((l) => ({ ...l, created_at: l.created_at || dateIso })), liftPhase);
             }
+            if (error && /created_at/i.test(String(error.message || error.details || ''))) {
+                const stripped = logsToSave.map(({ created_at, ...rest }) => rest);
+                const retry = await store.supabaseClient.from('workout_logs').insert(stripped).select();
+                data = retry.data;
+                error = retry.error;
+            }
             if (error) throw error;
             insertedRows = Array.isArray(data) ? data : [];
             if (liftPhase) {
@@ -4966,7 +5024,7 @@ export async function commitWorkoutSession() {
             insertedRows = logsToSave.map((row, idx) => ({
                 ...row,
                 id: `local_${sessionId}_${idx}`,
-                created_at: new Date().toISOString(),
+                created_at: row.created_at || createdAtIso,
                 type: 'workout'
             }));
         }
@@ -4995,7 +5053,9 @@ export async function commitWorkoutSession() {
                 lactateSummary: window._lactateHitSelection?.summary || previousSnap?.lactateSummary || null,
                 miscellaneousMs: wrapMiscMs,
                 planSlotKey: (sessionKind === 'Stretching') ? null : (window.plannedGpsSlot?.slotKey || null),
-                skipCredit: sessionKind === 'Stretching' || !!(window.plannedGpsSlot?.completed)
+                skipCredit: sessionKind === 'Stretching' || !!(window.plannedGpsSlot?.completed),
+                journalNotes: jNotes,
+                journalMental: mentFat
             });
             window.plannedGpsSlot = null;
             invalidateWeekPlanCache();
@@ -5028,7 +5088,7 @@ export async function commitWorkoutSession() {
             dayBucket.items.unshift({
                 ...row,
                 type: 'workout',
-                created_at: row.created_at || new Date().toISOString()
+                created_at: row.created_at || createdAtIso
             });
         });
         dayBucket.hasWorkout = dayBucket.items.some(i => i.type === 'workout');
@@ -5108,6 +5168,7 @@ export async function commitWorkoutSession() {
     window._loggedSessionDurationMs = 0;
     window._loggedSessionDurationLabel = '';
     window._lastSessionDurationMin = 0;
+    window._sessionDateIso = null;
     clearEditableSessionDurationUi();
     clearWorkoutDraft();
     if (store.activeLog) store.activeLog.items = [];

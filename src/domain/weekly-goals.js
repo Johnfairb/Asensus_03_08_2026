@@ -100,12 +100,20 @@ export function maybeAwardWeeklyAsensusPoint() {
     return getAsensusPoints();
 }
 
+function itemLooksLikeWarmup(it) {
+    if (!it) return false;
+    if (it.isWarmupGroup || it.isCustomWarmup) return true;
+    const name = String(it.exercise?.name || it.name || it.exercise || '');
+    return /warmup/i.test(name);
+}
+
 function sessionHasCompletedWarmup(snap) {
     const items = snap?.items || [];
     return items.some(it => {
-        const name = String(it.exercise?.name || it.exercise || '');
-        if (!/warmup/i.test(name) && !it.isWarmupGroup) return false;
-        return (it.sets || []).some(s => s.completed);
+        if (!itemLooksLikeWarmup(it)) return false;
+        const sets = it.sets || [];
+        if (!sets.length) return false;
+        return sets.some(s => s && s.completed !== false && s.completed !== 0 && !s._sessionSkipped);
     });
 }
 
@@ -145,8 +153,8 @@ function historyLogsHaveStretch(logs) {
 
 function itemIsGymWork(it) {
     if (!it) return false;
-    if (it.isWarmupGroup || it.isStretchGroup || it.isCustomStretch || it.isSportSessionBlock) return false;
-    const name = String(it.exercise?.name || it.name || '');
+    if (it.isWarmupGroup || it.isCustomWarmup || it.isStretchGroup || it.isCustomStretch || it.isSportSessionBlock) return false;
+    const name = String(it.exercise?.name || it.name || it.exercise || '');
     if (/warmup|stretch|practice|match/i.test(name)) return false;
     const domain = String(it.exercise?.domain || '').toLowerCase();
     if (domain === 'cardio' || domain === 'warmup' || domain === 'mobility' || domain === 'sport') return false;
@@ -155,9 +163,7 @@ function itemIsGymWork(it) {
 
 function setLooksLikeGymWork(set) {
     if (!set || set.isWarmup || set.isLactateHit || set._sessionSkipped) return false;
-    if (!set.isText) return true;
-    return Number(set.weight) > 0 || Number(set.reps) > 0
-        || Number(set.duration_sec) > 0 || Number(set.time_minutes) > 0;
+    return true;
 }
 
 function gymSetCountsFromItems(items) {
@@ -165,8 +171,10 @@ function gymSetCountsFromItems(items) {
     let total = 0;
     (items || []).filter(itemIsGymWork).forEach(it => {
         const sets = (it.sets || []).filter(setLooksLikeGymWork);
-        total += sets.length;
-        done += sets.filter(s => s.completed).length;
+        const planned = Number(it.plannedSets) || 0;
+        const completedWork = sets.filter(s => s && s.completed !== false && s.completed !== 0).length;
+        done += completedWork;
+        total += Math.max(planned, sets.length, completedWork);
     });
     return { done, total };
 }
@@ -188,12 +196,15 @@ function gymSetFraction(snap, dayLogs) {
     const fromItems = gymSetCountsFromItems(snap?.items);
     if (fromItems.total > 0) return fromItems.done / fromItems.total;
 
-    // Snapshots only keep ticked sets; if work was filtered out as isText / warmup,
-    // recover from the session's workout_log rows so a completed gym day still fills.
+    // Snapshots only keep ticked sets; recover from the session's workout_log rows
     const idSet = new Set((snap?.logIds || []).map(String));
-    if (!idSet.size) return 0;
-    const lifts = (dayLogs || []).filter(l => idSet.has(String(l.id)) && gymLogRowIsLift(l));
+    const lifts = (dayLogs || []).filter(l => {
+        if (!gymLogRowIsLift(l)) return false;
+        if (!idSet.size) return true;
+        return idSet.has(String(l.id));
+    });
     if (lifts.length > 0) return 1;
+    if (snapCountsAsStrength(snap) && (snap?.items || []).some(itemIsGymWork)) return 1;
     return 0;
 }
 
@@ -398,6 +409,9 @@ export function computeWeeklyGoalScores(weekStartISO = getMondayISO(new Date()))
     let strengthPct = 0;
     if (strengthSessionCount > 0) {
         strengthPct = Math.min(1, strengthFracSum / strengthSessionCount);
+    } else if ((weekCredits.strength || 0) > 0) {
+        // Credited gym session this week but snapshot items were not countable
+        strengthPct = 1;
     }
 
     return {
@@ -442,6 +456,29 @@ export function renderWeeklyExerciseGoals() {
         }
         if (txt) txt.textContent = ''; // no numbers per spec
     });
+
+    let logicEl = document.getElementById('weekly-goals-logic');
+    if (!logicEl) {
+        const panel = document.getElementById('drive-panel-goals');
+        const card = panel?.querySelector('.card');
+        if (card) {
+            logicEl = document.createElement('div');
+            logicEl.id = 'weekly-goals-logic';
+            card.appendChild(logicEl);
+        }
+    }
+    if (logicEl) {
+        const prep = scores.preparation;
+        const str = scores.strength;
+        logicEl.style.cssText = 'margin-top:10px; font-size:10px; color:var(--text-muted); line-height:1.45; font-family:Roboto Mono,monospace;';
+        logicEl.innerHTML = `
+            <div style="color:var(--text-silver); font-weight:700; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:6px;">How these fill</div>
+            <div>Anaerobic · 2 HIT / hard practice-match sessions</div>
+            <div>Aerobic · 2 Steady State sessions</div>
+            <div>Flexibility · ticked stretch blocks ÷ planned sessions (${prep.target} this week)</div>
+            <div>Preparation · ticked session warmups ÷ planned sessions (${prep.value}/${prep.target})</div>
+            <div>Strength · gym work-sets completed (not Power / Auxiliary)${str.pct > 0 ? ` · ${Math.round(str.pct * 100)}%` : ''}</div>`;
+    }
 
     let pointsEl = document.getElementById('asensus-points-row');
     if (!pointsEl) {

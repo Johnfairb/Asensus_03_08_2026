@@ -95,6 +95,14 @@ export function saveWorkoutDraft(partial = {}) {
         savedAt: new Date().toISOString(),
         ...partial
     };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(draft.dateIso || ''))) {
+        draft.dateIso = (prev && /^\d{4}-\d{2}-\d{2}$/.test(String(prev.dateIso || '')))
+            ? prev.dateIso
+            : (window._sessionDateIso && /^\d{4}-\d{2}-\d{2}$/.test(window._sessionDateIso)
+                ? window._sessionDateIso
+                : null);
+    }
+    if (draft.dateIso) window._sessionDateIso = draft.dateIso;
     if (draft.elapsedMs == null && prev && typeof prev.elapsedMs === 'number') {
         draft.elapsedMs = prev.elapsedMs;
     }

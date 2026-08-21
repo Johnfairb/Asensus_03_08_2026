@@ -588,7 +588,9 @@ export function recordLoggedWorkoutSession({
     lactateSummary = null,
     miscellaneousMs = null,
     planSlotKey: slotKey = null,
-    skipCredit = false
+    skipCredit = false,
+    journalNotes = null,
+    journalMental = null
 } = {}) {
     if (!dateIso || !sessionId) return null;
     const creditKind = normalizeLoggedSessionKind(kind);
@@ -652,7 +654,11 @@ export function recordLoggedWorkoutSession({
         lactateSummary: lactateSummary != null ? lactateSummary : (prev.lactateSummary || null),
         miscellaneousMs: Number.isFinite(Number(miscellaneousMs)) && Number(miscellaneousMs) >= 0
             ? Number(miscellaneousMs)
-            : (prev.miscellaneousMs || 0)
+            : (prev.miscellaneousMs || 0),
+        journalNotes: journalNotes != null ? String(journalNotes) : (prev.journalNotes || ''),
+        journalMental: journalMental != null && Number.isFinite(Number(journalMental))
+            ? Number(journalMental)
+            : (prev.journalMental != null ? prev.journalMental : null)
     };
     saveWorkoutSessionSnapshots(snaps);
 
