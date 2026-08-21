@@ -28,7 +28,7 @@ import { configureJournalModal } from '../ui/drive.js';
 import { buildDiaryEntryFromForm } from '../ui/diary-ui.js';
 import { loadDayJournal, loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveMatchJournalEntry, savePracticeJournalEntry, deleteMatchJournalEntry, deletePracticeJournalEntry } from '../ui/journey.js';
 import { canProgramPower, isPowerEvent, POWER_EVENT } from './power-engine.js';
-import { getExerciseTeachingPoints, getTeachingPointVideoUrl } from './exercise-catalog.js';
+import { getExerciseTeachingPoints, getTeachingPointVideoUrl, getExerciseFormVideos } from './exercise-catalog.js';
 import {
     getSportWeeklyQuotas,
     isGameEvent,
@@ -207,6 +207,7 @@ export function sessionItemsAreStretchOnly(items) {
 function sessionIsGenericWorkoutKind(kind) {
     const n = normalizeLoggedSessionKind(kind);
     if (n === 'Cardio (Steady)' || n === 'Lactate' || n === 'Full Body / Power' || n === 'Auxiliary') return false;
+    if (isCustomWorkoutKind(kind)) return false;
     if (isHypertrophyEvent(kind) || /Strength\s*[AB]/i.test(kind || '')) return false;
     const s = String(kind || '').trim();
     return !s || /^workout$/i.test(s) || /^gym(\s*workout)?$/i.test(s) || n === 'Full Body / Strength';
@@ -351,13 +352,18 @@ const LOGGED_SESSIONS_KEY = 'ascensus_logged_sessions';
 const WORKOUT_SESSION_SNAPSHOTS_KEY = 'ascensus_workout_session_snapshots';
 const COMPLETED_PLAN_SLOTS_KEY = 'ascensus_completed_plan_slots';
 
-/** Canonical kinds that count toward the weekly plan. */
+/** Canonical kinds that count toward the weekly plan. Custom is a blank slate and does not credit. */
 export const WORKOUT_TYPE_OPTIONS = [
-    { kind: 'Cardio (Steady)', label: 'Steady State', blurb: 'Zone 2 aerobic base' },
-    { kind: 'Lactate', label: 'HIT', blurb: '~45 min · 10 min HIT block' },
-    { kind: 'Full Body / Strength', label: 'Gym Workout', blurb: 'Strength / lifting session' },
-    { kind: 'Full Body / Power', label: 'Power', blurb: 'Plyometrics · maximal effort · 3 min rest' }
+    { kind: 'Cardio (Steady)', label: 'Steady State' },
+    { kind: 'Lactate', label: 'HIT' },
+    { kind: 'Full Body / Strength', label: 'Gym Workout' },
+    { kind: 'Full Body / Power', label: 'Power' },
+    { kind: 'Custom', label: 'Custom' }
 ];
+
+export function isCustomWorkoutKind(kind) {
+    return String(kind || '').trim() === 'Custom';
+}
 
 export function loadLoggedSessionsMap() {
     try {
@@ -737,6 +743,7 @@ export function prettyWorkoutTypeLabel(kind) {
     const normalized = normalizeLoggedSessionKind(kind) || kind;
     if (normalized === 'Cardio (Steady)') return 'Steady State';
     if (normalized === 'Lactate') return 'HIT';
+    if (isCustomWorkoutKind(kind) || normalized === 'Custom') return 'Custom';
     if (normalized === 'Full Body / Strength') return 'Strength Session';
     if (normalized === 'Auxiliary' || isAuxEvent(normalized)) return 'Auxiliary';
     if (typeof normalized === 'string' && /^stretch/i.test(normalized)) return 'Stretching';
@@ -3135,6 +3142,36 @@ function youtubeWatchUrl(url) {
     return id ? `https://www.youtube.com/watch?v=${id}` : '';
 }
 
+function youtubeThumbnailUrl(url) {
+    const id = youtubeVideoId(url);
+    return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : '';
+}
+
+/** Compact form-clip thumbnail button (replaces "FORM" text). */
+export function formVideoThumbButtonHtml(title, url = '', extraStyle = '') {
+    const clips = getExerciseFormVideos(title);
+    const resolved = (url && !/placeholder/i.test(String(url)))
+        ? url
+        : (clips[0]?.videoUrl || url || '');
+    const thumb = youtubeThumbnailUrl(resolved);
+    const jsTitle = String(title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const jsUrl = String(resolved || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const onclick = `event.stopPropagation(); openVideoModal('${jsTitle}'${jsUrl ? `, '${jsUrl}'` : ''})`;
+    if (thumb) {
+        const fill = /width:\s*100%/.test(extraStyle);
+        const imgStyle = fill
+            ? 'display:block;width:100%;height:120px;object-fit:cover;'
+            : 'display:block;width:72px;height:40px;object-fit:cover;';
+        return `<button type="button" onclick="${onclick}" aria-label="Form video" style="padding:0;border:1px solid var(--border-subtle);border-radius:6px;overflow:hidden;background:#111;cursor:pointer;line-height:0;flex-shrink:0;${extraStyle}">
+            <img src="${thumb}" alt="" ${fill ? '' : 'width="72" height="40" '}style="${imgStyle}">
+        </button>`;
+    }
+    const phStyle = /width:\s*100%/.test(extraStyle)
+        ? `min-height:72px;width:100%;border:1px dashed var(--border-subtle);border-radius:6px;background:var(--bg-surface-elevated);cursor:pointer;${extraStyle}`
+        : `width:72px;height:40px;border:1px dashed var(--border-subtle);border-radius:6px;background:var(--bg-surface-elevated);cursor:pointer;flex-shrink:0;${extraStyle}`;
+    return `<button type="button" onclick="${onclick}" aria-label="Form video" style="${phStyle}"></button>`;
+}
+
 function youtubeEmbedSrc(url) {
     const id = youtubeVideoId(url);
     if (!id) return String(url || '');
@@ -3184,19 +3221,67 @@ function loadVideoModalFrame(frame, url, title) {
     frame.innerHTML = youtubePlayerHtml(url, title);
 }
 
+function isPlaceholderVideoUrl(url) {
+    const s = String(url || '').trim();
+    return !s || /placeholder/i.test(s);
+}
+
+function resolveFormClips(title, url) {
+    const clips = getExerciseFormVideos(title);
+    if (clips.length) return clips;
+    if (!isPlaceholderVideoUrl(url)) return [{ label: title || 'Form video', videoUrl: url }];
+    return [];
+}
+
+function renderFormClipButtons(clips) {
+    const wrap = document.getElementById('video-modal-form-clips-wrap');
+    const el = document.getElementById('video-modal-form-clips');
+    if (!wrap || !el) return;
+    if (!clips || clips.length < 2) {
+        wrap.classList.add('hidden');
+        el.innerHTML = '';
+        return;
+    }
+    wrap.classList.remove('hidden');
+    el.innerHTML = clips.map((clip, idx) => `
+        <button type="button" class="video-form-clip-btn" data-form-clip-index="${idx}" onclick="selectFormVideoClip(${idx})" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:1px solid var(--border-subtle); border-radius:10px; padding:12px; color:inherit;">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+                <span style="font-size:12px; color:var(--text-silver); line-height:1.45;">${escapeVideoModalText(clip.label)}</span>
+                <span style="font-family:'Roboto Mono'; font-size:10px; color:var(--gold-accent); flex-shrink:0; text-transform:uppercase;">Video</span>
+            </div>
+        </button>
+    `).join('');
+}
+
+function syncFormClipActiveState() {
+    const active = window._videoModalActiveFormClip;
+    document.querySelectorAll('#video-modal-form-clips .video-form-clip-btn').forEach((btn) => {
+        const idx = Number(btn.getAttribute('data-form-clip-index'));
+        const on = active != null && idx === active;
+        btn.style.borderColor = on ? 'var(--gold-accent)' : 'var(--border-subtle)';
+        btn.style.background = on ? 'rgba(212,175,55,0.08)' : 'transparent';
+    });
+}
+
 export function openVideoModal(title, url) {
     document.getElementById('video-modal-title').innerText = title;
     const frame = document.getElementById('video-modal-frame');
-    const formUrl = url || TEACHING_POINT_PLACEHOLDER_URL;
+    const clips = resolveFormClips(title, url);
+    const formUrl = clips[0]?.videoUrl || url || TEACHING_POINT_PLACEHOLDER_URL;
     window._videoModalFormUrl = formUrl;
     window._videoModalTitle = title;
     window._videoModalActiveTp = null;
+    window._videoModalFormClips = clips;
+    window._videoModalActiveFormClip = clips.length ? 0 : null;
     syncVideoModalWatchLink(formUrl);
+    renderFormClipButtons(clips);
+    syncFormClipActiveState();
     frame.innerHTML = 'TAP TO LOAD INTEL';
     frame.onclick = function() {
-        loadVideoModalFrame(frame, formUrl, title);
+        loadVideoModalFrame(frame, window._videoModalFormUrl || formUrl, title);
         window._videoModalActiveTp = null;
         syncTeachingPointActiveState();
+        syncFormClipActiveState();
     };
 
     const notesEl = document.getElementById('video-modal-notes');
@@ -3214,6 +3299,20 @@ export function openVideoModal(title, url) {
     }
 
     document.getElementById('video-modal').classList.remove('hidden');
+}
+
+export function selectFormVideoClip(index) {
+    const clips = window._videoModalFormClips || [];
+    const clip = clips[index];
+    const frame = document.getElementById('video-modal-frame');
+    if (!clip || !frame) return;
+    window._videoModalActiveFormClip = index;
+    window._videoModalActiveTp = null;
+    window._videoModalFormUrl = clip.videoUrl;
+    syncVideoModalWatchLink(clip.videoUrl);
+    loadVideoModalFrame(frame, clip.videoUrl, clip.label);
+    syncTeachingPointActiveState();
+    syncFormClipActiveState();
 }
 
 function escapeVideoModalText(str) {
@@ -3252,6 +3351,7 @@ export function selectTeachingPointVideo(index) {
             frame.onclick = null;
         };
         syncTeachingPointActiveState();
+        syncFormClipActiveState();
         return;
     }
 

@@ -2,7 +2,7 @@ import { store } from '../state/store.js';
 import { excludeBannedExercises } from './bans.js';
 import { PERIODIZATION, getPhaseLoadMultiplier, getSeasonPhase, isGuidanceOff } from './fitness-hud.js';
 import { buildLactateIntervalPlan, lactateLogSetFromRow } from './lactate-engine.js';
-import { dateToISO, getLactateSlotForDate, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isSteadyCardio, openVideoModal, prettyFocusName, prettyWorkoutTypeLabel, strengthLabelForLetter } from './route-planner.js';
+import { dateToISO, formVideoThumbButtonHtml, getLactateSlotForDate, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isSteadyCardio, openVideoModal, prettyFocusName, prettyWorkoutTypeLabel, strengthLabelForLetter } from './route-planner.js';
 import { getSportData } from './sports-matrix.js';
 import { buildAuxiliaryExerciseList, buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, isStrengthPhase, progressStrengthWeight } from './strength-engine.js';
 import {
@@ -20,9 +20,9 @@ import {
 } from './hypertrophy-engine.js';
 import {
     isBwGateExercise,
-    isPressUpVariant,
     needsBwCompetencyAsk,
-    resolveProgrammedBwName
+    resolveProgrammedBwName,
+    usesPressUpWeightFinder
 } from './bodyweight-lifts.js';
 import {
     prepContextForFocus,
@@ -47,6 +47,12 @@ import { syncExerciseTimer } from '../ui/workout-timer.js';
 import { ensureCycleStarted, ensureCyclePlansForProgramme, confirmSessionExercises } from './workout-cycle.js';
 import { getEquivalentExercises } from './exercise-slots.js';
 import { latestPhaseWeight, lastCompletedWorkingWeight, latestWorkingLog, strengthLoadFromHypertrophy, resolveLogPeriodization, exerciseLogNamesMatch } from './periodization-logs.js';
+import {
+    barLoadCodesForExercise,
+    equipmentChoiceFromItem,
+    getExerciseWorkingWeight,
+    getExerciseWorkingWeightsByBar
+} from './load-increments.js';
 
 // ==========================================
 // 8. ELITE WORKOUT ENGINE (DRIVE TAB)
@@ -99,8 +105,8 @@ function historyForWeights() {
 }
 
 /** Last logged working-set kg, or null when this exercise has never been logged. */
-export function resolveLastLoggedWorkKg(exName) {
-    const w = lastCompletedWorkingWeight(historyForWeights(), exName);
+export function resolveLastLoggedWorkKg(exName, choice = null) {
+    const w = lastCompletedWorkingWeight(historyForWeights(), exName, choice);
     if (w == null || !Number.isFinite(Number(w))) return null;
     return Number(w);
 }
@@ -168,6 +174,8 @@ function resolveExtraLiftLoad(exName, spec = {}) {
     }
     const known = resolveLastLoggedWorkKg(exName);
     if (known != null) return { weight: known, needsWeightFind: false };
+    const seeded = getExerciseWorkingWeight(exName, spec.equipmentChoice || null);
+    if (seeded != null) return { weight: seeded, needsWeightFind: false };
     return { weight: 0, needsWeightFind: true };
 }
 
@@ -191,6 +199,35 @@ function extraExerciseInsertIndex(items) {
         if (isTrailingSessionBlock(list[i])) return i;
     }
     return list.length;
+}
+
+function ghostWeightLabel(item, sample) {
+    const name = item?.exercise?.name || '';
+    const bars = barLoadCodesForExercise(name);
+    const isNew = !!item?.needsWeightFind && !item?.weightFinderResolved;
+    const sampleW = Number(sample?.weight) || 0;
+    const choice = equipmentChoiceFromItem(item);
+    const fmt = (code, kg) => {
+        const tag = code === 'D' ? 'DB' : 'BB';
+        if (kg == null || !Number.isFinite(Number(kg))) return `${tag} new`;
+        return `${tag} ${kg}kg`;
+    };
+    if (bars.length >= 2) {
+        const byBar = getExerciseWorkingWeightsByBar(name);
+        const liveCode = choice === 'D' ? 'D' : 'B';
+        if (sampleW > 0) byBar[liveCode] = sampleW;
+        const bb = byBar.B;
+        const db = byBar.D;
+        if (isNew && !(bb > 0) && !(db > 0) && sampleW <= 0) {
+            return `<span style="color:var(--gold-accent); font-weight:800;">BB new · DB new</span>`;
+        }
+        return `${fmt('B', bb)} · ${fmt('D', db)}`;
+    }
+    if (isNew) return `<span style="color:var(--gold-accent); font-weight:800;">new exercise</span>`;
+    if (sampleW > 0) return `${sampleW}kg`;
+    const seeded = getExerciseWorkingWeight(name, choice);
+    if (seeded != null && seeded > 0) return `${seeded}kg`;
+    return 'BW';
 }
 
 function buildExtraLogEntry(ex, spec = {}) {
@@ -257,7 +294,8 @@ export function applySwappedLiftToItem(item, newEx) {
     let weight = 0;
     let needsWeightFind = false;
     if (isPlannedSessionContext()) {
-        const known = resolveLastLoggedWorkKg(newEx.name);
+        const known = resolveLastLoggedWorkKg(newEx.name, item.equipmentChoice || null)
+            ?? getExerciseWorkingWeight(newEx.name, item.equipmentChoice || null);
         if (known == null) {
             needsWeightFind = true;
             weight = 0;
@@ -266,7 +304,8 @@ export function applySwappedLiftToItem(item, newEx) {
         }
     } else {
         weight = Number(oldWork.find(s => Number(s.weight) > 0)?.weight)
-            || resolveLastLoggedWorkKg(newEx.name)
+            || resolveLastLoggedWorkKg(newEx.name, item.equipmentChoice || null)
+            || getExerciseWorkingWeight(newEx.name, item.equipmentChoice || null)
             || 0;
     }
     item.exercise = newEx;
@@ -290,10 +329,14 @@ export function addExercisesByIds(ids, specsById = {}) {
     const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
     if (!list.length) return;
 
+    const ghostContainer = document.getElementById('ghost-template-container');
+    const lockBtn = document.getElementById('btn-lock-in-route');
+    const ghostVisible = !!(ghostContainer && !ghostContainer.classList.contains('hidden'));
+    const confirmVisible = !!(lockBtn && lockBtn.style.display !== 'none');
     const ghostOpen = store.activeLog.type === 'workout'
-        && document.getElementById('ghost-template-container')
-        && !document.getElementById('ghost-template-container').classList.contains('hidden')
-        && !window._workoutSessionConfirmed;
+        && ghostVisible
+        && !window.manualWorkoutMode
+        && (!window._workoutSessionConfirmed || confirmVisible);
 
     list.forEach((id) => {
         const ex = store.globalExerciseDB.find(e => e.id == id || String(e.id) === String(id));
@@ -414,7 +457,7 @@ export function renderGhostWorkoutFromItems() {
             <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom: 4px;">
                 <div style="font-size: 12px; color:#D4AF37; font-weight:800; text-transform:uppercase;">${item.exercise.name}</div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <button type="button" onclick="openVideoModal('${String(item.exercise.name).replace(/'/g, "\\'")}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:4px 8px; border-radius:4px; color:var(--text-silver); font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">🎥 FORM</button>
+                    ${formVideoThumbButtonHtml(item.exercise.name)}
                     <button type="button" onclick="removeGhostExercise(${idx})" style="background:rgba(255,59,48,0.08); border:1px solid rgba(255,59,48,0.28); padding:4px 8px; border-radius:4px; color:#FF3B30; font-size:9px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer;">REMOVE</button>
                 </div>
             </div>`;
@@ -433,10 +476,7 @@ export function renderGhostWorkoutFromItems() {
             const sample = workSets[0];
             const nSets = typeof item.plannedSets === 'number' ? item.plannedSets : workSets.length;
             const reps = sample.reps || 10;
-            const isNew = !!item.needsWeightFind && !item.weightFinderResolved;
-            const load = isNew
-                ? `<span style="color:var(--gold-accent); font-weight:800;">new exercise</span>`
-                : (Number(sample.weight) > 0 ? `${sample.weight}kg` : 'BW');
+            const load = ghostWeightLabel(item, sample);
             html += `<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; margin-bottom: 4px;">
                 <span>${load}</span>
                 <span style="color:#D4AF37; font-weight:bold; font-family:'Roboto Mono';">${nSets}×${reps}</span>
@@ -1386,7 +1426,7 @@ export async function generateWorkoutTemplate(opts = {}) {
         }
 
         let tWeight;
-        const loggedWorkKg = lastCompletedWorkingWeight(hist, exObj.name);
+        const loggedWorkKg = lastCompletedWorkingWeight(hist, exObj.name, item.equipmentChoice || null);
         if (item.isText) {
             tWeight = 0;
         } else if (inStrengthPhase) {
@@ -1417,7 +1457,7 @@ export async function generateWorkoutTemplate(opts = {}) {
         // Untagged recent logs are treated as strength so last week's 115 kg is not
         // bumped to 132.5 kg.
         if (!item.isText && !isCardioEx && inStrengthPhase) {
-            const lastWork = latestWorkingLog(hist, exObj.name);
+            const lastWork = latestWorkingLog(hist, exObj.name, item.equipmentChoice || null);
             const lastTag = resolveLogPeriodization(lastWork);
             const lastW = lastWork != null ? Number(lastWork.weight_kg) : null;
             if (lastTag === 'hypertrophy' && lastW != null && Number.isFinite(lastW)) {
@@ -1436,13 +1476,7 @@ export async function generateWorkoutTemplate(opts = {}) {
         let needsWeightFind = false;
         const savedWorkKg = (() => {
             try {
-                const map = store.userConfig?.exerciseWorkingWeights || {};
-                const direct = map[exObj.name];
-                if (direct != null && Number.isFinite(Number(direct)) && Number(direct) >= 0) return Number(direct);
-                const lower = String(exObj.name || '').toLowerCase();
-                for (const [k, v] of Object.entries(map)) {
-                    if (String(k).toLowerCase() === lower && Number.isFinite(Number(v)) && Number(v) >= 0) return Number(v);
-                }
+                return getExerciseWorkingWeight(exObj.name, item.equipmentChoice || null);
             } catch (e) { /* ignore */ }
             return null;
         })();
@@ -1475,7 +1509,7 @@ export async function generateWorkoutTemplate(opts = {}) {
                 || latestPhaseWeight(hist, exObj.name, 'hypertrophy') != null
             );
             const hasSavedSeed = savedWorkKg != null;
-            if (isPressUpVariant(exObj.name) && !needsBwGate) {
+            if (usesPressUpWeightFinder(exObj.name) && !needsBwGate) {
                 tWeight = 0;
             } else if (!needsBwGate && !hasStrengthOrHyp && !hasHist && !hasLocal && !latestLog && !hasSavedSeed) {
                 needsWeightFind = true;

@@ -1385,6 +1385,10 @@
                 <a id="video-modal-open-yt" class="hidden" href="#" target="_blank" rel="noopener noreferrer"
                     style="font-size:11px; font-family:'Roboto Mono'; color:var(--gold-accent); text-decoration:none;">Open in YouTube</a>
             </div>
+            <div id="video-modal-form-clips-wrap" class="hidden" style="padding:16px 16px 0;">
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; font-weight:bold; text-transform:uppercase;">Form videos</div>
+                <div id="video-modal-form-clips" style="display:flex; flex-direction:column; gap:8px;"></div>
+            </div>
             <div style="padding:16px;">
                 <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; font-weight:bold; text-transform:uppercase;">Teaching points</div>
                 <div id="video-modal-notes" style="display:flex; flex-direction:column; gap:8px;"></div>
@@ -1751,23 +1755,22 @@
                 <h2 id="workout-type-modal-title" style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:15px;">Which type of workout?</h2>
                 <button type="button" onclick="closeWorkoutTypePicker()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
             </div>
-            <p id="workout-type-modal-hint" style="font-size:11px; color:var(--text-muted); margin:0 0 16px 0; line-height:1.4;">Choose the session type so it counts toward this week’s plan.</p>
+            <p id="workout-type-modal-hint" class="hidden" style="font-size:11px; color:var(--text-muted); margin:0 0 16px 0; line-height:1.4;"></p>
             <div style="display:flex; flex-direction:column; gap:10px;">
                 <button type="button" onclick="selectWorkoutType('Cardio (Steady)')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
-                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Steady State</div>
-                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">Zone 2 aerobic base — counts as one steady session this week.</div>
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800;">Steady State</div>
                 </button>
                 <button type="button" onclick="selectWorkoutType('Lactate')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
-                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">HIT</div>
-                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">~45 min · 10 min HIT block with variable work:rest. Search modalities next — counts as one of this week’s two HIT sessions.</div>
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800;">HIT</div>
                 </button>
                 <button type="button" onclick="selectWorkoutType('Full Body / Strength')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
-                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Gym Workout</div>
-                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">Strength / lifting session — counts toward this week’s gym plan.</div>
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800;">Gym Workout</div>
                 </button>
                 <button type="button" onclick="selectWorkoutType('Full Body / Power')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
-                    <div style="font-size:14px; color:var(--text-main); font-weight:800; margin-bottom:4px;">Power</div>
-                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">Plyometrics with maximal effort. Always available to log — programmed after 8 weeks of gym sessions.</div>
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800;">Power</div>
+                </button>
+                <button type="button" onclick="selectWorkoutType('Custom')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
+                    <div style="font-size:14px; color:var(--text-main); font-weight:800;">Custom</div>
                 </button>
             </div>
         </div>
@@ -1801,7 +1804,7 @@
                 <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform:uppercase; letter-spacing:1px; margin:0; font-size:15px;">Load Workout</h2>
                 <button type="button" onclick="closeLoadWorkoutPicker()" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
             </div>
-            <p id="load-workout-modal-subtitle" style="font-size:11px; color:var(--text-muted); margin:0 0 12px 0; line-height:1.4;">Choose a saved workout from My Workouts.</p>
+            <p id="load-workout-modal-subtitle" class="hidden" style="display:none;"></p>
             <div style="display:flex; gap:8px; margin-bottom:12px; overflow-x:auto; padding-bottom:2px;">
                 <button type="button" id="load-workout-tab-saved" class="btn-primary catalogue-sub-btn is-primary active" data-load-tab="saved" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLoadWorkoutTab('saved')">My saved workouts</button>
                 <button type="button" id="load-workout-tab-gps" class="btn-primary catalogue-sub-btn is-secondary" data-load-tab="gps" style="margin:0; padding:10px 14px; flex:0 0 auto; width:auto;" onclick="switchLoadWorkoutTab('gps')">GPS planned sessions</button>

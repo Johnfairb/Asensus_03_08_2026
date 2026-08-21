@@ -38,7 +38,7 @@ import { handleAuth, handleSignOut, quickLogin } from '../services/auth.js';
 import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, removeGhostExercise, swapGhostExercise, unmergeSuperset } from '../domain/workout-generator.js';
 import { openAddExercisesModal, closeAddExercisesModal, confirmAddExercisesModal } from './add-exercises-modal.js';
 import { calculateAchievability, handleFocusChange, handleSportChange, onSexOrSportUiChange, onGymDaysOrPhaseUiChange, onHybridSplitChange, onSeasonPhaseChange, roundToEquipment, saveSettings, toggleRestStop } from '../domain/thermodynamics.js';
-import { addFixedSchedule, closeFixedScheduleModal, closeSleepModal, closeVideoModal, commitMatchSession, commitPracticeSession, deleteFixedSchedule, deleteSportDiaryFromLog, editSportDiaryFromLog, generateFutureTimeline, getTeachingPoints, getVideoDirectives, openFixedScheduleModal, openFuturePlan, openMatchLogModal, openPracticeLogModal, openSleepModal, openVideoModal, selectTeachingPointVideo, submitSleepLog, syncSleepHoursWarning, switchDayPlanSubTab, toggleSchedTimeVisibility } from '../domain/route-planner.js';
+import { addFixedSchedule, closeFixedScheduleModal, closeSleepModal, closeVideoModal, commitMatchSession, commitPracticeSession, deleteFixedSchedule, deleteSportDiaryFromLog, editSportDiaryFromLog, generateFutureTimeline, getTeachingPoints, getVideoDirectives, openFixedScheduleModal, openFuturePlan, openMatchLogModal, openPracticeLogModal, openSleepModal, openVideoModal, selectFormVideoClip, selectTeachingPointVideo, submitSleepLog, syncSleepHoursWarning, switchDayPlanSubTab, toggleSchedTimeVisibility } from '../domain/route-planner.js';
 import { openFlexibleRecipe } from '../domain/recipes.js';
 import { clearSeasonDates, saveSeasonDates, submitRepairAssessment, triggerRepairModeCheck } from '../domain/periodization.js';
 import { generateGroceryList, toggleGroceryAisle } from '../domain/grocery.js';
@@ -199,6 +199,7 @@ export function bindUi() {
   window.toggleGroceryAisle = toggleGroceryAisle;
   window.getVideoDirectives = getVideoDirectives;
   window.getTeachingPoints = getTeachingPoints;
+  window.selectFormVideoClip = selectFormVideoClip;
   window.selectTeachingPointVideo = selectTeachingPointVideo;
   window.handleAuth = handleAuth;
   window.handleFocusChange = handleFocusChange;

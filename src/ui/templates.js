@@ -7,7 +7,7 @@ import { isGuidanceOff } from '../domain/fitness-hud.js';
 import { getVisualPortion, resolveDayMealItems } from '../domain/meal-planner.js';
 import { smartRoundMass } from '../domain/thermodynamics.js';
 import { generateWorkoutTemplate, renderGhostWorkoutFromItems } from '../domain/workout-generator.js';
-import { isLactateEvent, isSteadyCardio } from '../domain/route-planner.js';
+import { isCustomWorkoutKind, isLactateEvent, isSteadyCardio } from '../domain/route-planner.js';
 import { renderWorkoutLog } from './drive.js';
 import { clearWorkoutDraft, saveWorkoutDraft } from '../domain/workout-draft.js';
 import { resetWorkoutTimer, armWorkoutTimer } from './workout-timer.js';
@@ -468,14 +468,21 @@ export function loadGhostTemplate() {
         const lockBtnWorkout = document.getElementById('btn-lock-in-route');
         if (lockBtnWorkout) lockBtnWorkout.textContent = 'Confirm workout';
         if (window.manualWorkoutMode) {
-            content.innerHTML = `
+            const blank = isCustomWorkoutKind(window.manualSessionKind);
+            if (blank) {
+                content.innerHTML = '';
+                container.classList.add('hidden');
+            } else {
+                content.innerHTML = `
                 <div style="text-align:center;">
                     <p style="font-size:12px; color:var(--text-muted); font-weight:600; line-height:1.5; margin:0;">Manual workout — no GPS template. Use <strong style="color:var(--gold-accent);">Load Workout</strong> below, or tap <strong style="color:var(--gold-accent);">+</strong> to add exercises, then Complete Log.</p>
                 </div>`;
-            container.classList.remove('hidden');
+                container.classList.remove('hidden');
+            }
             if (lockBtnWorkout) lockBtnWorkout.style.display = 'none';
             return;
         }
+        window._workoutSessionConfirmed = false;
         if (typeof generateWorkoutTemplate === "function") {
             const skip = shouldSkipWorkoutConfirm();
             if (skip && lockBtnWorkout) lockBtnWorkout.style.display = 'none';

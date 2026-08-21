@@ -5,7 +5,7 @@ import { resolveSessionRpe, getTonightSleepTargetHours } from '../domain/sleep-r
 import { calculateLiveFitnessScores, generateDailyExerciseLog, getSeasonPhase, getTodayFocus, getWorkoutSessionAdvice, isGuidanceOff } from '../domain/fitness-hud.js';
 import { applyInjuryPainFollowUpFromJournal, injuryAreaLabel, needsInjuryPainFollowUp } from '../domain/periodization.js';
 import { HIT_TYPE_OPTIONS, HIT_FLEXIBLE_INPUT_META, mergeModalityBaselineTest, recalculateLactatePlanIntensities, resolveHitClassRecovery, modalityUsesFlexibleBaselineInput, getModalityBaselineInputKind, getModalitySpeedUnit, saveModalityBaselineInputPrefs, parseBaselineResultInput, formatBaselineStoredValue, baselineResultUnit, baselineTestDisplayLabel, getBaselineTestSequence } from '../domain/lactate-engine.js';
-import { commitMatchSession, commitPracticeSession, dateToISO, generateFutureTimeline, getWorkoutSessionSnapshot, loadWorkoutSessionSnapshots, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, isLastPlannedSessionOfDay, looksLikeSteadyCardioExercise, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, resolveStrengthEventLetter, sessionItemsAreStretchOnly, setRouteOverride, addDaysISO, isPowerEvent, strengthLabelForLetter } from '../domain/route-planner.js';
+import { commitMatchSession, commitPracticeSession, dateToISO, formVideoThumbButtonHtml, generateFutureTimeline, getWorkoutSessionSnapshot, loadWorkoutSessionSnapshots, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isCustomWorkoutKind, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, isLastPlannedSessionOfDay, looksLikeSteadyCardioExercise, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, resolveStrengthEventLetter, sessionItemsAreStretchOnly, setRouteOverride, addDaysISO, isPowerEvent, strengthLabelForLetter } from '../domain/route-planner.js';
 import { lactateSessionRpeBarHtml, openLactateHitPicker, shouldPromptLactateHitTypes, syncLactateIntensitiesIntoActiveLog } from './lactate-ui.js';
 
 const HIT_TYPE_LABELS_RE = new RegExp(
@@ -25,6 +25,7 @@ import {
     increaseLoadOneStep,
     resolveLoadProfile,
     roundUpLoad,
+    setExerciseWorkingWeight,
     skipsWeightProgression
 } from '../domain/load-increments.js';
 import { switchLoadEquipment } from './equipment-ui.js';
@@ -604,14 +605,8 @@ function warmupChildVideoHtml(child) {
         return `<div style="border:1px dashed var(--border-highlight); border-radius:8px; min-height:72px; display:flex; align-items:center; justify-content:center; color:var(--text-stealth); font-size:10px; font-family:'Roboto Mono';">Teaching point video placeholder</div>`;
     }
     return `<div style="display:flex; flex-direction:column; gap:6px; margin-top:2px;">${list.map((clip) => {
-        const title = String(clip.label || child?.name || 'Teaching video').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const url = String(clip.videoUrl || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const label = String(clip.label || child?.name || '').replace(/</g, '&lt;');
         return `<div style="border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.2);">
-            <button type="button" onclick="event.stopPropagation(); openVideoModal('${title}', '${url}')"
-                style="width:100%; padding:14px; background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:11px; cursor:pointer;">
-                🎥 ${label}
-            </button>
+            ${formVideoThumbButtonHtml(clip.label || child?.name || 'Teaching video', clip.videoUrl || '', 'width:100%;')}
         </div>`;
     }).join('')}</div>`;
 }
@@ -642,14 +637,11 @@ function persistUserConfigMaps() {
     try { localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig)); } catch (e) { /* ignore */ }
 }
 
-function persistWorkingWeight(exName, kg) {
+function persistWorkingWeight(exName, kg, choice = null) {
     const name = String(exName || '').trim();
     const w = Number(kg);
     if (!name || !Number.isFinite(w) || w < 0) return;
-    if (!store.userConfig.exerciseWorkingWeights || typeof store.userConfig.exerciseWorkingWeights !== 'object') {
-        store.userConfig.exerciseWorkingWeights = {};
-    }
-    store.userConfig.exerciseWorkingWeights[name] = w;
+    setExerciseWorkingWeight(name, w, choice);
     persistUserConfigMaps();
 }
 
@@ -682,7 +674,7 @@ function persistSessionLoads(items) {
                 const last = [...(item.sets || [])]
                     .filter(s => s && s.side === side.key && s.completed && !s.isWarmup && !s.isText && !s.isDropSet)
                     .pop();
-                if (name && last && Number(last.weight) > 0) persistWorkingWeight(name, last.weight);
+                if (name && last && Number(last.weight) > 0) persistWorkingWeight(name, last.weight, equipmentChoiceFromItem(item) || side?.equipmentChoice);
             });
             return;
         }
@@ -690,7 +682,7 @@ function persistSessionLoads(items) {
             .filter(s => s && s.completed && !s.isWarmup && !s.isText && !s.isLactateHit && !s.isDropSet)
             .pop();
         const name = item.exercise?.name || item.name;
-        if (name && last && Number(last.weight) > 0) persistWorkingWeight(name, last.weight);
+        if (name && last && Number(last.weight) > 0) persistWorkingWeight(name, last.weight, equipmentChoiceFromItem(item));
     });
 }
 
@@ -2308,15 +2300,17 @@ export function renderExerciseSets() {
             if (expanded) {
                 html += `<div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">`;
                 kids.forEach((child, cIdx) => {
-                    const safe = String(child.name || '').replace(/</g, '&lt;').replace(/'/g, "\\'");
                     const childOpen = !!child._uiExpanded;
                     const canLoad = allowsWeightInput(child.name);
                     const wVal = Number(child.weight) > 0 ? child.weight : '';
                     html += `<div style="border:1px solid var(--border-subtle); border-radius:8px; padding:10px; background:transparent;">
                         <button type="button" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:none; padding:0; color:inherit;" onclick="togglePrepChildExpand(${exIdx}, ${setIdx}, ${cIdx})">
-                            <div style="display:flex; justify-content:space-between; gap:8px;">
+                            <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
                                 <span style="font-size:12px; font-weight:600;">${String(child.name || '').replace(/</g, '&lt;')}</span>
-                                <span style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">${child.reps || ''} · ${childOpen ? '−' : '+'} Form</span>
+                                <span style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                                    <span style="font-size:10px; color:var(--text-stealth); font-family:'Roboto Mono';">${child.reps || ''}</span>
+                                    ${formVideoThumbButtonHtml(child.name || '')}
+                                </span>
                             </div>
                         </button>`;
                     if (canLoad) {
@@ -2329,12 +2323,7 @@ export function renderExerciseSets() {
                         </div>`;
                     }
                     if (childOpen) {
-                        html += `<div style="margin-top:8px; border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.2);">
-                            <button type="button" onclick="openVideoModal('${safe}', 'https://www.youtube.com/embed/placeholder')"
-                                style="width:100%; padding:14px; background:none; border:none; color:var(--gold-accent); font-family:'Roboto Mono'; font-size:11px; cursor:pointer;">
-                                🎥 FORM VIDEO — ${String(child.name || '').replace(/</g, '&lt;')}
-                            </button>
-                        </div>`;
+                        html += `<div style="margin-top:8px;">${formVideoThumbButtonHtml(child.name || '', '', 'width:100%;')}</div>`;
                     }
                     html += `</div>`;
                 });
@@ -2647,7 +2636,7 @@ export function renderExerciseSets() {
     let html = exerciseTimerBannerHtml(item, exIdx);
     html += `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-            <button onclick="openVideoModal('${item.exercise.name}', 'https://www.youtube.com/embed/placeholder')" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); padding:6px 10px; border-radius:4px; color:var(--text-silver); font-size:10px; font-family:'Roboto Mono'; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:4px;">🎥 FORM VIDEO</button>
+            ${formVideoThumbButtonHtml(item.exercise.name)}
             ${isBarbell ? `<button onclick="document.getElementById('plate-calculator-modal').classList.remove('hidden')" style="background:var(--bg-surface-elevated); border:1px solid var(--border-subtle); color:var(--gold-accent); font-size:10px; padding:6px 10px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer; font-weight:bold;">[PLATES]</button>` : ''}
         </div>`;
 
@@ -3218,7 +3207,7 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
         const persistName = item.isSuperset
             ? ((item.sides || []).find(s => s.key === setObj.side)?.exercise?.name || item.exercise?.name || '')
             : (item.exercise?.name || item.name || '');
-        persistWorkingWeight(persistName, num);
+        persistWorkingWeight(persistName, num, equipmentChoiceFromItem(item));
     }
     if (field === 'reps' && setObj && !setObj.isWarmup && !setObj.isText) {
         const exName = item.isSuperset
@@ -3567,16 +3556,19 @@ export function beginManualWorkoutSession(kind, opts = {}) {
 
     window.manualSessionKind = normalized;
     window.editingSessionId = null;
+    window._workoutSessionConfirmed = false;
     rememberSessionDateIso(dateIsoFromPlanSlot(window.plannedGpsSlot) || dateToISO(new Date()));
 
-    if (isLactateEvent(normalized) && !opts.afterHitPicker) {
+    const isCustomManual = isCustomWorkoutKind(normalized);
+
+    if (!isCustomManual && isLactateEvent(normalized) && !opts.afterHitPicker) {
         openLactateHitPicker(() => beginManualWorkoutSession(normalized, { afterHitPicker: true }));
         return;
     }
 
     // Gym / lifting: ask for compound vs isolation rest (or custom = no timers)
     const isPowerManual = isPowerEvent(normalized);
-    const isGymManual = !isSteadyCardio(normalized) && !isLactateEvent(normalized) && !isPowerManual;
+    const isGymManual = !isCustomManual && !isSteadyCardio(normalized) && !isLactateEvent(normalized) && !isPowerManual;
     if (isGymManual && !opts.afterRestPrefs) {
         openManualGymRestModal(normalized);
         return;
@@ -3585,8 +3577,8 @@ export function beginManualWorkoutSession(kind, opts = {}) {
         store.manualGymRest = null;
     }
 
-    // Steady / Lactate / Power use the GPS template + log UI
-    const usePlanTemplate = isSteadyCardio(normalized) || isLactateEvent(normalized) || isPowerManual;
+    // Steady / Lactate / Power use the GPS template + log UI. Custom is a blank slate.
+    const usePlanTemplate = !isCustomManual && (isSteadyCardio(normalized) || isLactateEvent(normalized) || isPowerManual);
     window.manualWorkoutMode = !usePlanTemplate;
 
     const buttonElement = window._pendingManualWorkoutBtn;
@@ -3981,6 +3973,7 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
     window.manualWorkoutMode = false;
     window.editingSessionId = null;
     store.manualGymRest = null;
+    window._workoutSessionConfirmed = false;
 
     if (type === 'workout') {
         if (isGuidanceOff('workout')) {
@@ -4871,6 +4864,7 @@ export async function commitWorkoutSession() {
                         time_minutes: 0,
                         rpe: rpeVal,
                         type: baseDomain || 'strength',
+                        equipment_choice: equipmentChoiceFromItem(item) || sideInfo?.equipmentChoice || null,
                         session_duration_min: timedMinutes || 0,
                         ...(liftPhase && !isCardio ? { periodization_phase: liftPhase } : {})
                     });
@@ -4911,6 +4905,7 @@ export async function commitWorkoutSession() {
                     time_minutes: timeMins,
                     rpe: set.isLactateHit ? 0 : rpeVal,
                     type: isStretchRow ? 'mobility' : (isCardio || set.isLactateHit ? 'cardio' : (baseDomain || 'strength')),
+                    equipment_choice: equipmentChoiceFromItem(item) || null,
                     session_duration_min: timedMinutes || 0,
                     ...(liftPhase && !isCardio && !set.isLactateHit && !isStretchRow ? { periodization_phase: liftPhase } : {})
                 });

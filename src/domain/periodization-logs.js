@@ -146,10 +146,16 @@ export function exerciseLogNamesMatch(a, b) {
  * Last completed working-set row from the most recent session for this exercise.
  * Prefers the highest set number on that day (the set the user finished on).
  */
-export function latestWorkingLog(hist, exName) {
+export function latestWorkingLog(hist, exName, choice = null) {
+    const code = choice || null;
     const rows = (hist || []).filter((l) => {
         if (!exerciseLogNamesMatch(l.exercise, exName)) return false;
         if (l.is_warmup || l.isWarmup) return false;
+        if (code) {
+            const logCode = l.equipment_choice || l.equipmentChoice || null;
+            if (logCode && logCode !== code) return false;
+            if (!logCode && code === 'D') return false;
+        }
         const w = Number(l.weight_kg);
         const reps = Number(l.reps);
         return (Number.isFinite(w) && w > 0) || (Number.isFinite(reps) && reps > 0);
@@ -170,8 +176,8 @@ export function latestWorkingLog(hist, exName) {
  * Last completed working-set load from the most recent session for this exercise.
  * Prefers the highest set number on that day (the set the user finished on).
  */
-export function lastCompletedWorkingWeight(hist, exName) {
-    const last = latestWorkingLog(hist, exName);
+export function lastCompletedWorkingWeight(hist, exName, choice = null) {
+    const last = latestWorkingLog(hist, exName, choice);
     const w = Number(last?.weight_kg);
     return Number.isFinite(w) ? w : null;
 }

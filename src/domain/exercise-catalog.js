@@ -206,13 +206,6 @@ export const EXERCISE_CATALOG = {
         muscle_group: 'hamstrings', ppl: 'Legs',
         primary: ['Hamstrings'], secondary: ['Calves']
     }),
-    'Hyperextension': ex({
-        loadOptions: ['P', 'D'],
-        domain: 'lifting', movement: 'lower back isolation', role: 'isolation',
-        muscle_group: 'core', ppl: 'Legs',
-        coreLevel: 'B', coreTarget: '20',
-        primary: ['Glute max', 'Hamstrings', 'Lower back'], secondary: ['Calves']
-    }),
 
     // —— Horizontal push ——
     'Bench Press': ex({
@@ -244,6 +237,20 @@ export const EXERCISE_CATALOG = {
         secondary: ['Lats', 'Rotator cuff', 'Lower traps']
     }),
     'Press-up': ex({
+        loadOptions: [],
+        domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
+        muscle_group: 'lower_chest', ppl: 'Push', bodyweight: true,
+        primary: ['Pecs', 'Front delts', 'Triceps'],
+        secondary: ['Lats', 'Rotator cuff', 'Core']
+    }),
+    'Decline Push-up': ex({
+        loadOptions: [],
+        domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
+        muscle_group: 'lower_chest', ppl: 'Push', bodyweight: true,
+        primary: ['Pecs', 'Front delts', 'Triceps'],
+        secondary: ['Lats', 'Rotator cuff', 'Core']
+    }),
+    'Push-up on Knee': ex({
         loadOptions: [],
         domain: 'strength', movement: 'horizontal push', dumbbell: false, role: 'compound',
         muscle_group: 'lower_chest', ppl: 'Push', bodyweight: true,
@@ -521,6 +528,12 @@ export const EXERCISE_CATALOG = {
         muscle_group: 'biceps', ppl: 'Pull',
         primary: ['Biceps'], secondary: []
     }),
+    'Seated Curl': ex({
+        loadOptions: ['D'],
+        domain: 'lifting', movement: 'bicep isolation', grip: 'underhand', dumbbell: true, role: 'isolation',
+        muscle_group: 'biceps', ppl: 'Pull',
+        primary: ['Biceps'], secondary: []
+    }),
     'Hammer Curl': ex({
         loadOptions: ['D'],
         domain: 'lifting', movement: 'bicep isolation', grip: 'neutral', dumbbell: true, role: 'isolation',
@@ -611,7 +624,7 @@ export const EXERCISE_CATALOG = {
     // —— Core (strength circuit via coreLevel; excluded from hypertrophy pools) ——
     'Crunch': ex({
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
-    'Knees on Bench Crunch': ex({
+    'Knees Bench Crunch': ex({
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Feet Up Crunch': ex({
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '30', primary: ['Core'], secondary: [] }),
@@ -629,7 +642,7 @@ export const EXERCISE_CATALOG = {
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Side-sit on Hyperextension Bench': ex({
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'ql', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '20 each side', primary: ['Core'], secondary: [] }),
-    'Pallof Press': ex({
+    'Pallof Push': ex({
         loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20 each side', primary: ['Core'], secondary: [] }),
     'Wood-chop': ex({
         loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '15 each side', primary: ['Core'], secondary: [] }),
@@ -657,6 +670,13 @@ export const EXERCISE_CATALOG = {
         loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '15', primary: ['Core'], secondary: [] }),
     'Seated Cable Rotation': ex({
         loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '15', primary: ['Core'], secondary: [] }),
+    'Hyperextension': ex({
+        loadOptions: ['P', 'D'],
+        domain: 'lifting', movement: 'lower back isolation', role: 'isolation',
+        muscle_group: 'core', ppl: 'Core', inProgramming: false,
+        coreLevel: 'B', coreTarget: '20',
+        primary: ['Glute max', 'Hamstrings', 'Lower back'], secondary: ['Calves']
+    }),
 
     // —— Power / plyometrics (programmed by power-engine; library domain "power") ——
     'Box Jumps': ex({
@@ -821,6 +841,209 @@ export function getTeachingPointVideoUrl(label) {
     return TEACHING_POINT_VIDEOS[key] || '';
 }
 
+function formClip(label, videoId) {
+    return { label, videoUrl: `https://www.youtube.com/watch?v=${videoId}` };
+}
+
+/** Per-lift form clips (front/side, load, or advanced variants). */
+const EXERCISE_FORM_VIDEOS = {
+    'Crunch': [formClip('Crunch', 's1Bs7GIF-vA')],
+    'Knees Bench Crunch': [formClip('Knees Bench Crunch', '0-zGaA0lGrM')],
+    'Feet Up Crunch': [formClip('Feet Up Crunch', 'zL-HbZC0Hyg')],
+    'Reverse Crunch': [formClip('Reverse Crunch', 'NI45UO6MCTg')],
+    'Plank': [formClip('Plank', 'qHKB3xebboM')],
+    'Side Plank': [formClip('Side Plank', 'V4d-uuaG-_0')],
+    'Dead Bug': [formClip('Dead Bug', '3m4-s_6FTXI')],
+    'Russian Twist': [formClip('Russian Twist', 'B2FJAfOC7mM')],
+    'Halo': [formClip('Halo', '3z69mqHnXeg')],
+    'Suitcase Carry': [
+        formClip('Angle 1', 'yCfcmuCDCJs'),
+        formClip('Angle 2', 'CuNUK64ap4Y')
+    ],
+    'Turkish Get-up': [formClip('Turkish Get-up', '2VytA1Dparw')],
+    'Side-sit on Hyperextension Bench': [formClip('Side-sit', 'SCBDVgjR3Ik')],
+    'Hyperextension': [formClip('Hyperextension', 'pEaPF-jU_uI')],
+    'Hanging Knee Raise': [formClip('Hanging Knee Raise', 'ZjAqZoHJGBQ')],
+    'Wood-chop': [formClip('Wood-chop', '5wFGixVCKWo')],
+    'Standing Cable Rotation': [formClip('Standing Cable Rotation', 'PuQtmYqGkeY')],
+    'Pallof Push': [formClip('Pallof Push', 'SKqe1U4whtE')],
+    'Seated Cable Rotation': [formClip('Seated Cable Rotation', 'mYYz6NuCUN0')],
+    'Cable Crunch': [formClip('Cable Crunch', 'N4CLSyLJISk')],
+    'Standing Side Bend': [formClip('Standing Side Bend', 'mxuyW2fF4v8')],
+
+    'Squat': [
+        formClip('Side', 'HKTH3YIc1Jk'),
+        formClip('Front', 'mqsmfBZ9LqM')
+    ],
+    'Sumo Squat': [
+        formClip('Angle 1', 'sySK8kqkNYE'),
+        formClip('Angle 2', '7UwaRedGaEA')
+    ],
+    'Deadlift': [
+        formClip('Side', 'BCBmj0GKXco'),
+        formClip('Front', 'v_pOuUwkfZw')
+    ],
+    'Sumo Deadlift': [
+        formClip('Front', 'ZfLBFsCAYdc'),
+        formClip('Side', '-_-4odMhjCU')
+    ],
+    'Romanian Deadlift': [
+        formClip('Side', 'XvHZMbO8jQI'),
+        formClip('Front', '7hmkB-B-R5E')
+    ],
+    'Rack Deadlift': [
+        formClip('Front', 'IcfJ1DkdMjk'),
+        formClip('Side', 'Aj3mRqqB5-0')
+    ],
+    'Single Leg Deadlift': [
+        formClip('Front', 'JGQKkITdjys'),
+        formClip('Side', 'OYVHu-oaqIA')
+    ],
+    'Front Squat': [
+        formClip('Side (no plates)', '_Nb4NbvipUk'),
+        formClip('Front (no plates)', 'HLwExtRbv18'),
+        formClip('Front (plates)', 'UVnzt1ZUhf0'),
+        formClip('Side (plates)', 'J8IfN0Feg-0')
+    ],
+    'Goblet Squat': [
+        formClip('Side', 'Wjhb0xypIE8'),
+        formClip('Front', 'cEwa0WnkK3U')
+    ],
+    'Split Squat': [
+        formClip('Side', 'U8lFz42Uvu4'),
+        formClip('Front', 'Jo2OGQh-uug')
+    ],
+    'Walk Lunge': [
+        formClip('Angle 1', 'HtjZopOtgFg'),
+        formClip('Angle 2', 'NaVILGSKmGc')
+    ],
+    'Bulgarian Squat': [
+        formClip('Side', 'AoXB7hb1gPI'),
+        formClip('Front', 'h_YJLxzTVK4')
+    ],
+    'Pistol Squat': [
+        formClip('Side', 'BpkYPnzRyzg'),
+        formClip('Front', 'dipmr2NKCx8')
+    ],
+    'Leg Press': [formClip('Leg Press', '044j5Fpi5Eo')],
+    'Leg Extension': [formClip('Leg Extension', 'qTZLbQMkhxQ')],
+    'Calf Raise Barbell': [formClip('Barbell Calf Raise', 'YCgB-vclF_U')],
+    'Single Calf Raise': [formClip('Single Calf Raise', 'gCFu0tgVeHE')],
+    'Lying Hamstring Curl': [formClip('Lying Hamstring Curl', 'bjqIuxXYfTc')],
+    'Calf Raise Machine': [formClip('Plate-loaded Calf Raise', 'QGbCiAPUPzo')],
+
+    'Machine Bench Press': [formClip('Machine Bench Press', 'uAcV8L1R5uI')],
+    'Neutral Cable Row': [formClip('Neutral Cable Row', 'zAB0uShcEHU')],
+    'Overhand Cable Row': [formClip('Overhand Cable Row', 'LwI301603do')],
+    'Cable Crossover': [formClip('Cable Crossover', 'VD2MNWNyAsk')],
+    'Cable French Press': [formClip('Cable French Press', 'uZbX2wvTNC0')],
+    'Rope Push Down': [
+        formClip('Rope Push Down 1', '1Zlp_Lz3CXA'),
+        formClip('Rope Push Down 2', 'vVq1cqVt02c')
+    ],
+    'Lat Machine Pull': [
+        formClip('Lat down', 'U4fzsdQbRvM'),
+        formClip('Wide grip', 'GpBaP2T-hYY')
+    ],
+    'Lat Machine Close Grip': [
+        formClip('Narrow grip', 'jQyy6VZtfp4'),
+        formClip('Neutral / handle', 'KAWtCJzmIoc')
+    ],
+    'Lat Machine Single Pull': [formClip('Single-arm Lat Pulldown', 'SxDiRzvAH9U')],
+    'Cable Curl': [formClip('Cable Curl', 'JP5WildW4Kw')],
+    'Cable Lateral Raise (Single)': [formClip('Cable Lateral Raise', 'FOFTu0mp1hE')],
+    'Lateral Rotation': [
+        formClip('Outwards', '5LZZB5n4pgQ'),
+        formClip('Inwards', 'CRQXV4P3wmA')
+    ],
+    'Pull Up': [
+        formClip('Pull Up', 'QussPjEvOOM'),
+        formClip('Weighted', 'xCsC5ep5GyA')
+    ],
+    'Chin Up': [
+        formClip('Chin Up', 'zvhWOpuWIdk'),
+        formClip('Weighted', 'mTEBLjAbM3I')
+    ],
+    'Neutral Pull Up': [
+        formClip('Neutral Chin Up', 'qtAHgDvdWxA'),
+        formClip('Weighted', '6i4gSCJ4AHM')
+    ],
+    'Dip': [
+        formClip('Dip', 'ZEda1n_1yYQ'),
+        formClip('Weighted', 'HtLQJhraevY')
+    ],
+    'Bench Press': [
+        formClip('Barbell', 't3-qrXXTIok'),
+        formClip('Dumbbell', '0P80Zz88aIQ')
+    ],
+    'Incline Bench Press': [
+        formClip('Barbell', 'g-WtgvayETM'),
+        formClip('Dumbbell', 'UseTFRLYJdA')
+    ],
+    'Decline Bench Press': [
+        formClip('Barbell', 'OLWK-dx9nfM'),
+        formClip('Dumbbell', 'KShY1Mq54Do')
+    ],
+    'Close Grip Bench Press': [formClip('Close Grip', 'Uyabxf3RlY4')],
+    'Flye': [
+        formClip('Dumbbell', 'ci29MKbYUyM'),
+        formClip('Decline', 'I2RY34aPWbY')
+    ],
+    'Incline Flye': [formClip('Incline Flye', 'izSw-sdOtG0')],
+    'Pullover': [formClip('Pullover', 'gwlrPy0vN94')],
+    'Press-up': [formClip('Press-up', 'qQgPQ7rX4MA')],
+    'Decline Push-up': [formClip('Decline Push-up', 'jCv6qI_jkTs')],
+    'Push-up on Knee': [
+        formClip('Angle 1', '9g_zOt6Umpo'),
+        formClip('Angle 2', '6O92NrTlhp0')
+    ],
+    'Close Grip Press-up': [formClip('Close Grip Press-up', 'rdQQwwHt0Cw')],
+    'Overhand Barbell Row': [formClip('Overhand Barbell Row', '0tSVYZnWWfM')],
+    'Underhand Barbell Row': [formClip('Underhand Barbell Row', 'FpBrN_JwTkc')],
+    'Dumbbell Row': [formClip('Dumbbell Row', '4d0heoqUAC4')],
+    'Reverse Row': [
+        formClip('Reverse Row', 'EGJMnOdI9Qc'),
+        formClip('Advanced (on bench)', 'PqKAB5wUgxQ')
+    ],
+    'Barbell Military Press': [formClip('Military Press', '1_ulFhoG-cw')],
+    'Seated Dumbbell Shoulder Press': [formClip('Dumbbell Shoulder Press', '4tS3juRA35U')],
+    'Seated Dumbbell Screw Press': [formClip('Screw Press', '1lMzvTE5yB4')],
+    'Lateral Raise': [formClip('Lateral Raise', 'hbAt223h4Ic')],
+    'Lying 30 Degree Single Lateral Raise': [formClip('Lying 30° Single', 'dDxBejgL2pk')],
+    'Standing Dumbbell Front Raise': [formClip('Front Raise', 'XZ7AWGDEmVM')],
+    'Incline Dumbbell Front Raise': [formClip('Incline Front Raise', 'GRaw8UaSS2s')],
+    'Bent Over Rear Flye': [formClip('Reverse Flye', 'Q2_hFwbmz5A')],
+    'Skull Crusher': [formClip('Skull Crusher', 'coWN4t-ltn8')],
+    'Upright Row': [formClip('Upright Row', '_qHIBXQLUmE')],
+    'Barbell Curl': [formClip('Barbell Curl', 'Re73RKn6nDo')],
+    'Dumbbell Curl': [formClip('Dumbbell Curl', 'Cf8EOJVN9Lo')],
+    'Hammer Curl': [formClip('Hammer Curl', 'ip9jeZnxAfU')],
+    'Reverse Curl': [formClip('Reverse Curl', '5wSSK5yDvEY')],
+    'Seated Curl': [formClip('Seated Curl', 'sl8DLnI4GRY')],
+    'Concentration Curl': [formClip('Concentration Curl', 'lJW9py1mmjY')],
+    'Dumbbell Preacher Curl': [formClip('Preacher Curl', '94VY9GnDXiU')],
+    'Single Overhead Seated French Press': [formClip('Overhead French Press', 'gFP79Cy1dYE')],
+    'Reverse Dips': [
+        formClip('Reverse Dips', 'GsZ8E6Zsvog'),
+        formClip('Advanced (on bench)', 'gcT0g3V05vo')
+    ],
+    'Machine Overhead Press': [formClip('Shoulder Machine', 'gZyDz13UwLA')],
+    'Kick Back': [formClip('Kick Back', 'cwk5zMZ1M1s')]
+};
+
+/** Form clips for a catalog lift. Empty if none are wired yet. */
+export function getExerciseFormVideos(name) {
+    const meta = getExerciseMeta(name);
+    const key = meta?.name || resolveCatalogName(name) || String(name || '').trim();
+    const clips = EXERCISE_FORM_VIDEOS[key];
+    return Array.isArray(clips) ? clips.map((c) => ({ ...c })) : [];
+}
+
+/** First form-video URL for a lift, or '' if none. */
+export function getExerciseFormVideoUrl(name) {
+    return getExerciseFormVideos(name)[0]?.videoUrl || '';
+}
+
 const EXERCISE_TEACHING_POINT_TOKENS = {
     'Deadlift': ['LNKT'],
     'Sumo Deadlift': ['LNKT'],
@@ -845,6 +1068,8 @@ const EXERCISE_TEACHING_POINT_TOKENS = {
     'Decline Bench Press': ['ETS'],
     'Dip': ['TS'],
     'Press-up': ['ES'],
+    'Decline Push-up': ['ES'],
+    'Push-up on Knee': ['ES'],
     'Close Grip Press-up': ['ES'],
     'Machine Bench Press': ['ES'],
     'Lat Machine Pull': ['T'],
@@ -964,6 +1189,17 @@ export function resolveCatalogName(name) {
         'press up': 'Press-up',
         'push up': 'Press-up',
         'push-up': 'Press-up',
+        'push ups': 'Press-up',
+        'decline push up': 'Decline Push-up',
+        'decline push-up': 'Decline Push-up',
+        'decline pushups': 'Decline Push-up',
+        'push ups on knee': 'Push-up on Knee',
+        'push-up on knee': 'Push-up on Knee',
+        'push up on knee': 'Push-up on Knee',
+        'knee push up': 'Push-up on Knee',
+        'knee push-up': 'Push-up on Knee',
+        'knee press-up': 'Push-up on Knee',
+        'kneeling press-up': 'Push-up on Knee',
         'seated db press': 'Seated Dumbbell Shoulder Press',
         'military press': 'Barbell Military Press',
         'seated military press': 'Machine Overhead Press',
@@ -979,8 +1215,16 @@ export function resolveCatalogName(name) {
         'chin ups': 'Chin Up',
         'chin-ups': 'Chin Up',
         'neutral chin ups': 'Neutral Pull Up',
+        'neutral chin up': 'Neutral Pull Up',
         'lat pulldown': 'Lat Machine Pull',
         'lat pull-down': 'Lat Machine Pull',
+        'lat down': 'Lat Machine Pull',
+        'cable pull down': 'Lat Machine Pull',
+        'neutral lat pulldown': 'Lat Machine Close Grip',
+        'neutral lat pull down': 'Lat Machine Close Grip',
+        'handle lat pulldown': 'Lat Machine Close Grip',
+        'cable lateral raise': 'Cable Lateral Raise (Single)',
+        'cable lat raise': 'Cable Lateral Raise (Single)',
         'superman': 'Superman Push-up',
         'superman push up': 'Superman Push-up',
         'superman push-up': 'Superman Push-up',
@@ -994,6 +1238,12 @@ export function resolveCatalogName(name) {
         'clap pull up': 'Clap Pull-up',
         'explosive pull up': 'Explosive Pull-up',
         'bicep curls': 'Dumbbell Curl',
+        'seated curl': 'Seated Curl',
+        'seated curls': 'Seated Curl',
+        'seated bicep curl': 'Seated Curl',
+        'seated bicep curls': 'Seated Curl',
+        'bench bicep curl': 'Dumbbell Preacher Curl',
+        'preacher curls': 'Dumbbell Preacher Curl',
         'french press': 'Cable French Press',
         'cable french press': 'Cable French Press',
         'seated french press': 'Single Overhead Seated French Press',
@@ -1002,12 +1252,17 @@ export function resolveCatalogName(name) {
         'single arm french press': 'Single Overhead Seated French Press',
         'overhead french press': 'Single Overhead Seated French Press',
         'single overhead seated french press': 'Single Overhead Seated French Press',
-        'calf raises': 'Calf Raise Machine',
+        'calf raises': 'Calf Raise Barbell',
+        'barbell calf raises': 'Calf Raise Barbell',
+        'seated calf raise': 'Calf Raise Machine',
+        'plate loaded calf raise machine': 'Calf Raise Machine',
         'quad extension': 'Leg Extension',
         'leg extensions': 'Leg Extension',
         'hamstring curl': 'Seated Hamstring Curl',
         'hamstring curls': 'Seated Hamstring Curl',
         'reverse flyes': 'Bent Over Rear Flye',
+        'reverse flys': 'Bent Over Rear Flye',
+        'reverse fly': 'Bent Over Rear Flye',
         'front raises': 'Standing Dumbbell Front Raise',
         'lateral raises': 'Lateral Raise',
         'pec flyes': 'Flye',
@@ -1017,8 +1272,18 @@ export function resolveCatalogName(name) {
         'sidesit': 'Side-sit on Hyperextension Bench',
         'side sit': 'Side-sit on Hyperextension Bench',
         'back extension': 'Hyperextension',
-        'pallor press': 'Pallof Press',
+        'pallof press': 'Pallof Push',
+        'pallor press': 'Pallof Push',
+        'pallof push': 'Pallof Push',
         'walk lunge': 'Walk Lunge',
+        'walking lunge': 'Walk Lunge',
+        'walking lunges': 'Walk Lunge',
+        'knees on bench crunch': 'Knees Bench Crunch',
+        'knees bench crunch': 'Knees Bench Crunch',
+        'farmer carry': 'Suitcase Carry',
+        'farmer carries': 'Suitcase Carry',
+        'farmer carrys': 'Suitcase Carry',
+        'knee raises': 'Hanging Knee Raise',
         'goblet squat': 'Goblet Squat',
         'roman chair': 'Knee Raise Machine',
         'roman chair knee raise': 'Knee Raise Machine',

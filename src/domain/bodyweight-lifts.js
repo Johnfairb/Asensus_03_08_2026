@@ -16,7 +16,8 @@ const STORAGE_KEY = 'ascensus_bw_gate_v1';
 export const PRESS_UP_VARIANTS = [
     'Press-up',
     'Close Grip Press-up',
-    'Incline Press-up'
+    'Incline Press-up',
+    'Decline Push-up'
 ];
 
 /** Canonical names that use the bodyweight competency gate. */
@@ -29,6 +30,8 @@ export const BW_GATE_EXERCISES = new Set([
     'Press-up',
     'Close Grip Press-up',
     'Incline Press-up',
+    'Decline Push-up',
+    'Push-up on Knee',
     'Pistol Squat',
     'Single Leg Deadlift',
     'Turkish Get-up'
@@ -39,12 +42,22 @@ const FIXED_SWAPS = {
     'Pull Up': 'Lat Machine Pull',
     'Chin Up': 'Lat Machine Chin-up',
     'Neutral Pull Up': 'Lat Machine Close Grip',
-    'Press-up': 'Bench Press',
+    'Press-up': 'Push-up on Knee',
     'Close Grip Press-up': 'Close Grip Bench Press',
     'Incline Press-up': 'Incline Bench Press',
+    'Decline Push-up': 'Decline Bench Press',
+    'Push-up on Knee': 'Machine Bench Press',
     'Pistol Squat': 'Split Squat',
     'Single Leg Deadlift': 'Romanian Deadlift',
     'Turkish Get-up': 'Suitcase Carry'
+};
+
+/** Permanent swap after logging >12 press-up reps (graduation, not the can't-do regression). */
+const PRESS_UP_RETIRE_SWAPS = {
+    'Press-up': 'Bench Press',
+    'Close Grip Press-up': 'Close Grip Bench Press',
+    'Incline Press-up': 'Incline Bench Press',
+    'Decline Push-up': 'Decline Bench Press'
 };
 
 function monthKey(d = new Date()) {
@@ -98,6 +111,12 @@ export function isPressUpVariant(name) {
     return PRESS_UP_VARIANTS.includes(canonicalBwName(name));
 }
 
+/** Press-up family that uses the same BW competency + 0 kg finder (includes knee regression). */
+export function usesPressUpWeightFinder(name) {
+    const canon = canonicalBwName(name);
+    return isPressUpVariant(canon) || canon === 'Push-up on Knee';
+}
+
 export function arePressUpsRetired() {
     return !!loadState().pressUpsRetired;
 }
@@ -127,7 +146,7 @@ export function resolveProgrammedBwName(name) {
 
     const state = loadState();
     if (isPressUpVariant(canon) && state.pressUpsRetired) {
-        return FIXED_SWAPS[canon] || canon;
+        return PRESS_UP_RETIRE_SWAPS[canon] || FIXED_SWAPS[canon] || canon;
     }
     if (state.cant[canon]) return state.cant[canon];
     return canon;
@@ -165,7 +184,7 @@ export function retireAllPressUps() {
     const state = loadState();
     state.pressUpsRetired = true;
     PRESS_UP_VARIANTS.forEach(n => {
-        state.cant[n] = FIXED_SWAPS[n];
+        state.cant[n] = PRESS_UP_RETIRE_SWAPS[n] || FIXED_SWAPS[n];
         delete state.can[n];
     });
     saveState(state);

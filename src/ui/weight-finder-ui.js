@@ -13,11 +13,11 @@ import {
 import {
     bwRepThreshold,
     isBwGateExercise,
-    isPressUpVariant,
     needsBwCompetencyAsk,
     recordBwCanDo,
     recordBwCannotDo,
-    swapTargetFor
+    swapTargetFor,
+    usesPressUpWeightFinder
 } from '../domain/bodyweight-lifts.js';
 import { excludeBannedExercises } from '../domain/bans.js';
 import { isStrengthPhase } from '../domain/strength-engine.js';
@@ -370,9 +370,9 @@ export function confirmBwGateYes() {
         const side = activeSideMeta(item);
         const name = side?.exercise?.name || '';
         recordBwCanDo(name);
-        markSideBwResolved(side, { needsWeight: !isPressUpVariant(name) && !sideHasWorkWeight(side, item) });
-        if (isPressUpVariant(name) || sideHasWorkWeight(side, item)) {
-            if (isPressUpVariant(name)) applyWorkWeightToSupersetSide(item, _finderSide, 0);
+        markSideBwResolved(side, { needsWeight: !usesPressUpWeightFinder(name) && !sideHasWorkWeight(side, item) });
+        if (usesPressUpWeightFinder(name) || sideHasWorkWeight(side, item)) {
+            if (usesPressUpWeightFinder(name)) applyWorkWeightToSupersetSide(item, _finderSide, 0);
             if (side) {
                 side.needsWeightFind = false;
                 side.weightFinderResolved = true;
@@ -389,8 +389,8 @@ export function confirmBwGateYes() {
     item.needsBwGate = false;
     item.bwGateResolved = true;
 
-    if (isPressUpVariant(name) || itemHasWorkWeight(item)) {
-        if (isPressUpVariant(name)) applyHypertrophyWorkWeight(item, 0);
+    if (usesPressUpWeightFinder(name) || itemHasWorkWeight(item)) {
+        if (usesPressUpWeightFinder(name)) applyHypertrophyWorkWeight(item, 0);
         markItemWeightResolved(item);
         finishWeightFinderAndMaybeOpenLog();
         return;
@@ -417,13 +417,21 @@ export function confirmBwGateNo() {
         side.exercise = { ...swapped };
         side.needsBwGate = false;
         side.bwGateResolved = true;
-        side.needsWeightFind = true;
-        side.weightFinderResolved = false;
         item.note = ((item.note || '') + ` ${_finderSide}: swapped from ${original}.`).trim();
         item.exercise = {
             ...item.exercise,
             name: `A · ${item.sides?.[0]?.exercise?.name || 'Exercise A'} / B · ${item.sides?.[1]?.exercise?.name || 'Exercise B'}`
         };
+        if (usesPressUpWeightFinder(swapName)) {
+            applyWorkWeightToSupersetSide(item, _finderSide, 0);
+            side.needsWeightFind = false;
+            side.weightFinderResolved = true;
+            finishWeightFinderAndMaybeOpenLog();
+            refreshSetsUi();
+            return;
+        }
+        side.needsWeightFind = true;
+        side.weightFinderResolved = false;
         // Zero that side's work loads until weight is set
         (item.sets || []).forEach(s => {
             if (s.side === _finderSide && !s.isWarmup) s.weight = 0;
@@ -440,6 +448,13 @@ export function confirmBwGateNo() {
     item.note = ((item.note || '') + ` Swapped from ${original} (bodyweight competency) for this month.`).trim();
     item.needsBwGate = false;
     item.bwGateResolved = true;
+    if (usesPressUpWeightFinder(swapName)) {
+        applyHypertrophyWorkWeight(item, 0);
+        markItemWeightResolved(item);
+        finishWeightFinderAndMaybeOpenLog();
+        refreshSetsUi();
+        return;
+    }
     item.needsWeightFind = true;
     item.weightFinderResolved = false;
     const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText);

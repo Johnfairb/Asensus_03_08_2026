@@ -164,9 +164,8 @@ export function openWorkoutTypePicker(mode = 'load') {
     const hint = document.getElementById('workout-type-modal-hint');
     if (title) title.innerText = 'Which type of workout?';
     if (hint) {
-        hint.innerText = window._workoutTypePickerMode === 'manual'
-            ? 'Choose the session type so it counts toward this week’s plan.'
-            : 'Choose the session type, then pick a saved workout.';
+        hint.innerText = '';
+        hint.classList.add('hidden');
     }
     modal.classList.remove('hidden');
 }
@@ -201,15 +200,14 @@ export function openLoadWorkoutList(tab = null) {
 
     const typeLabel = prettyWorkoutTypeLabel(window.manualSessionKind || 'Full Body / Strength');
     const subtitle = document.getElementById('load-workout-modal-subtitle');
+    if (subtitle) {
+        subtitle.innerHTML = '';
+        subtitle.classList.add('hidden');
+        subtitle.style.display = 'none';
+    }
     if (window._loadWorkoutTab === 'gps') {
-        if (subtitle) {
-            subtitle.innerHTML = `This week’s GPS plan — load any session. Already-done sessions stay available but won’t count again toward the weekly quota.`;
-        }
         renderGpsPlanLoadList(list);
     } else {
-        if (subtitle) {
-            subtitle.innerHTML = `Type: <strong style="color:var(--gold-accent);">${typeLabel}</strong> — choose a saved workout from My Workouts.`;
-        }
         renderSavedWorkoutLoadList(list, typeLabel);
     }
     modal.classList.remove('hidden');

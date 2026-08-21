@@ -37,7 +37,7 @@ export const HYPERTROPHY_POOLS = {
     posterior_bilateral: ['Deadlift', 'Sumo Deadlift', 'Rack Deadlift', 'Romanian Deadlift'],
     posterior_unilateral: ['Single Leg Deadlift'],
     horizontal_push_db: ['Bench Press', 'Close Grip Bench Press', 'Decline Bench Press'],
-    horizontal_push_bb: ['Bench Press', 'Decline Bench Press', 'Close Grip Bench Press', 'Dip', 'Press-up', 'Machine Bench Press'],
+    horizontal_push_bb: ['Bench Press', 'Decline Bench Press', 'Close Grip Bench Press', 'Dip', 'Press-up', 'Decline Push-up', 'Machine Bench Press'],
     vertical_push_db: ['Seated Dumbbell Shoulder Press', 'Seated Dumbbell Screw Press', 'Incline Bench Press'],
     vertical_push_bb: ['Barbell Military Press', 'Machine Overhead Press', 'Incline Bench Press', 'Incline Press-up'],
     vertical_pull: [
@@ -50,7 +50,7 @@ export const HYPERTROPHY_POOLS = {
         'Underhand Cable Row', 'Overhand Cable Row', 'Neutral Cable Row'
     ],
     bicep_isolation: [
-        'Barbell Curl', 'Dumbbell Curl', 'Hammer Curl', 'Reverse Curl',
+        'Barbell Curl', 'Dumbbell Curl', 'Seated Curl', 'Hammer Curl', 'Reverse Curl',
         'Cable Curl', 'Concentration Curl', 'Preacher Curl EZ Bar', 'Dumbbell Preacher Curl'
     ],
     tricep_isolation: [

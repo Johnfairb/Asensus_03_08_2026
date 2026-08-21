@@ -7,6 +7,7 @@ import {
     getExerciseSessionLabel,
     getExerciseTeachingPoints,
     getTeachingPointVideoUrl,
+    getExerciseFormVideos,
     resolveCatalogName,
     EXERCISE_CATALOG
 } from '../domain/exercise-catalog.js';
@@ -15,7 +16,10 @@ import {
     DEFAULT_PROFILES,
     editableIncrementCodes,
     isLbStackProfile,
-    optionLabel
+    optionLabel,
+    barLoadCodesForExercise,
+    getExerciseWorkingWeight,
+    setExerciseWorkingWeight
 } from '../domain/load-increments.js';
 import { saveExerciseIncrementOverrides } from './equipment-ui.js';
 import { getLibraryMuscleGroup, LIBRARY_MUSCLE_ORDER } from '../domain/bodyweight-lifts.js';
@@ -49,6 +53,7 @@ import { updateExerciseDropdowns, updateFoodDropdowns } from './templates.js';
 import { startLibraryWeightFinder } from './weight-finder-ui.js';
 import { persistUserConfigToCloud } from '../domain/thermodynamics.js';
 import { roundHypertrophyWorkWeight } from '../domain/hypertrophy-engine.js';
+import { formVideoThumbButtonHtml } from '../domain/route-planner.js';
 
 function foodHasPrice(food) {
     return (Number(food?.price_per_100g) > 0) || (Number(food?._packPrice) > 0);
@@ -556,11 +561,7 @@ export function openExerciseDetail(id) {
     const primary = formatMuscleList(catalog?.primary);
     const secondary = formatMuscleList(catalog?.secondary);
     const isCardio = String(ex.domain || '').toLowerCase() === 'cardio';
-    const savedMap = store.userConfig?.exerciseWorkingWeights || {};
-    const savedRaw = savedMap[displayName] ?? savedMap[ex.name];
-    const savedWeight = savedRaw != null && Number.isFinite(Number(savedRaw)) && Number(savedRaw) >= 0
-        ? Number(savedRaw)
-        : '';
+    const barCodes = barLoadCodesForExercise(displayName);
 
     document.getElementById('library-detail-title').textContent = displayName || 'Exercise';
     document.getElementById('library-detail-subtitle').textContent = sessionLabel
@@ -608,13 +609,24 @@ export function openExerciseDetail(id) {
     document.getElementById('library-detail-panel')?.classList.add('is-tall');
     if (!isCardio) {
         const safeName = String(displayName || '').replace(/'/g, "\\'");
+        const codes = barCodes.length ? barCodes : [''];
+        const fields = codes.map((code) => {
+            const saved = getExerciseWorkingWeight(displayName, code || null);
+            const val = saved == null ? '' : saved;
+            const id = code ? `library-ex-weight-input-${code}` : 'library-ex-weight-input';
+            const btnId = code ? `library-ex-dont-know-btn-${code}` : 'library-ex-dont-know-btn';
+            const label = code ? `${optionLabel(code)} (kg)` : 'WEIGHT (KG)';
+            const codeArg = code ? `, '${code}'` : '';
+            return `
+                <button type="button" id="${btnId}" class="btn-primary is-secondary ${val === '' ? '' : 'hidden'}" style="margin:0 0 10px; width:100%;" onclick="openLibraryDontKnowWeight('${safeName}'${codeArg})">I don't know the ${code ? optionLabel(code).toLowerCase() + ' ' : ''}weight</button>
+                <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">${label}</label>
+                <input type="number" inputmode="decimal" min="0" step="0.5" class="input-field" id="${id}" data-eq-code="${code}" value="${val}" placeholder="e.g. 60" style="margin-bottom:8px;" oninput="syncLibraryWeightDontKnowBtn()">`;
+        }).join('');
         bodyParts.push(`
             <div class="detail-metric-row">
                 <div class="hud-label" style="margin:0 0 8px 0;">Working weight</div>
-                <button type="button" id="library-ex-dont-know-btn" class="btn-primary is-secondary ${savedWeight === '' ? '' : 'hidden'}" style="margin:0 0 10px; width:100%;" onclick="openLibraryDontKnowWeight('${safeName}')">I don't know the weight</button>
-                <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Saved for future sessions. Normal progression still applies after you log.</div>
-                <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono';">WEIGHT (KG)</label>
-                <input type="number" inputmode="decimal" min="0" step="0.5" class="input-field" id="library-ex-weight-input" value="${savedWeight === '' ? '' : savedWeight}" placeholder="e.g. 60" style="margin-bottom:8px;" oninput="syncLibraryWeightDontKnowBtn()">
+                <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Saved per bar type for future sessions. Normal progression still applies after you log.</div>
+                ${fields}
                 <div id="library-ex-weight-error" style="display:none; font-size:12px; color:#ff6b6b; margin-bottom:8px;"></div>
                 <button type="button" class="btn-primary is-primary" style="margin:0; width:100%;" onclick="saveExerciseWorkingWeightFromDetail()">Save weight</button>
             </div>`);
@@ -633,7 +645,11 @@ export function openExerciseDetail(id) {
         bodyParts.push(`
             <div class="detail-metric-row">
                 <div class="hud-label" style="margin:0 0 6px 0;">Form video</div>
-                ${videoPlaceholder('Form video placeholder')}
+                ${(() => {
+                    const formClips = getExerciseFormVideos(displayName);
+                    if (!formClips.length) return videoPlaceholder('Form video placeholder');
+                    return formVideoThumbButtonHtml(displayName, formClips[0]?.videoUrl || '', 'width:100%;');
+                })()}
             </div>`);
         bodyParts.push(`
             <div class="detail-metric-row">
@@ -683,34 +699,49 @@ export function openExerciseDetail(id) {
 }
 
 export function syncLibraryWeightDontKnowBtn() {
-    const input = document.getElementById('library-ex-weight-input');
-    const btn = document.getElementById('library-ex-dont-know-btn');
-    if (!btn) return;
-    const raw = String(input?.value ?? '').trim();
-    const empty = raw === '';
-    btn.classList.toggle('hidden', !empty);
+    document.querySelectorAll('#library-detail-body input[id^="library-ex-weight-input"]').forEach((input) => {
+        const code = input.getAttribute('data-eq-code') || '';
+        const btnId = code ? `library-ex-dont-know-btn-${code}` : 'library-ex-dont-know-btn';
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
+        const empty = String(input.value ?? '').trim() === '';
+        btn.classList.toggle('hidden', !empty);
+    });
 }
 
-function persistExerciseWorkingWeight(exName, kg) {
-    if (!store.userConfig.exerciseWorkingWeights || typeof store.userConfig.exerciseWorkingWeights !== 'object') {
-        store.userConfig.exerciseWorkingWeights = {};
-    }
-    const rounded = kg === 0 ? 0 : roundHypertrophyWorkWeight(kg, exName);
-    store.userConfig.exerciseWorkingWeights[exName] = rounded;
+function persistExerciseWorkingWeight(exName, kg, choice = null) {
+    const rounded = kg === 0 ? 0 : roundHypertrophyWorkWeight(kg, exName, choice);
+    setExerciseWorkingWeight(exName, rounded, choice);
     try { localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig)); } catch (e) { /* ignore */ }
     try { persistUserConfigToCloud(); } catch (e) { /* ignore */ }
     return rounded;
 }
 
 export function saveExerciseWorkingWeightFromDetail() {
-    const input = document.getElementById('library-ex-weight-input');
     const err = document.getElementById('library-ex-weight-error');
     const ex = store.globalExerciseDB.find(e => String(e.id) === String(_libraryDetailId));
     if (!ex) return;
     const catalog = getExerciseMeta(ex.name);
     const displayName = catalog?.name || resolveCatalogName(ex.name) || ex.name;
-    const kg = parseFloat(input?.value);
-    if (!Number.isFinite(kg) || kg < 0) {
+    const inputs = [...document.querySelectorAll('#library-detail-body input[id^="library-ex-weight-input"]')];
+    if (!inputs.length) return;
+    let savedAny = false;
+    for (const input of inputs) {
+        const raw = String(input.value ?? '').trim();
+        if (raw === '') continue;
+        const kg = parseFloat(raw);
+        if (!Number.isFinite(kg) || kg < 0) {
+            if (err) {
+                err.style.display = 'block';
+                err.textContent = 'Enter a weight of 0 or more.';
+            }
+            return;
+        }
+        const applied = persistExerciseWorkingWeight(displayName, kg, input.getAttribute('data-eq-code') || null);
+        input.value = String(applied);
+        savedAny = true;
+    }
+    if (!savedAny) {
         if (err) {
             err.style.display = 'block';
             err.textContent = 'Enter a weight of 0 or more.';
@@ -718,16 +749,16 @@ export function saveExerciseWorkingWeightFromDetail() {
         return;
     }
     if (err) err.style.display = 'none';
-    const applied = persistExerciseWorkingWeight(displayName, kg);
-    if (input) input.value = String(applied);
     syncLibraryWeightDontKnowBtn();
 }
 
-export function openLibraryDontKnowWeight(exName) {
-    const input = document.getElementById('library-ex-weight-input');
+export function openLibraryDontKnowWeight(exName, choice = null) {
+    const code = choice || '';
+    const input = document.getElementById(code ? `library-ex-weight-input-${code}` : 'library-ex-weight-input')
+        || document.querySelector('#library-detail-body input[id^="library-ex-weight-input"]');
     if (String(input?.value ?? '').trim() !== '') return;
     startLibraryWeightFinder(exName || 'Exercise', (workKg) => {
-        const applied = persistExerciseWorkingWeight(exName, workKg);
+        const applied = persistExerciseWorkingWeight(exName, workKg, code || null);
         if (input) input.value = String(applied);
         syncLibraryWeightDontKnowBtn();
         if (_libraryDetailId) openExerciseDetail(_libraryDetailId);
@@ -1011,11 +1042,13 @@ export async function loadExercises() {
 
     const headingForExercise = (ex) => {
         const displayName = getExerciseMeta(ex.name)?.name || resolveCatalogName(ex.name) || ex.name;
+        const catalogDomain = String(getExerciseMeta(displayName)?.domain || ex.domain || '').toLowerCase();
+        if (catalogDomain === 'power') return 'Power';
         const muscle = getLibraryMuscleGroup(displayName);
         if (muscle) return muscle;
         const domain = String(ex.domain || '').toLowerCase();
         if (domain === 'power') return 'Power';
-        if (domain === 'cardio') return 'Cardio';
+        if (domain === 'cardio' || catalogDomain === 'cardio') return 'Cardio';
         return 'Other';
     };
 

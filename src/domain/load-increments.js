@@ -437,3 +437,80 @@ export function profileToLegacyEquipment(profile) {
 export function equipmentChoiceFromItem(item) {
     return item?.equipmentChoice || item?.exercise?.equipmentChoice || null;
 }
+
+export function normalizeLoadCode(choice) {
+    if (!choice) return null;
+    if (LEGACY_TO_CODE[choice]) return LEGACY_TO_CODE[choice];
+    return String(choice);
+}
+
+/** Barbell / dumbbell codes this lift actually supports. */
+export function barLoadCodesForExercise(exName) {
+    return expandLoadChoices(catalogLoadOptions(exName)).filter((c) => c === 'B' || c === 'D');
+}
+
+function defaultBarCode(exName) {
+    const bars = barLoadCodesForExercise(exName);
+    if (bars.includes('B')) return 'B';
+    if (bars.includes('D')) return 'D';
+    const opts = expandLoadChoices(catalogLoadOptions(exName));
+    return opts[0] || 'B';
+}
+
+function lookupWorkingWeightEntry(exName) {
+    const map = store.userConfig?.exerciseWorkingWeights;
+    if (!map || typeof map !== 'object') return undefined;
+    if (map[exName] != null) return map[exName];
+    const lower = String(exName || '').toLowerCase();
+    for (const [k, v] of Object.entries(map)) {
+        if (String(k).toLowerCase() === lower) return v;
+    }
+    return undefined;
+}
+
+/** Saved working kg for this exercise + bar type (null if none). Legacy numbers only apply to the default bar. */
+export function getExerciseWorkingWeight(exName, choice = null) {
+    const raw = lookupWorkingWeightEntry(exName);
+    if (raw == null) return null;
+    const code = normalizeLoadCode(choice) || defaultBarCode(exName);
+    if (typeof raw === 'number') {
+        const bars = barLoadCodesForExercise(exName);
+        if (bars.length > 1 && code !== defaultBarCode(exName)) return null;
+        return Number.isFinite(raw) && raw >= 0 ? raw : null;
+    }
+    if (typeof raw === 'object') {
+        const v = raw[code];
+        if (v != null && Number.isFinite(Number(v)) && Number(v) >= 0) return Number(v);
+        return null;
+    }
+    return null;
+}
+
+export function getExerciseWorkingWeightsByBar(exName) {
+    const out = {};
+    barLoadCodesForExercise(exName).forEach((c) => {
+        out[c] = getExerciseWorkingWeight(exName, c);
+    });
+    return out;
+}
+
+export function setExerciseWorkingWeight(exName, kg, choice = null) {
+    if (!store.userConfig.exerciseWorkingWeights || typeof store.userConfig.exerciseWorkingWeights !== 'object') {
+        store.userConfig.exerciseWorkingWeights = {};
+    }
+    const map = store.userConfig.exerciseWorkingWeights;
+    const name = String(exName || '').trim();
+    if (!name) return null;
+    const code = normalizeLoadCode(choice) || defaultBarCode(name);
+    const rounded = Number(kg);
+    if (!Number.isFinite(rounded) || rounded < 0) return null;
+    const existing = map[name];
+    if (existing != null && typeof existing === 'number') {
+        map[name] = { [defaultBarCode(name)]: existing };
+    }
+    if (!map[name] || typeof map[name] !== 'object' || Array.isArray(map[name])) {
+        map[name] = {};
+    }
+    map[name][code] = rounded;
+    return rounded;
+}

@@ -1,6 +1,6 @@
 /**
  * Multi-select add-exercises popup grouped like My Exercises (library headings).
- * Strength muscle groups first, then plyos with no heading, then Cardio / Other.
+ * Strength muscle groups first, then Power, then Cardio / Other.
  */
 import { store } from '../state/store.js';
 import { excludeBannedExercises } from '../domain/bans.js';
@@ -10,9 +10,6 @@ import { isExerciseMuscleLocked } from '../domain/hypertrophy-engine.js';
 import { allowsWeightInput } from '../domain/load-increments.js';
 import { powerMovementForName } from '../domain/power-engine.js';
 import { addExercisesByIds } from '../domain/workout-generator.js';
-
-/** Sentinel: plyos sit after strength groups with no "Power" heading. */
-const POWER_FLAT_GROUP = '__power_flat__';
 
 function isPowerPickerExercise(ex) {
     if (!ex) return false;
@@ -35,7 +32,7 @@ function groupExercisesForPicker() {
         const displayName = getExerciseMeta(ex.name)?.name || ex.name;
         let heading;
         if (isPowerPickerExercise(ex)) {
-            heading = POWER_FLAT_GROUP;
+            heading = 'Power';
         } else {
             heading = getLibraryMuscleGroup(displayName);
             if (!heading) {
@@ -50,7 +47,7 @@ function groupExercisesForPicker() {
     grouped.forEach((list) => list.sort((a, b) =>
         String(a.displayName || '').localeCompare(String(b.displayName || ''))
     ));
-    const order = [...LIBRARY_MUSCLE_ORDER, POWER_FLAT_GROUP, 'Cardio', 'Other'];
+    const order = [...LIBRARY_MUSCLE_ORDER, 'Power', 'Cardio', 'Other'];
     const headings = [
         ...order.filter((h) => (grouped.get(h) || []).length > 0),
         ...[...grouped.keys()].filter((h) => !order.includes(h))
@@ -103,9 +100,6 @@ export function openAddExercisesModal() {
                 </label>
             </div>`;
         }).join('');
-        if (heading === POWER_FLAT_GROUP) {
-            return `<div style="margin:16px 0 12px;padding-top:8px;border-top:1px solid var(--border-subtle);">${rows}</div>`;
-        }
         return `<details style="margin-bottom:12px;">
             <summary style="font-family:'Roboto Mono';font-size:11px;font-weight:800;color:var(--gold-accent);text-transform:uppercase;letter-spacing:0.5px;cursor:pointer;padding:6px 0;">${heading}</summary>
             <div>${rows || `<div style="font-size:11px;color:var(--text-muted);padding:8px 0;">None</div>`}</div>
