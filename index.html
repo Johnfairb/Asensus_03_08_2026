@@ -928,7 +928,7 @@
                     <label>Between stretches (seconds)</label>
                     <input type="number" id="set-stretch-gap-sec" class="input-field" min="0" step="1" value="5" onchange="saveSessionPrepSettings()">
                     <div id="planned-stretch-ban-wrap">
-                        <div style="font-size:10px; color:var(--text-muted); margin:10px 0 8px; font-family:'Roboto Mono';">Cool-down muscles — uncheck to ban until re-enabled</div>
+                        <div style="font-size:10px; color:var(--text-muted); margin:10px 0 8px; font-family:'Roboto Mono';">Skip muscles when stretching — uncheck any you want to leave out</div>
                         <div id="stretch-ban-list" style="display:grid; grid-template-columns:1fr 1fr; gap:8px 10px;"></div>
                     </div>
                 </div>
@@ -1771,6 +1771,7 @@
                 </button>
                 <button type="button" onclick="selectWorkoutType('Custom')" style="display:block; width:100%; text-align:left; background:var(--bg-surface-elevated); border:1px solid var(--border-highlight); border-radius:12px; padding:16px; cursor:pointer;">
                     <div style="font-size:14px; color:var(--text-main); font-weight:800;">Custom</div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:4px; line-height:1.4;">Blank log — skip templates and add your own exercises</div>
                 </button>
             </div>
         </div>

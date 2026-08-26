@@ -298,6 +298,221 @@ export function canShareWithPractice(focus) {
 
 export function invalidateWeekPlanCache() { store._weekPlanCache = { key: '', plan: null }; }
 
+const PLAN_EXCHANGES_KEY = 'ascensus_plan_session_exchanges_v1';
+
+export function loadPlanSessionExchanges() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(PLAN_EXCHANGES_KEY) || '{}') || {};
+        return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+export function savePlanSessionExchanges(map) {
+    localStorage.setItem(PLAN_EXCHANGES_KEY, JSON.stringify(map || {}));
+    invalidateWeekPlanCache();
+    try { persistUserConfigToCloud(); } catch (e) { /* ignore */ }
+}
+
+function planExchangeFingerprint(weekStartISO) {
+    return JSON.stringify(loadPlanSessionExchanges()[weekStartISO] || []);
+}
+
+function prunePlanExchanges(map, keepWeekStart) {
+    const out = {};
+    const keep = new Date(String(keepWeekStart || '') + 'T12:00:00');
+    if (Number.isNaN(keep.getTime())) return map || {};
+    keep.setDate(keep.getDate() - 14);
+    const minIso = dateToISO(keep);
+    Object.keys(map || {}).forEach((k) => {
+        if (String(k) >= minIso) out[k] = map[k];
+    });
+    return out;
+}
+
+/** GPS-programmed sessions the user can exchange (not practice / match / rest). */
+export function isSwappablePlanSession(e) {
+    if (!e || isRestEvent(e) || isPracticeEvent(e) || isGameEvent(e)) return false;
+    return isLiftingEvent(e) || isLactateEvent(e) || isSteadyCardio(e)
+        || isStrengthEvent(e) || isPowerEvent(e) || isAuxEvent(e);
+}
+
+function findPlanEventIndex(events, target, skipIndex = -1) {
+    const list = Array.isArray(events) ? events : [];
+    for (let i = 0; i < list.length; i++) {
+        if (i === skipIndex) continue;
+        if (list[i] === target) return i;
+    }
+    const want = prettyFocusName(target);
+    for (let i = 0; i < list.length; i++) {
+        if (i === skipIndex) continue;
+        if (prettyFocusName(list[i]) === want) return i;
+    }
+    return -1;
+}
+
+function applyPlanSessionExchanges(days, weekStartISO) {
+    const swaps = loadPlanSessionExchanges()[weekStartISO];
+    if (!Array.isArray(swaps) || !swaps.length) return;
+    const byDate = Object.create(null);
+    (days || []).forEach((d) => { if (d?.dateStr) byDate[d.dateStr] = d; });
+    swaps.forEach((swap) => {
+        const dayA = byDate[swap?.aDate];
+        const dayB = byDate[swap?.bDate];
+        if (!dayA || !dayB) return;
+        if (dayA === dayB) {
+            const iA = findPlanEventIndex(dayA.events, swap.aEvent);
+            const iB = findPlanEventIndex(dayA.events, swap.bEvent, iA);
+            if (iA < 0 || iB < 0 || iA === iB) return;
+            const tmp = dayA.events[iA];
+            dayA.events[iA] = dayA.events[iB];
+            dayA.events[iB] = tmp;
+            return;
+        }
+        const iA = findPlanEventIndex(dayA.events, swap.aEvent);
+        const iB = findPlanEventIndex(dayB.events, swap.bEvent);
+        if (iA < 0 || iB < 0) return;
+        const tmp = dayA.events[iA];
+        dayA.events[iA] = dayB.events[iB];
+        dayB.events[iB] = tmp;
+    });
+}
+
+function isSessionDoneOnDate(dateIso, event, eventIndex = 0) {
+    if (!dateIso || !event) return false;
+    if (isPlanSlotCompleted(planSlotKey(dateIso, event, eventIndex))) return true;
+    const kind = normalizeLoggedSessionKind(event);
+    if (!kind) return false;
+    return (listLoggedCreditKeysForDate(dateIso) || []).some((k) => k === kind);
+}
+
+function swapDayLabel(dateIso) {
+    const today = dateToISO(new Date());
+    if (dateIso === today) return 'Today';
+    if (dateIso === addDaysISO(today, 1)) return 'Tomorrow';
+    try {
+        return new Date(dateIso + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+    } catch (e) {
+        return dateIso;
+    }
+}
+
+/** Other remaining GPS sessions this week that can take this slot's place. */
+export function listPlanSessionSwapTargets(dateIso, event) {
+    if (!dateIso || !event || !isSwappablePlanSession(event)) return [];
+    let sessions = [];
+    try {
+        sessions = listWeekGpsPlanSessions(new Date(dateIso + 'T12:00:00')) || [];
+    } catch (e) {
+        return [];
+    }
+    return sessions.filter((s) => {
+        if (!s || !isSwappablePlanSession(s.event)) return false;
+        if (s.dateIso === dateIso && s.event === event) return false;
+        if (s.completed || isSessionDoneOnDate(s.dateIso, s.event, s.eventIndex)) return false;
+        return true;
+    });
+}
+
+export function planSessionSwapButtonHtml(dateIso, event, { compact = false } = {}) {
+    if (!dateIso || !event || !isSwappablePlanSession(event)) return '';
+    if (isSessionDoneOnDate(dateIso, event)) return '';
+    const targets = listPlanSessionSwapTargets(dateIso, event);
+    if (!targets.length) return '';
+    const safeDate = String(dateIso).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const safeEvent = String(event).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    if (compact) {
+        return `<button type="button" onclick="event.stopPropagation(); openPlanSessionSwapPicker('${safeDate}', '${safeEvent}')" style="background:none;border:1px solid var(--border-subtle);color:var(--text-silver);font-size:10px;font-family:'Roboto Mono';cursor:pointer;padding:6px 10px;border-radius:6px;flex-shrink:0;margin:0;">Swap</button>`;
+    }
+    return `<button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); openPlanSessionSwapPicker('${safeDate}', '${safeEvent}')">Swap with another day</button>`;
+}
+
+function refreshPlanSurfaces(isoDate) {
+    invalidateWeekPlanCache();
+    try { generateFutureTimeline(); } catch (e) { /* ignore */ }
+    try { getTodayFocus(); } catch (e) { /* ignore */ }
+    const modal = document.getElementById('day-detail-modal');
+    if (isoDate && modal && !modal.classList.contains('hidden')) {
+        const title = document.getElementById('modal-date-title')?.innerText
+            || new Date(isoDate + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+        const planDate = new Date(isoDate + 'T12:00:00');
+        const focus = pickPrimaryFocus(getPlannedDayEvents(planDate));
+        const macros = getDayMacroTargets(focus, planDate);
+        openFuturePlan(title, focus, macros.cals, isoDate);
+    }
+}
+
+/** Swap two programmed sessions so each takes the other's day. */
+export function exchangePlanSessions(aDate, aEvent, bDate, bEvent) {
+    if (!aDate || !bDate || !aEvent || !bEvent) return false;
+    if (aDate === bDate && aEvent === bEvent) return false;
+    const weekStart = getMondayISO(new Date(aDate + 'T12:00:00'));
+    const weekStartB = getMondayISO(new Date(bDate + 'T12:00:00'));
+    if (weekStart !== weekStartB) {
+        alert('You can only swap sessions within the same week.');
+        return false;
+    }
+    const map = prunePlanExchanges(loadPlanSessionExchanges(), weekStart);
+    const list = Array.isArray(map[weekStart]) ? map[weekStart].slice() : [];
+    list.push({ aDate, aEvent, bDate, bEvent });
+    map[weekStart] = list;
+    savePlanSessionExchanges(map);
+    refreshPlanSurfaces(aDate);
+    return true;
+}
+
+export function openPlanSessionSwapPicker(dateIso, event) {
+    const existing = document.getElementById('plan-session-swap-chooser');
+    if (existing) existing.remove();
+    if (isSessionDoneOnDate(dateIso, event)) {
+        alert('That session is already logged — swap before you start it.');
+        return;
+    }
+    const targets = listPlanSessionSwapTargets(dateIso, event);
+    if (!targets.length) {
+        alert('No other programmed sessions this week to swap with.');
+        return;
+    }
+    const hereLabel = prettyFocusName(event);
+    const overlay = document.createElement('div');
+    overlay.id = 'plan-session-swap-chooser';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:100050;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+    const buttons = targets.map((t) => {
+        const day = swapDayLabel(t.dateIso);
+        const name = prettyFocusName(t.event);
+        const safeDate = String(t.dateIso).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const safeEvent = String(t.event).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        return `<button type="button" data-swap-date="${safeDate}" data-swap-event="${safeEvent}" class="btn-primary is-secondary" style="margin:0; text-align:left;">
+            <div style="font-size:13px; font-weight:800; color:var(--text-main);">${name}</div>
+            <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; margin-top:3px;">${day} — this ${hereLabel} moves there</div>
+        </button>`;
+    }).join('');
+    overlay.innerHTML = `
+        <div class="stealth-panel" style="width:100%;max-width:390px;background:var(--bg-surface);padding:20px 16px 16px;border-radius:14px 14px 0 0;max-height:80vh;overflow:auto;">
+            <div style="font-size:13px;font-weight:800;color:var(--text-main);margin-bottom:6px;">Swap ${hereLabel}?</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;line-height:1.4;">Pick the session that should take this slot. ${hereLabel} moves to that day.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                ${buttons}
+                <button type="button" data-swap-cancel="1" style="margin:8px 0 0;background:none;border:none;color:var(--text-stealth);font-size:12px;cursor:pointer;font-family:'Roboto Mono';">Cancel</button>
+            </div>
+        </div>`;
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) close();
+    });
+    overlay.querySelectorAll('[data-swap-date]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const bDate = btn.getAttribute('data-swap-date');
+            const bEvent = btn.getAttribute('data-swap-event');
+            close();
+            exchangePlanSessions(dateIso, event, bDate, bEvent);
+        });
+    });
+    overlay.querySelector('[data-swap-cancel]')?.addEventListener('click', close);
+    document.body.appendChild(overlay);
+}
+
 export function getMondayISO(d) {
     const x = new Date(d);
     x.setHours(12, 0, 0, 0);
@@ -1715,7 +1930,8 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
         loggedCredits.strength || 0,
         loggedCredits.power || 0,
         isGuidanceOff('timetabling') ? 1 : 0,
-        weekSpecificFingerprint(weekStartISO)
+        weekSpecificFingerprint(weekStartISO),
+        planExchangeFingerprint(weekStartISO)
     ].join('|');
 
     if (store._weekPlanCache.key === cacheKey && store._weekPlanCache.plan) return store._weekPlanCache.plan;
@@ -1828,6 +2044,7 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
         });
     }
     persistWeekStrengthTail(days);
+    applyPlanSessionExchanges(days, weekStartISO);
     store._weekPlanCache = { key: cacheKey, plan: days };
     return days;
 }
@@ -2462,9 +2679,14 @@ export function generateFutureTimeline() {
             const restLabel = (dayEvents || []).includes('Rest (Cardio Only)') ? 'Rest (Cardio Only)' : 'Rest';
             sessionItemsHtml = `<div style="${itemLineStyle}">${restLabel}</div>`;
         } else {
-            sessionItemsHtml = slots.map(s =>
-                `<div style="${itemLineStyle}">${s.time} ${s.name}</div>`
-            ).join('');
+            sessionItemsHtml = slots.map(s => {
+                const swapBtn = planSessionSwapButtonHtml(dateStr, s.event, { compact: true });
+                if (!swapBtn) return `<div style="${itemLineStyle}">${s.time} ${s.name}</div>`;
+                return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                    <div style="${itemLineStyle}">${s.time} ${s.name}</div>
+                    ${swapBtn}
+                </div>`;
+            }).join('');
         }
         const sessionLinesHtml = `<div>
             <strong style="${sectionLabelStyle}">Exercise</strong>
@@ -2989,6 +3211,7 @@ export function pickFixedFocusForDay(events) {
 export function openFuturePlan(dateStr, focus, totalCals, isoDate) {
     const titleEl = document.getElementById('modal-date-title');
     if (titleEl) titleEl.innerText = dateStr;
+    if (isoDate) window._openPlanIso = isoDate;
 
     const planDate = isoDate ? new Date(isoDate + 'T12:00:00') : new Date();
     const dayEvents = getPlannedDayEvents(planDate);
@@ -3019,10 +3242,10 @@ export function openFuturePlan(dateStr, focus, totalCals, isoDate) {
         let sessionHtml = buildDomainGoalBarsHtml(domains);
         if (!slots.length || slots.every(s => isRestEvent(s.event))) {
             const restFocus = dayEvents.includes('Rest (Cardio Only)') ? 'Rest (Cardio Only)' : 'Rest';
-            sessionHtml += buildPlainSessionCardHtml(restFocus, '');
+            sessionHtml += buildPlainSessionCardHtml(restFocus, '', isoDate);
         } else {
             slots.forEach(slot => {
-                sessionHtml += buildPlainSessionCardHtml(slot.event, slot.time);
+                sessionHtml += buildPlainSessionCardHtml(slot.event, slot.time, isoDate);
             });
         }
         exPanel.innerHTML = sessionHtml;

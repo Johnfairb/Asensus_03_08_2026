@@ -131,7 +131,8 @@ export function captureSyncedLocalState() {
         hitMonthPlan: readSyncedJson('ascensus_hit_month_plan_v1', {}),
         completedPlanSlots: readSyncedJson('ascensus_completed_plan_slots', {}),
         loggedSessions: readSyncedJson('ascensus_logged_sessions', {}),
-        hypertrophyFatigue: readSyncedJson('ascensus_hypertrophy_fatigue', {})
+        hypertrophyFatigue: readSyncedJson('ascensus_hypertrophy_fatigue', {}),
+        planSessionExchanges: readSyncedJson('ascensus_plan_session_exchanges_v1', {})
     };
 }
 
@@ -140,6 +141,10 @@ export function restoreSyncedLocalState(sync) {
     writeSyncedJson('ascensus_fixed_schedules', sync.fixedSchedules);
     writeSyncedJson('ascensus_specific_schedules', sync.specificSchedules);
     writeSyncedJson('ascensus_route_overrides', sync.routeOverrides);
+    if (sync.planSessionExchanges && typeof sync.planSessionExchanges === 'object') {
+        writeSyncedJson('ascensus_plan_session_exchanges_v1', sync.planSessionExchanges);
+        try { invalidateWeekPlanCache(); } catch (e) { /* ignore */ }
+    }
     writeSyncedJson('ascensus_strength_month_picks', sync.strengthMonthPicks);
     const localMonthPlan = readSyncedJson('ascensus_strength_month_plan_v9', null);
     if (

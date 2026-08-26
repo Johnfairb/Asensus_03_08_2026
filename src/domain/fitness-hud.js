@@ -1,7 +1,7 @@
 import { store } from '../state/store.js';
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from './meal-planner.js';
 import { getLactateProtocolForSlot } from './lactate-engine.js';
-import { assignPairedSessionSlots, dateToISO, foldMisfiledGymTailSessions, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listLoggedCreditKeysForDate, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, resolveStrengthEventLetter, saveWorkoutSessionSnapshots, strengthLabelForLetter } from './route-planner.js';
+import { assignPairedSessionSlots, dateToISO, foldMisfiledGymTailSessions, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listLoggedCreditKeysForDate, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, planSessionSwapButtonHtml, resolveStrengthEventLetter, saveWorkoutSessionSnapshots, strengthLabelForLetter } from './route-planner.js';
 import { loadDayJournal } from '../ui/journey.js';
 import { getSportData } from './sports-matrix.js';
 import { buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, resolveStrengthSession } from './strength-engine.js';
@@ -309,7 +309,12 @@ export function renderWorkoutPreview(focus) {
         let logAction = '';
         if (!isRest) {
             // Matching in-progress session is shown only via the draft banner below
-            logAction = `<button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); startExecution('workout', this, '${safeFocus}')">Start</button>`;
+            const todayIso = dateToISO(today);
+            const swapHtml = planSessionSwapButtonHtml(todayIso, eventName);
+            logAction = `<div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;" onclick="event.stopPropagation();">
+                <button type="button" class="btn-primary is-secondary meal-log-btn" onclick="event.stopPropagation(); startExecution('workout', this, '${safeFocus}')">Start</button>
+                ${swapHtml}
+            </div>`;
         }
 
         return `<div class="card" ${clickAttrs} style="${cardStyle}">
@@ -1199,17 +1204,19 @@ export function getWorkoutExerciseRows(focus) {
 }
 
 /** Plain session block for Plan day popup (no log/start, no .card). */
-export function buildPlainSessionCardHtml(focus, _timeLabel) {
+export function buildPlainSessionCardHtml(focus, _timeLabel, dateIso = '') {
     const { sessionType, sessionName, exercises } = getWorkoutExerciseRows(focus);
     const domainChip = formatTopDomainChip(getDayDomainTargets(focus), 2);
+    const swapHtml = dateIso ? planSessionSwapButtonHtml(dateIso, focus, { compact: true }) : '';
     let html = `<div style="padding:4px 0 16px; margin-bottom:8px; border-bottom:1px solid var(--border-subtle); width:100%; min-width:0;">
         <div class="day-plan-section-head" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; padding-bottom:6px; gap:8px; min-width:0;">
             <div style="min-width:0; flex:1;">
                 <strong style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; letter-spacing:0.4px; min-width:0;">${sessionType}</strong>
                 <div style="margin-top:4px; color:var(--text-main); font-size:12px; font-weight:600; line-height:1.35; min-width:0;">${sessionName}</div>
             </div>
-            <div style="flex-shrink:0; text-align:right;">
+            <div style="flex-shrink:0; text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
                 <span class="day-plan-metric-val" style="color:var(--text-main); white-space:nowrap;">${domainChip}</span>
+                ${swapHtml}
             </div>
         </div>
         ${buildSessionExerciseRowsHtml(exercises)}

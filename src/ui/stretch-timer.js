@@ -432,6 +432,7 @@ export function toggleSessionStretchExclude(exIdx, baseName) {
         s._sessionSkipped = turnOff;
         if (turnOff) s.completed = false;
     });
+    try { saveWorkoutDraft(); } catch (e) { /* ignore */ }
     if (getStretchTimerState(item)?.running) {
         rebuildStretchTimerAfterExclude(exIdx);
     } else {

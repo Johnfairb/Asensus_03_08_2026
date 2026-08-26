@@ -409,8 +409,13 @@ export function renderWorkoutLog() {
 
     html += workoutReorderGapHtml((store.activeLog.items || []).length);
 
+    const itemCount = (store.activeLog.items || []).length;
     if (filter === 'todo' && todoCount === 0) {
-        html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px;">All exercises logged. Switch to Logged to review.</div>`;
+        if (itemCount === 0) {
+            html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px; line-height:1.5;">Empty workout — tap <strong style="color:var(--gold-accent);">+ Add exercise</strong> to log lifts, or Load Workout.</div>`;
+        } else {
+            html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px;">All exercises logged. Switch to Logged to review.</div>`;
+        }
     }
     if (filter === 'logged' && loggedCount === 0) {
         html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px;">Nothing logged yet — complete sets under To do.</div>`;
@@ -2531,9 +2536,23 @@ export function renderExerciseSets() {
         });
 
         let html = `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:12px;">
-            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${plannedTimed ? 'Start the timer when ready. Remove muscles for this workout if needed.' : 'Check the whole routine, or expand to mark parts.'}</div>
+            <div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono';">${plannedTimed ? 'Skip any muscles for this session, then start the timer.' : 'Check the whole routine, or expand to mark parts.'}</div>
             ${item.isCustomStretch ? '' : `<button type="button" onclick="dismissPlannedStretchFromLog(${exIdx})" style="background:none; border:none; color:var(--text-stealth); font-size:22px; cursor:pointer; line-height:1;" aria-label="Dismiss stretching">&times;</button>`}
         </div>`;
+
+        if (groups.length) {
+            html += `<div style="margin-bottom:14px;">
+                <div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:8px;">Muscles this session — tap to skip</div>
+                <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                    ${groups.map((group) => {
+                        const skipped = group.indices.map(i => parts[i]).filter(Boolean).every(s => s._sessionSkipped);
+                        const safeBase = String(group.base).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                        const label = String(group.base).replace(/</g, '&lt;');
+                        return `<button type="button" onclick="toggleSessionStretchExclude(${exIdx}, '${safeBase}')" style="margin:0; padding:8px 10px; border-radius:8px; border:1px solid ${skipped ? 'var(--border-subtle)' : 'var(--gold-accent)'}; background:${skipped ? 'transparent' : 'rgba(212,175,55,0.12)'}; color:${skipped ? 'var(--text-stealth)' : 'var(--gold-accent)'}; font-size:11px; font-family:'Roboto Mono'; font-weight:700; cursor:pointer; text-decoration:${skipped ? 'line-through' : 'none'};">${label}${skipped ? ' · skip' : ''}</button>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
 
         if (plannedTimed) {
             const step = currentStretchStep(item);
@@ -2572,7 +2591,7 @@ export function renderExerciseSets() {
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px;">
                         <div style="font-size:13px; font-weight:800; color:var(--text-main);">${String(group.base).replace(/</g, '&lt;')}${skipped ? ' <span style="font-size:10px; color:var(--text-stealth); font-weight:600;">(removed)</span>' : ''}</div>
                         <div style="display:flex; align-items:center; gap:8px;">
-                            ${plannedTimed ? `<button type="button" onclick="toggleSessionStretchExclude(${exIdx}, '${String(group.base).replace(/'/g, "\\'")}')" style="background:none; border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">${skipped ? 'Restore' : 'Remove'}</button>` : ''}
+                            ${`<button type="button" onclick="toggleSessionStretchExclude(${exIdx}, '${String(group.base).replace(/'/g, "\\'")}')" style="background:none; border:1px solid var(--border-subtle); color:var(--text-silver); font-size:9px; padding:4px 8px; border-radius:4px; font-family:'Roboto Mono'; cursor:pointer;">${skipped ? 'Include' : 'Skip'}</button>`}
                             ${groupSets.length === 1
                                 ? `<div class="check-btn ${groupDone ? 'completed' : ''}" style="flex-shrink:0; ${timerRunning || skipped ? 'opacity:0.45; pointer-events:none;' : ''}" onclick="event.stopPropagation(); toggleSetComplete(${exIdx}, ${group.indices[0]})">${groupDone ? '✓' : ''}</div>`
                                 : `<div class="check-btn ${groupDone ? 'completed' : ''}" style="flex-shrink:0; ${timerRunning || skipped ? 'opacity:0.45; pointer-events:none;' : ''}" onclick="event.stopPropagation(); toggleStretchMuscleGroupComplete(${exIdx}, '${String(group.base).replace(/'/g, "\\'")}')">${groupDone ? '✓' : ''}</div>`}
@@ -3616,6 +3635,12 @@ export function beginManualWorkoutSession(kind, opts = {}) {
         armWorkoutTimer();
         window._workoutSessionConfirmed = true;
         saveWorkoutDraft({ elapsedMs: 0, timerRunning: false });
+        if (isCustomManual) {
+            renderWorkoutLog();
+            setTimeout(() => {
+                try { openAddExercisesModal(); } catch (e) { /* ignore */ }
+            }, 80);
+        }
     }
 }
 
