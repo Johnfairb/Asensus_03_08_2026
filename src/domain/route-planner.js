@@ -976,16 +976,22 @@ export function getWeekStartStrengthLetter(weekStartISO) {
 export function persistWeekStrengthTail(days) {
     if (!days || !days.length) return;
     const weekStart = days[0].dateStr;
-    const sessions = [];
-    let lastLetter = null;
+    const existing = loadStrengthWeekSticky(weekStart);
+    const byDate = Object.create(null);
+    (existing.sessions || []).forEach((s) => {
+        if (s && s.dateStr && (s.letter === 'A' || s.letter === 'B')) byDate[s.dateStr] = s.letter;
+    });
+    let lastLetter = existing.lastLetter === 'B' || existing.lastLetter === 'A' ? existing.lastLetter : null;
     for (let i = 0; i < days.length; i++) {
         const ev = (days[i].events || []).find(isStrengthABEvent);
         if (!ev) continue;
         const letter = resolveStrengthEventLetter(ev) || 'A';
-        sessions.push({ dateStr: days[i].dateStr, letter });
+        byDate[days[i].dateStr] = letter;
         lastLetter = letter;
     }
+    const sessions = Object.keys(byDate).sort().map((dateStr) => ({ dateStr, letter: byDate[dateStr] }));
     if (!sessions.length) return;
+    lastLetter = sessions[sessions.length - 1].letter;
     saveStrengthWeekSticky(weekStart, sessions, lastLetter);
     // Keep legacy keys for cloud sync, but never let another week clobber this week's map entry
     try {
@@ -1109,9 +1115,7 @@ export function placeStrengthSessions(days, count) {
         }
     }
 
-    const chosenDates = chosen.map((i) => days[i].dateStr).sort().join('|');
-    const stickyKey = [...stickyDates].sort().join('|');
-    enforceStrengthABAlternation(days, startLetter, { pinSticky: chosenDates === stickyKey && !!chosenDates });
+    enforceStrengthABAlternation(days, startLetter, { pinSticky: true });
     persistWeekStrengthTail(days);
     return chosen.length;
 }

@@ -118,6 +118,9 @@ export function captureSyncedLocalState() {
         specificSchedules: readSyncedJson('ascensus_specific_schedules', {}),
         routeOverrides: readSyncedJson('ascensus_route_overrides', {}),
         strengthMonthPicks: readSyncedJson('ascensus_strength_month_picks', {}),
+        strengthMonthPlan: readSyncedJson('ascensus_strength_month_plan_v9', null),
+        cycleSessionPlans: readSyncedJson('ascensus_cycle_session_plans_v1', null),
+        workoutCycle: readSyncedJson('ascensus_workout_cycle_v1', null),
         metricTargets: readSyncedJson('ascensus_metric_targets', {}),
         gpsIndex: localStorage.getItem('ascensus_gps_index'),
         strengthAB: localStorage.getItem('ascensus_strength_ab'),
@@ -125,6 +128,7 @@ export function captureSyncedLocalState() {
         strengthPlanTail: localStorage.getItem('ascensus_strength_plan_tail'),
         strengthPlanTailWeek: localStorage.getItem('ascensus_strength_plan_tail_week'),
         strengthWeekSticky: readSyncedJson('ascensus_strength_week_sticky_v1', {}),
+        hitMonthPlan: readSyncedJson('ascensus_hit_month_plan_v1', {}),
         completedPlanSlots: readSyncedJson('ascensus_completed_plan_slots', {}),
         loggedSessions: readSyncedJson('ascensus_logged_sessions', {}),
         hypertrophyFatigue: readSyncedJson('ascensus_hypertrophy_fatigue', {})
@@ -137,6 +141,28 @@ export function restoreSyncedLocalState(sync) {
     writeSyncedJson('ascensus_specific_schedules', sync.specificSchedules);
     writeSyncedJson('ascensus_route_overrides', sync.routeOverrides);
     writeSyncedJson('ascensus_strength_month_picks', sync.strengthMonthPicks);
+    const localMonthPlan = readSyncedJson('ascensus_strength_month_plan_v9', null);
+    if (
+        !(localMonthPlan && Array.isArray(localMonthPlan.sessionA) && Array.isArray(localMonthPlan.sessionB))
+        && sync.strengthMonthPlan
+        && Array.isArray(sync.strengthMonthPlan.sessionA)
+        && Array.isArray(sync.strengthMonthPlan.sessionB)
+    ) {
+        writeSyncedJson('ascensus_strength_month_plan_v9', sync.strengthMonthPlan);
+    }
+    const localCyclePlans = readSyncedJson('ascensus_cycle_session_plans_v1', null);
+    if (
+        !(localCyclePlans && typeof localCyclePlans === 'object' && Object.keys(localCyclePlans).length)
+        && sync.cycleSessionPlans
+        && typeof sync.cycleSessionPlans === 'object'
+        && Object.keys(sync.cycleSessionPlans).length
+    ) {
+        writeSyncedJson('ascensus_cycle_session_plans_v1', sync.cycleSessionPlans);
+    }
+    const localCycle = readSyncedJson('ascensus_workout_cycle_v1', null);
+    if (!localCycle?.startDate && sync.workoutCycle?.startDate) {
+        writeSyncedJson('ascensus_workout_cycle_v1', sync.workoutCycle);
+    }
     writeSyncedJson('ascensus_metric_targets', sync.metricTargets);
     if (sync.gpsIndex != null) localStorage.setItem('ascensus_gps_index', String(sync.gpsIndex));
     if (sync.strengthAB != null) localStorage.setItem('ascensus_strength_ab', String(sync.strengthAB));
@@ -144,6 +170,9 @@ export function restoreSyncedLocalState(sync) {
     if (sync.strengthPlanTail != null) localStorage.setItem('ascensus_strength_plan_tail', String(sync.strengthPlanTail));
     if (sync.strengthPlanTailWeek != null) localStorage.setItem('ascensus_strength_plan_tail_week', String(sync.strengthPlanTailWeek));
     writeSyncedJson('ascensus_strength_week_sticky_v1', sync.strengthWeekSticky);
+    if (sync.hitMonthPlan && Array.isArray(sync.hitMonthPlan.A) && Array.isArray(sync.hitMonthPlan.B)) {
+        writeSyncedJson('ascensus_hit_month_plan_v1', sync.hitMonthPlan);
+    }
     mergeCreditStateFromRemote(sync);
     try {
         if (typeof store.specificSchedules !== 'undefined') {

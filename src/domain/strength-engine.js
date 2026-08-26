@@ -1,7 +1,7 @@
 import { store } from '../state/store.js';
 import { buildWeeklyTrainingPlan, getMondayISO, isStrengthEvent } from './route-planner.js';
 import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, getSportData } from './sports-matrix.js';
-import { HYPERTROPHY_POOLS, avoidLockedMuscleOnItems, isExerciseMuscleLocked, isHypertrophyPhase } from './hypertrophy-engine.js';
+import { HYPERTROPHY_POOLS, isHypertrophyPhase } from './hypertrophy-engine.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
 import { buildStrengthMetaMap, EXERCISE_CATALOG, getExerciseMeta, isUnilateralCompound, resolveCatalogName } from './exercise-catalog.js';
 import { pickCoreExercisesForLevel } from './core-programming.js';
@@ -169,12 +169,31 @@ function isIsoDayKey(value) {
     return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
 }
 
+const LEGACY_MONTH_PLAN_KEYS = [
+    'ascensus_strength_month_plan_v8',
+    'ascensus_strength_month_plan_v7',
+    'ascensus_strength_month_picks'
+];
+
+function isUsableMonthPlan(plan) {
+    return !!(plan && Array.isArray(plan.sessionA) && Array.isArray(plan.sessionB));
+}
+
 /** Read the stored month plan without generating a new one. */
 export function peekStoredStrengthMonthPlan() {
     try {
         const plan = JSON.parse(localStorage.getItem(MONTH_PLAN_KEY) || 'null');
-        if (plan && Array.isArray(plan.sessionA) && Array.isArray(plan.sessionB)) return plan;
+        if (isUsableMonthPlan(plan)) return plan;
     } catch (e) { /* ignore */ }
+    for (const key of LEGACY_MONTH_PLAN_KEYS) {
+        try {
+            const plan = JSON.parse(localStorage.getItem(key) || 'null');
+            if (isUsableMonthPlan(plan)) {
+                try { localStorage.setItem(MONTH_PLAN_KEY, JSON.stringify(plan)); } catch (e) { /* ignore */ }
+                return plan;
+            }
+        } catch (e) { /* ignore */ }
+    }
     return null;
 }
 
@@ -396,7 +415,7 @@ export function loadStrengthMonthPlan(sportData) {
         return plan;
     }
 
-    if (plan && Array.isArray(plan.sessionA) && Array.isArray(plan.sessionB)) {
+    if (isUsableMonthPlan(plan)) {
         return plan;
     }
 
@@ -404,6 +423,21 @@ export function loadStrengthMonthPlan(sportData) {
     plan.month = month;
     saveStrengthMonthPlan(plan);
     return plan;
+}
+
+function ensureSlotPick(plan, slotId, sportData) {
+    if (!plan) return 'Unknown';
+    plan.compoundPicks = plan.compoundPicks || {};
+    if (plan.compoundPicks[slotId]) return plan.compoundPicks[slotId];
+    const sport = sportData || getSportData();
+    const overrides = {
+        shoulderRisk: !!(sport && (sport.rotator_cuff || sport.front_delt)),
+        armImbalance: !!(sport && (sport.bicep || sport.tricep || sport.arm_imbalance)),
+        noPullups: store.userConfig.canDoPullups === 'No'
+    };
+    plan.compoundPicks[slotId] = pickCompoundForSlot(slotId, overrides);
+    saveStrengthMonthPlan(plan);
+    return plan.compoundPicks[slotId];
 }
 
 /**
@@ -541,7 +575,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
                     restSec: 60
                 });
             });
-            return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items: avoidLockedMuscleOnItems(items), source: locked.source === 'custom' ? 'custom' : 'confirmed' };
+            return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items, source: locked.source === 'custom' ? 'custom' : 'confirmed' };
         }
         if (locked?.source === 'custom' && Array.isArray(locked.items) && locked.items.length) {
             const compoundSets = strengthSetsForTier(tier, 'compound');
@@ -564,7 +598,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
                     restSec: it.isIsolation ? 120 : (isUnilateralCompound(name) ? 200 : 240)
                 };
             }).filter(Boolean);
-            return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items: avoidLockedMuscleOnItems(items), source: 'custom' };
+            return { session, setBudget: setBudget || compoundSets * Math.max(1, items.length), timeTier: tier, items, source: 'custom' };
         }
     } catch (e) { /* generated path */ }
 
@@ -583,16 +617,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
     slotIds.forEach((slotId) => {
         const meta = STRENGTH_COMPOUND_SLOTS[slotId];
         if (!meta) return;
-        let name = resolveProgrammedBwName(
-            (plan.compoundPicks && plan.compoundPicks[slotId]) || pickCompoundForSlot(slotId)
-        );
-        if (isExerciseMuscleLocked(name)) {
-            const pool = compoundPoolForSlot(slotId)
-                .map((n) => resolveProgrammedBwName(n))
-                .filter((n) => n && !usedNames.has(n) && !isExerciseMuscleLocked(n));
-            if (!pool.length) return;
-            name = pool[Math.floor(Math.random() * pool.length)];
-        }
+        const name = resolveProgrammedBwName(ensureSlotPick(plan, slotId, sportData));
         usedNames.add(name);
         items.push({
             name,
@@ -609,15 +634,7 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
 
     const sessionIsos = (plan.isolations || []).filter(iso => iso.session === session);
     sessionIsos.forEach((iso) => {
-        let name = resolveProgrammedBwName(iso.name);
-        if (isExerciseMuscleLocked(name)) {
-            const poolName = ISO_POOL_BY_MUSCLE[iso.muscleKey];
-            const pool = (HYPERTROPHY_POOLS[poolName] || [])
-                .map((n) => resolveProgrammedBwName(n))
-                .filter((n) => n && !usedNames.has(n) && !isExerciseMuscleLocked(n));
-            if (!pool.length) return;
-            name = pool[Math.floor(Math.random() * pool.length)];
-        }
+        const name = resolveProgrammedBwName(iso.name);
         usedNames.add(name);
         items.push({
             name,

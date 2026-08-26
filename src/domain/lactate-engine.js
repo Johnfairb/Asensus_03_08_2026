@@ -344,6 +344,96 @@ export function getLactateMonthKey(date = new Date()) {
     }
 }
 
+const HIT_MONTH_PLAN_KEY = 'ascensus_hit_month_plan_v1';
+/** Canonical duration used to mint Session A/B interval patterns for the month. */
+const HIT_CANONICAL_RPE = 8;
+
+function cloneIntervalSets(sets) {
+    return (sets || []).map((s) => {
+        const workSec = Math.max(5, Math.round(Number(s.workSec) || 0));
+        const restSec = Math.max(5, Math.round(Number(s.restSec) || 0));
+        return { workSec, restSec, cycleSec: workSec + restSec };
+    }).filter((s) => s.workSec > 0 && s.restSec > 0);
+}
+
+function roundTo5(n) {
+    return Math.max(5, Math.round(Number(n) / 5) * 5);
+}
+
+/** Stretch or shrink a locked work/rest pattern to fill targetSec (keeps the same set count). */
+export function scaleIntervalSets(sets, targetSec) {
+    const src = cloneIntervalSets(sets);
+    if (!src.length) return [];
+    const want = Math.max(40, Math.round(Number(targetSec) || 0));
+    const total = src.reduce((s, x) => s + x.cycleSec, 0);
+    if (!(total > 0) || Math.abs(total - want) < 5) return src;
+
+    const factor = want / total;
+    const scaled = src.map((x) => {
+        const workSec = Math.max(20, roundTo5(x.workSec * factor));
+        const restSec = Math.max(20, roundTo5(x.restSec * factor));
+        return { workSec, restSec, cycleSec: workSec + restSec };
+    });
+    let sum = scaled.reduce((s, x) => s + x.cycleSec, 0);
+    let diff = want - sum;
+    const last = scaled[scaled.length - 1];
+    if (last && Math.abs(diff) >= 5) {
+        const adj = roundTo5(diff);
+        if (adj > 0) {
+            last.restSec += adj;
+            last.cycleSec += adj;
+        } else {
+            const take = Math.min(-adj, Math.max(0, last.restSec - 20));
+            last.restSec -= take;
+            last.cycleSec -= take;
+        }
+    }
+    return scaled;
+}
+
+function loadStoredHitMonthPlan() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(HIT_MONTH_PLAN_KEY) || 'null');
+        if (raw && Array.isArray(raw.A) && Array.isArray(raw.B) && raw.A.length && raw.B.length) return raw;
+    } catch (e) { /* ignore */ }
+    return null;
+}
+
+function saveHitMonthPlan(plan) {
+    try { localStorage.setItem(HIT_MONTH_PLAN_KEY, JSON.stringify(plan)); } catch (e) { /* ignore */ }
+    return plan;
+}
+
+function mintHitSlotSets(monthKey, slot) {
+    const offset = slot === 'B' ? 77 : 13;
+    const rng = mulberry32((Number(monthKey) * 1009 + offset) >>> 0);
+    return generateVariableIntervalSets(lactateWorkBlockSec(HIT_CANONICAL_RPE), rng, HIT_CANONICAL_RPE);
+}
+
+/** Locked HIT A/B interval patterns for this billing month. Minted once, then reused. */
+export function loadOrCreateHitMonthPlan(date = new Date()) {
+    const monthKey = getLactateMonthKey(date);
+    const stored = loadStoredHitMonthPlan();
+    if (stored && stored.monthKey === monthKey) {
+        return {
+            monthKey,
+            A: cloneIntervalSets(stored.A),
+            B: cloneIntervalSets(stored.B)
+        };
+    }
+    const plan = {
+        monthKey,
+        A: mintHitSlotSets(monthKey, 'A'),
+        B: mintHitSlotSets(monthKey, 'B')
+    };
+    return saveHitMonthPlan(plan);
+}
+
+export function getMonthlyHitIntervalSets(slot = 'A', date = new Date()) {
+    const plan = loadOrCreateHitMonthPlan(date);
+    return cloneIntervalSets(slot === 'B' ? plan.B : plan.A);
+}
+
 function formatSec(sec) {
     const s = Math.max(0, Math.round(Number(sec) || 0));
     if (s % 60 === 0) return `${s / 60}m`;
@@ -913,9 +1003,9 @@ export function generateVariableIntervalSets(totalSec = LACTATE_WORK_BLOCK_SEC, 
 
 export function getMonthlyLactateProtocols(date = new Date()) {
     const monthKey = getLactateMonthKey(date);
-    const rng = mulberry32(monthKey * 9973 + 42);
+    const plan = loadOrCreateHitMonthPlan(date);
     const wrap = (slot) => {
-        const sample = generateVariableIntervalSets(lactateWorkBlockSec(8), rng, 8);
+        const sample = slot === 'B' ? plan.B : plan.A;
         const avgWork = Math.round(sample.reduce((s, x) => s + x.workSec, 0) / Math.max(1, sample.length));
         const avgRest = Math.round(sample.reduce((s, x) => s + x.restSec, 0) / Math.max(1, sample.length));
         return {
@@ -924,7 +1014,7 @@ export function getMonthlyLactateProtocols(date = new Date()) {
             sets: sample.length,
             workSec: avgWork,
             restSec: avgRest,
-            blockMinutes: 15,
+            blockMinutes: lactateWorkBlockMinutes(HIT_CANONICAL_RPE),
             label: `variable intervals (~${formatSec(avgWork)} / ${formatSec(avgRest)} avg)`,
             summary: `${sample.length}× variable work/rest · duration from desired RPE`
         };
@@ -1074,8 +1164,6 @@ export function buildLactateIntervalPlan({
         };
     }
 
-    const seed = Date.now() ^ (getLactateMonthKey(date) * 1009) ^ (slot === 'B' ? 77 : 13) ^ (initialRpe * 17);
-    const rng = mulberry32(seed);
     const modalities = intervalTypes.length ? intervalTypes : ['interval_sprints'];
 
     const testRows = [];
@@ -1085,7 +1173,8 @@ export function buildLactateIntervalPlan({
     });
     const consumedSec = testRows.reduce((s, r) => s + (Number(r.workSec) || 0) + (Number(r.restSec) || 0), 0);
     const remainingSec = Math.max(0, blockSec - consumedSec);
-    const intervals = remainingSec >= 40 ? generateVariableIntervalSets(remainingSec, rng, liveRpe) : [];
+    const monthlySets = getMonthlyHitIntervalSets(slot, date);
+    const intervals = remainingSec >= 40 ? scaleIntervalSets(monthlySets, remainingSec) : [];
     const totalSets = intervals.length;
     const rawRows = [...testRows];
 

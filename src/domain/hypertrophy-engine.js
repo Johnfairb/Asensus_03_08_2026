@@ -5,6 +5,7 @@
 import { store } from '../state/store.js';
 import { weeklyPowerGymSlots } from './power-engine.js';
 import { getSportData } from './sports-matrix.js';
+import { getBillingMonthKey } from './billing-month.js';
 import {
     bodyweightCompoundSet,
     buildHypertrophyMetaMap,
@@ -671,6 +672,9 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
         const cycle = JSON.parse(localStorage.getItem('ascensus_workout_cycle_v1') || 'null');
         cycleStart = cycle?.startDate || '';
     } catch (e) { /* ignore */ }
+    if (!cycleStart) {
+        try { cycleStart = getBillingMonthKey(date); } catch (e) { /* ignore */ }
+    }
     const prefs = getHypertrophyPlanPrefs();
     const tier = timeTier(prefs.maxTime, prefs.split);
     const key = `${cycleStart || hypertrophyCacheDateKey(date)}|${kind}|${prefs.split}|${tier}|${prefs.maxTime}`;
@@ -856,7 +860,15 @@ function pickUnlockedAlternative(name) {
         if (meta.role && m.role && m.role !== meta.role) return false;
         return true;
     });
-    if (candidates.length) return candidates[Math.floor(Math.random() * candidates.length)];
+    if (candidates.length) {
+        let h = 2166136261;
+        const s = String(name || '');
+        for (let i = 0; i < s.length; i++) {
+            h ^= s.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return candidates[(h >>> 0) % candidates.length];
+    }
     return Object.keys(HYPERTROPHY_EXERCISE_META).find((n) => n !== name && !isExerciseMuscleLocked(n)) || null;
 }
 
