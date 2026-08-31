@@ -231,6 +231,9 @@ export function applyUserConfigToDom() {
     if (!store.userConfig.coreExerciseLoads || typeof store.userConfig.coreExerciseLoads !== 'object') {
         store.userConfig.coreExerciseLoads = {};
     }
+    if (!store.userConfig.cableStackConfirmed || typeof store.userConfig.cableStackConfirmed !== 'object') {
+        store.userConfig.cableStackConfirmed = {};
+    }
     setVal('set-weight', store.userConfig.weight);
     setVal('set-target-weight', store.userConfig.targetWeight);
     setVal('set-height', store.userConfig.height);

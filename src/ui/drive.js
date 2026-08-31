@@ -17,7 +17,7 @@ import { saveSettings } from '../domain/thermodynamics.js';
 import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, applySwappedLiftToItem, canSupersetPair, createSupersetFromIndices, mergeLocalWorkoutHistory, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
 import { populateSportSelects } from '../domain/sports-matrix.js';
 import { applyPowerExerciseToItem } from '../domain/power-engine.js';
-import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase, sessionAppliesMuscleLockout } from '../domain/hypertrophy-engine.js';
+import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, defaultWorkSetRir, hypertrophyRestSeconds, isHypertrophyPhase, sessionAppliesMuscleLockout, sessionUsesHypertrophyProgramming } from '../domain/hypertrophy-engine.js';
 import { inferStrengthLetterFromItems } from '../domain/strength-engine.js';
 import {
     allowsWeightInput,
@@ -25,16 +25,17 @@ import {
     equipmentChoiceFromItem,
     expandLoadChoices,
     increaseLoadOneStep,
+    decreaseLoadOneStep,
     resolveLoadProfile,
     roundUpLoad,
     setExerciseWorkingWeight,
     skipsWeightProgression
 } from '../domain/load-increments.js';
-import { switchLoadEquipment } from './equipment-ui.js';
+import { switchLoadEquipment, maybePromptCableIncrementConfirm } from './equipment-ui.js';
 import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
 import { getPrepVideos } from '../domain/session-prep.js';
-import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, exerciseLogNamesMatch } from '../domain/periodization-logs.js';
+import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, exerciseLogNamesMatch, applyPriorExerciseLoadReduction, countPriorLoggedLifts, itemHasLoggedWorkSet } from '../domain/periodization-logs.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry, saveExerciseDiariesForDate, idbPutJournalMedia, escapeHtml, buildJournalMediaGalleryHtml } from './journey.js';
@@ -681,7 +682,11 @@ function persistSessionLoads(items) {
                 const last = [...(item.sets || [])]
                     .filter(s => s && s.side === side.key && s.completed && !s.isWarmup && !s.isText && !s.isDropSet)
                     .pop();
-                if (name && last && Number(last.weight) > 0) persistWorkingWeight(name, last.weight, equipmentChoiceFromItem(item) || side?.equipmentChoice);
+                const sideDropped = item._firstSetLoadDropped?.[side.key] && Number(side?.workWeightKg) >= 0;
+                const kg = sideDropped ? Number(side.workWeightKg) : (last ? Number(last.weight) : null);
+                if (name && kg != null && Number.isFinite(kg) && (sideDropped ? kg >= 0 : kg > 0)) {
+                    persistWorkingWeight(name, kg, equipmentChoiceFromItem(item) || side?.equipmentChoice);
+                }
             });
             return;
         }
@@ -689,8 +694,117 @@ function persistSessionLoads(items) {
             .filter(s => s && s.completed && !s.isWarmup && !s.isText && !s.isLactateHit && !s.isDropSet)
             .pop();
         const name = item.exercise?.name || item.name;
-        if (name && last && Number(last.weight) > 0) persistWorkingWeight(name, last.weight, equipmentChoiceFromItem(item));
+        const dropped = item._firstSetLoadDropped === true && Number(item.workWeightKg) >= 0;
+        const persistKg = dropped ? Number(item.workWeightKg) : (last ? Number(last.weight) : null);
+        if (name && persistKg != null && Number.isFinite(persistKg) && (dropped ? persistKg >= 0 : persistKg > 0)) {
+            persistWorkingWeight(name, persistKg, equipmentChoiceFromItem(item));
+        }
     });
+}
+
+function isPositionLoadLift(item) {
+    if (!item || item.isWarmupGroup || item.isStretchGroup || item.isCustomStretch) return false;
+    if (item.isSteadyCardio || item.isCoreBlock || item.isLactateHit || item.isSportSessionBlock) return false;
+    if (item.isPower || item.skipHypertrophyWarmup) return false;
+    const domain = String(item.exercise?.domain || '').toLowerCase();
+    if (domain === 'cardio' || domain === 'mobility' || domain === 'sport') return false;
+    return !!(item.exercise?.name || item.name);
+}
+
+function applyPositionLoadToItem(item, priorCount) {
+    if (!isPositionLoadLift(item)) return false;
+    if (item.needsWeightFind && !item.weightFinderResolved) return false;
+    if (itemHasLoggedWorkSet(item)) return false;
+    const exName = item.exercise?.name || item.name;
+    if (!exName) return false;
+    let base = Number(item.baseWorkWeightKg);
+    if (!Number.isFinite(base)) {
+        const work = (item.sets || []).find((s) => s && !s.isWarmup && !s.isText && !s.isLactateHit);
+        base = Number(work?.weight);
+        if (!Number.isFinite(base) || base < 0) return false;
+        item.baseWorkWeightKg = base;
+    }
+    const choice = equipmentChoiceFromItem(item);
+    const next = applyPriorExerciseLoadReduction(base, exName, priorCount, choice);
+    const workSets = (item.sets || []).filter((s) => s && !s.isWarmup && !s.isText && !s.isLactateHit && !s.isDropSet);
+    let changed = false;
+    workSets.forEach((s) => {
+        if (Number(s.weight) !== next) {
+            s.weight = next;
+            changed = true;
+        }
+    });
+    if (changed) {
+        item.workWeightKg = next;
+        maybeRebuildLiftWarmups(item, next);
+    }
+    item.sessionPriorCount = priorCount;
+    return changed;
+}
+
+function refreshHypertrophyPositionLoads(exceptIdx = -1) {
+    if (!sessionUsesHypertrophyProgramming()) return false;
+    const items = store.activeLog?.items;
+    if (!Array.isArray(items)) return false;
+    let changed = false;
+    items.forEach((it, i) => {
+        if (i === exceptIdx) return;
+        const n = countPriorLoggedLifts(items, i);
+        if (applyPositionLoadToItem(it, n)) changed = true;
+    });
+    return changed;
+}
+
+function maybeDropLoadAfterShortFirstSet(exIdx, setIdx) {
+    if (!sessionUsesHypertrophyProgramming()) return false;
+    const item = store.activeLog?.items?.[exIdx];
+    const setObj = item?.sets?.[setIdx];
+    if (!item || !setObj || !setObj.completed) return false;
+    if (setObj.isWarmup || setObj.isText || setObj.isDropSet || setObj.isLactateHit) return false;
+    if (item.isPower || item.skipHypertrophyWarmup) return false;
+
+    const side = item.isSuperset ? setObj.side : null;
+    if (side ? item._firstSetLoadDropped?.[side] : item._firstSetLoadDropped) return false;
+
+    const firstIdx = (item.sets || []).findIndex((s) =>
+        s && !s.isWarmup && !s.isText && !s.isDropSet && !s.isLactateHit && (!side || s.side === side)
+    );
+    if (firstIdx !== setIdx) return false;
+
+    const reps = Number(setObj.reps);
+    if (!Number.isFinite(reps) || reps <= 0 || reps >= 10) return false;
+
+    const exName = item.isSuperset
+        ? ((item.sides || []).find((s) => s.key === side)?.exercise?.name || '')
+        : (item.exercise?.name || item.name || '');
+    if (!exName) return false;
+    const choice = equipmentChoiceFromItem(item);
+    const currentW = Number(setObj.weight) || 0;
+    if (currentW <= 0) return false;
+    if (skipsWeightProgression(exName, choice)) return false;
+
+    const nextW = decreaseLoadOneStep(currentW, exName, choice);
+    if (!(nextW < currentW)) return false;
+
+    let dropped = false;
+    (item.sets || []).forEach((s, i) => {
+        if (i <= setIdx || !s || s.completed) return;
+        if (s.isWarmup || s.isText || s.isDropSet || s.isLactateHit) return;
+        if (side && s.side !== side) return;
+        s.weight = nextW;
+        dropped = true;
+    });
+    if (side) {
+        if (!item._firstSetLoadDropped || typeof item._firstSetLoadDropped !== 'object') item._firstSetLoadDropped = {};
+        item._firstSetLoadDropped[side] = true;
+        const sideMeta = (item.sides || []).find((s) => s.key === side);
+        if (sideMeta) sideMeta.workWeightKg = nextW;
+    } else {
+        item._firstSetLoadDropped = true;
+        item.workWeightKg = nextW;
+    }
+    persistWorkingWeight(exName, nextW, choice);
+    return dropped;
 }
 
 /** Show/hide the list of individual stretch parts (collapsed by default). */
@@ -764,6 +878,10 @@ export function beginExerciseLog(exIdx) {
         }
     }
     if (maybePromptWeightFinder(exIdx, { openLogAfter: true })) return;
+    if (sessionUsesHypertrophyProgramming()) {
+        const n = countPriorLoggedLifts(store.activeLog?.items, exIdx);
+        applyPositionLoadToItem(store.activeLog.items[exIdx], n);
+    }
     openExerciseSetsModal(exIdx);
 }
 
@@ -2779,7 +2897,7 @@ export function renderExerciseSets() {
             inputGroupHtml = `
                 ${weightCell}
                 <input type="number" class="set-input" value="${isCardio ? (set.time_minutes||0) : (set.reps||0)}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, '${isCardio?'time_minutes':'reps'}', this.value)">
-                <input type="number" class="set-input" style="color:var(--text-muted);" placeholder="0-5" value="${set.rpe != null && set.rpe !== '' ? set.rpe : 2}" onfocus="this.value='';" onblur="if(String(this.value).trim()===''){this.value='2';} updateWorkoutSet(${exIdx}, ${setIdx}, 'rpe', this.value)" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'rpe', this.value)">
+                <input type="number" class="set-input" style="color:var(--text-muted);" placeholder="0-5" value="${set.rpe != null && set.rpe !== '' ? set.rpe : defaultWorkSetRir()}" onfocus="this.value='';" onblur="if(String(this.value).trim()===''){this.value='${defaultWorkSetRir()}';} updateWorkoutSet(${exIdx}, ${setIdx}, 'rpe', this.value)" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'rpe', this.value)">
             `;
         }
 
@@ -2880,6 +2998,11 @@ export function switchLoadEquipmentAndRefresh(exIdx, choice) {
 
 export function switchCableEquipmentAndRefresh(exIdx, choice) {
     switchLoadEquipmentAndRefresh(exIdx, choice);
+    if (choice === 'Fca' || choice === 'Cca') {
+        maybePromptCableIncrementConfirm(() => {
+            renderExerciseSets();
+        });
+    }
 }
 
 function exerciseDiaryNameCandidates(item) {
@@ -3237,6 +3360,9 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
         if (maybeRetirePressUpsFromSet(exName, num)) {
             try { window.alert('Press-ups retired: logged >12 reps. Bench variants will be used going forward.'); } catch (e) { /* ignore */ }
         }
+        if (setObj.completed && maybeDropLoadAfterShortFirstSet(exIdx, setIdx)) {
+            if (window.currentModalExIdx != null) renderExerciseSets();
+        }
     }
     if (field === 'distance_km' || field === 'time_minutes') {
         if (field === 'distance_km' && isSteadyCardioLogItem(item)) {
@@ -3254,9 +3380,10 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
 
 function loggedSetRir(setObj) {
     const raw = setObj?.rpe;
-    if (raw === '' || raw === undefined || raw === null) return 2;
+    const fallback = defaultWorkSetRir();
+    if (raw === '' || raw === undefined || raw === null) return fallback;
     const n = parseFloat(raw);
-    return Number.isFinite(n) ? n : 2;
+    return Number.isFinite(n) ? n : fallback;
 }
 
 /**
@@ -3334,6 +3461,10 @@ export function toggleSetComplete(exIdx, setIdx) {
         try { ensureWorkoutTimerStarted(); } catch (e) { /* ignore */ }
     }
     if (setObj.completed) maybeIncreaseLoadAfterEasyRir(exIdx, setIdx);
+    if (setObj.completed) maybeDropLoadAfterShortFirstSet(exIdx, setIdx);
+    if (setObj.completed && !setObj.isWarmup && !setObj.isText && !setObj.isDropSet) {
+        refreshHypertrophyPositionLoads(exIdx);
+    }
     if (setObj.completed && !setObj.isWarmup && !setObj.isText) {
         const retireName = item.isSuperset
             ? ((item.sides || []).find(s => s.key === setObj.side)?.exercise?.name)

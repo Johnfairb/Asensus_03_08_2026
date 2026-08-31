@@ -14,6 +14,8 @@ import {
     isHypertrophyPhase,
     isExerciseMuscleLocked,
     usesHypertrophyProgramming,
+    sessionUsesHypertrophyProgramming,
+    defaultWorkSetRir,
     progressHypertrophyWeight,
     resolveWarmupRestOptions,
     roundUpLoad
@@ -46,7 +48,7 @@ import { renderActiveLog } from '../ui/templates.js';
 import { syncExerciseTimer } from '../ui/workout-timer.js';
 import { ensureCycleStarted, ensureCyclePlansForProgramme, confirmSessionExercises } from './workout-cycle.js';
 import { getEquivalentExercises } from './exercise-slots.js';
-import { latestPhaseWeight, lastCompletedWorkingWeight, latestWorkingLog, strengthLoadFromHypertrophy, resolveLogPeriodization, exerciseLogNamesMatch } from './periodization-logs.js';
+import { latestPhaseWeight, lastCompletedWorkingWeight, latestWorkingLog, strengthLoadFromHypertrophy, hypertrophyLoadFromStrength, resolveLogPeriodization, exerciseLogNamesMatch, applyPriorExerciseLoadReduction, countPriorLoggedLifts } from './periodization-logs.js';
 import {
     barLoadCodesForExercise,
     equipmentChoiceFromItem,
@@ -134,7 +136,7 @@ function isLiftingExtraExercise(ex) {
 
 function defaultExtraReps(exName, isIso) {
     const focus = document.getElementById('today-focus')?.value || window.manualSessionKind || '';
-    if (isHypertrophyFocus(focus)) return 10;
+    if (isHypertrophyFocus(focus) || sessionUsesHypertrophyProgramming(focus)) return 10;
     if (isIso) return 8;
     return 6;
 }
@@ -152,7 +154,7 @@ function buildLiftWorkSets({ exName, isIso, nSets, weight, reps, includeWarmups 
             reps: workReps,
             distance_km: 0,
             time_minutes: 0,
-            rpe: 2,
+            rpe: defaultWorkSetRir(),
             completed: false,
             restTime: workRest
         });
@@ -172,8 +174,21 @@ function resolveExtraLiftLoad(exName, spec = {}) {
         const w = Number(spec.weight);
         return { weight: Number.isFinite(w) ? w : 0, needsWeightFind: false };
     }
-    const known = resolveLastLoggedWorkKg(exName);
-    if (known != null) return { weight: known, needsWeightFind: false };
+    const hist = historyForWeights();
+    const lastWork = latestWorkingLog(hist, exName, spec.equipmentChoice || null);
+    const lastW = lastWork != null ? Number(lastWork.weight_kg) : null;
+    const lastTag = resolveLogPeriodization(lastWork);
+    const hyp = sessionUsesHypertrophyProgramming();
+    if (lastW != null && Number.isFinite(lastW)) {
+        if (hyp && lastTag === 'strength') {
+            return { weight: hypertrophyLoadFromStrength(lastW, exName, spec.equipmentChoice), needsWeightFind: false };
+        }
+        if (!hyp && lastTag === 'hypertrophy') {
+            return { weight: strengthLoadFromHypertrophy(lastW, exName, spec.equipmentChoice), needsWeightFind: false };
+        }
+        return { weight: lastW, needsWeightFind: false };
+    }
+    if (hyp) return { weight: 0, needsWeightFind: true };
     const seeded = getExerciseWorkingWeight(exName, spec.equipmentChoice || null);
     if (seeded != null) return { weight: seeded, needsWeightFind: false };
     return { weight: 0, needsWeightFind: true };
@@ -262,13 +277,18 @@ function buildExtraLogEntry(ex, spec = {}) {
     const nSets = Number(spec.sets) > 0 ? Math.round(Number(spec.sets)) : 1;
     const reps = Number(spec.reps) > 0 ? Math.round(Number(spec.reps)) : defaultExtraReps(ex.name, isIso);
     const { weight, needsWeightFind } = resolveExtraLiftLoad(ex.name, spec);
+    let workKg = weight;
+    if (!needsWeightFind && sessionUsesHypertrophyProgramming()) {
+        const n = countPriorLoggedLifts(store.activeLog?.items);
+        workKg = applyPriorExerciseLoadReduction(weight, ex.name, n, spec.equipmentChoice || null);
+    }
     const sets = buildLiftWorkSets({
         exName: ex.name,
         isIso,
         nSets,
-        weight,
+        weight: workKg,
         reps,
-        includeWarmups: !needsWeightFind && weight > 0
+        includeWarmups: !needsWeightFind && workKg > 0
     });
     return {
         exercise: ex,
@@ -280,7 +300,8 @@ function buildExtraLogEntry(ex, spec = {}) {
         note: 'Extra',
         needsWeightFind,
         weightFinderResolved: !needsWeightFind,
-        workWeightKg: weight > 0 ? weight : undefined
+        workWeightKg: workKg > 0 ? workKg : undefined,
+        baseWorkWeightKg: Number.isFinite(Number(weight)) ? Number(weight) : 0
     };
 }
 
@@ -294,14 +315,9 @@ export function applySwappedLiftToItem(item, newEx) {
     let weight = 0;
     let needsWeightFind = false;
     if (isPlannedSessionContext()) {
-        const known = resolveLastLoggedWorkKg(newEx.name, item.equipmentChoice || null)
-            ?? getExerciseWorkingWeight(newEx.name, item.equipmentChoice || null);
-        if (known == null) {
-            needsWeightFind = true;
-            weight = 0;
-        } else {
-            weight = known;
-        }
+        const resolved = resolveExtraLiftLoad(newEx.name, { equipmentChoice: item.equipmentChoice || null });
+        needsWeightFind = !!resolved.needsWeightFind;
+        weight = resolved.weight;
     } else {
         weight = Number(oldWork.find(s => Number(s.weight) > 0)?.weight)
             || resolveLastLoggedWorkKg(newEx.name, item.equipmentChoice || null)
@@ -322,6 +338,7 @@ export function applySwappedLiftToItem(item, newEx) {
         includeWarmups: !needsWeightFind && weight > 0
     });
     item.workWeightKg = weight > 0 ? weight : undefined;
+    item.baseWorkWeightKg = Number.isFinite(Number(weight)) ? Number(weight) : 0;
 }
 
 /** Add one or more exercises (by id). Before Confirm workout → ghost; after → active log. */
@@ -525,7 +542,7 @@ export function addSetToExercise(exIdx) {
         reps: lastWork.reps || 0,
         distance_km: lastWork.distance_km || 0,
         time_minutes: lastWork.time_minutes || 0,
-        rpe: isPower ? '' : 2,
+        rpe: isPower ? '' : defaultWorkSetRir(),
         completed: false,
         isDropSet: false,
         isWarmup: false,
@@ -705,8 +722,8 @@ export function buildSupersetItem(itemA, itemB) {
         bWork.length || (typeof itemB.plannedSets === 'number' ? itemB.plannedSets : 0) || 3
     );
 
-    const templateA = aWork[0] || { weight: 0, reps: 10, rpe: 2, restTime: 0 };
-    const templateB = bWork[0] || { weight: 0, reps: 10, rpe: 2, restTime: 100 };
+    const templateA = aWork[0] || { weight: 0, reps: 10, rpe: defaultWorkSetRir(), restTime: 0 };
+    const templateB = bWork[0] || { weight: 0, reps: 10, rpe: defaultWorkSetRir(), restTime: 100 };
 
     // Prefer fresh warmups from each side's work weight when clones are missing
     const aWuFinal = aWarm.length
@@ -725,7 +742,7 @@ export function buildSupersetItem(itemA, itemB) {
         sets.push({
             weight: aw.weight || 0,
             reps: aw.reps || 10,
-            rpe: aw.rpe === '' || aw.rpe == null ? 2 : aw.rpe,
+            rpe: aw.rpe === '' || aw.rpe == null ? defaultWorkSetRir() : aw.rpe,
             completed: false,
             isWarmup: false,
             isDropSet: false,
@@ -738,7 +755,7 @@ export function buildSupersetItem(itemA, itemB) {
         sets.push({
             weight: bw.weight || 0,
             reps: bw.reps || 10,
-            rpe: bw.rpe === '' || bw.rpe == null ? 2 : bw.rpe,
+            rpe: bw.rpe === '' || bw.rpe == null ? defaultWorkSetRir() : bw.rpe,
             completed: false,
             isWarmup: false,
             isDropSet: false,
@@ -889,16 +906,17 @@ export function addSupersetRound(exIdx) {
     if (!item?.isSuperset) return;
     const aWork = (item.sets || []).filter(s => s.side === 'A' && !s.isWarmup && !s.isDropSet && !s.isText);
     const bWork = (item.sets || []).filter(s => s.side === 'B' && !s.isWarmup && !s.isDropSet && !s.isText);
-    const ta = aWork[aWork.length - 1] || { weight: 0, reps: 10, rpe: 2 };
-    const tb = bWork[bWork.length - 1] || { weight: 0, reps: 10, rpe: 2 };
+    const ta = aWork[aWork.length - 1] || { weight: 0, reps: 10, rpe: defaultWorkSetRir() };
+    const tb = bWork[bWork.length - 1] || { weight: 0, reps: 10, rpe: defaultWorkSetRir() };
     const round = Math.max(aWork.length, bWork.length) + 1;
+    const rir = defaultWorkSetRir();
     item.sets.push({
-        weight: ta.weight || 0, reps: ta.reps || 10, rpe: 2, completed: false,
+        weight: ta.weight || 0, reps: ta.reps || 10, rpe: rir, completed: false,
         isWarmup: false, isDropSet: false, side: 'A', round, restTime: 0,
         prevWeight: ta.prevWeight || ta.weight || 0
     });
     item.sets.push({
-        weight: tb.weight || 0, reps: tb.reps || 10, rpe: 2, completed: false,
+        weight: tb.weight || 0, reps: tb.reps || 10, rpe: rir, completed: false,
         isWarmup: false, isDropSet: false, side: 'B', round, restTime: 100,
         prevWeight: tb.prevWeight || tb.weight || 0
     });
@@ -1452,27 +1470,30 @@ export async function generateWorkoutTemplate(opts = {}) {
             itemNoteExtra = ` Bodyweight check: can you do the required reps? If not, we swap for this month.`;
         }
 
-        // Strength: last session load + weekly progression. Only convert hypertrophy
-        // logs (+15%) when the most recent session for this lift is tagged hypertrophy.
-        // Untagged recent logs are treated as strength so last week's 115 kg is not
-        // bumped to 132.5 kg.
-        if (!item.isText && !isCardioEx && inStrengthPhase) {
+        // Hypertrophy / strength: last session load, converting 15% when the most
+        // recent log is tagged the other phase. Bodyweight is included in the total.
+        if (!item.isText && !isCardioEx && (inStrengthPhase || useHypertrophy)) {
             const lastWork = latestWorkingLog(hist, exObj.name, item.equipmentChoice || null);
             const lastTag = resolveLogPeriodization(lastWork);
             const lastW = lastWork != null ? Number(lastWork.weight_kg) : null;
-            if (lastTag === 'hypertrophy' && lastW != null && Number.isFinite(lastW)) {
-                tWeight = strengthLoadFromHypertrophy(lastW, exObj.name);
-                latestLog = null; // first strength prescription from hyp — progression starts next session
-            } else if (lastW != null && Number.isFinite(lastW)) {
-                tWeight = lastW;
-                latestLog = lastWork;
+            if (lastW != null && Number.isFinite(lastW)) {
+                if (inStrengthPhase && lastTag === 'hypertrophy') {
+                    tWeight = strengthLoadFromHypertrophy(lastW, exObj.name, item.equipmentChoice || null);
+                    latestLog = null; // first strength prescription from hyp — progression starts next session
+                } else if (useHypertrophy && lastTag === 'strength') {
+                    tWeight = hypertrophyLoadFromStrength(lastW, exObj.name, item.equipmentChoice || null);
+                    latestLog = null;
+                } else {
+                    tWeight = lastW;
+                    latestLog = lastWork;
+                }
             }
         }
 
         // First time THIS exact exercise name is logged — ask for work weight / 10@5 RIR finder
         // History at 0 kg (pure BW) still counts so we don't re-ask every session.
         // Strength with no hyp history also uses the hypertrophy finder, then +15%.
-        // Library-seeded working weights count as known (skip finder; still subject to progression once logged).
+        // Library seeds alone do not skip the finder in hypertrophy (that hid the new-exercise prompt).
         let needsWeightFind = false;
         const savedWorkKg = (() => {
             try {
@@ -1485,21 +1506,22 @@ export async function generateWorkoutTemplate(opts = {}) {
                 const hasPhaseHist = latestPhaseWeight(hist, exObj.name, 'strength') != null
                     || latestPhaseWeight(hist, exObj.name, 'hypertrophy') != null;
                 if (!hasPhaseHist && tWeight <= 0) tWeight = savedWorkKg;
-            } else if (loggedWorkKg == null) {
+            } else if (!useHypertrophy && loggedWorkKg == null) {
                 tWeight = savedWorkKg;
             }
         }
         if (!item.isText && !isCardioEx && (useHypertrophy || isBwGateExercise(exObj.name) || inStrengthPhase)) {
-            const exName = String(exObj.name || '').toLowerCase();
-            const nameMatch = (n) => String(n || '').toLowerCase() === exName;
-            const hasHist = (hist || []).some(l => nameMatch(l.exercise) && (l.weight_kg != null && Number(l.weight_kg) >= 0) && (Number(l.reps) > 0 || Number(l.weight_kg) > 0));
-            let hasLocal = false;
+            const lastWorkRow = latestWorkingLog(hist, exObj.name, item.equipmentChoice || null);
+            const hasWorkingHist = lastWorkRow != null;
+            let hasLocalWorking = false;
             try {
                 const grouped = store.globalGroupedHistory || {};
                 for (const day of Object.values(grouped)) {
                     const rows = day?.items || [];
-                    if (rows.some(l => nameMatch(l.exercise) && l.weight_kg != null && Number(l.weight_kg) >= 0 && (Number(l.reps) > 0 || Number(l.weight_kg) > 0))) {
-                        hasLocal = true;
+                    if (rows.some((l) => exerciseLogNamesMatch(l.exercise, exObj.name)
+                        && !l.is_warmup && !l.isWarmup
+                        && (Number(l.reps) > 0 || Number(l.weight_kg) > 0))) {
+                        hasLocalWorking = true;
                         break;
                     }
                 }
@@ -1508,13 +1530,12 @@ export async function generateWorkoutTemplate(opts = {}) {
                 latestPhaseWeight(hist, exObj.name, 'strength') != null
                 || latestPhaseWeight(hist, exObj.name, 'hypertrophy') != null
             );
-            const hasSavedSeed = savedWorkKg != null;
             if (usesPressUpWeightFinder(exObj.name) && !needsBwGate) {
                 tWeight = 0;
-            } else if (!needsBwGate && !hasStrengthOrHyp && !hasHist && !hasLocal && !latestLog && !hasSavedSeed) {
+            } else if (!needsBwGate && !hasWorkingHist && !hasLocalWorking) {
                 needsWeightFind = true;
-            } else if (inStrengthPhase && !hasStrengthOrHyp && tWeight <= 0 && !needsBwGate && !hasSavedSeed) {
-                // No 1RM fallback — must find via hypertrophy protocol
+                if (useHypertrophy) tWeight = 0;
+            } else if (inStrengthPhase && !hasStrengthOrHyp && tWeight <= 0 && !needsBwGate && savedWorkKg == null) {
                 needsWeightFind = true;
             }
         }
@@ -1639,7 +1660,7 @@ export async function generateWorkoutTemplate(opts = {}) {
                 setsArray.push({
                     weight: tWeight,
                     reps: itemReps,
-                    rpe: 2,
+                    rpe: useHypertrophy ? 0 : 2,
                     completed: false,
                     restTime: itemRest,
                     prevWeight: latestLog ? latestLog.weight_kg : 0,
@@ -1668,7 +1689,10 @@ export async function generateWorkoutTemplate(opts = {}) {
             needsWeightFind: !!needsWeightFind,
             needsBwGate: !!needsBwGate,
             weightFinderResolved: false,
-            bwGateResolved: false
+            bwGateResolved: false,
+            equipmentChoice: item.equipmentChoice || null,
+            workWeightKg: !needsWeightFind && Number(tWeight) >= 0 ? tWeight : undefined,
+            baseWorkWeightKg: !needsWeightFind && Number.isFinite(Number(tWeight)) ? Number(tWeight) : undefined
         });
     });
 

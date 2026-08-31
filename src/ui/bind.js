@@ -25,9 +25,9 @@ import {
   toggleLactateFullWorkout
 } from './journey.js';
 import { showShopStyleInfo, toggleFoodHeading } from '../domain/food-catalog.js';
-import { cancelExEdit, cancelFoodEdit, closeLibraryDetail, deleteItem, editExercise, editFood, editFromLibraryDetail, filterBoot, loadExercises, loadInventory, openExerciseDetail, openFoodDetail, openLibraryDontKnowWeight, saveExerciseIncrementsFromDetail, saveExerciseToCloud, saveExerciseWorkingWeightFromDetail, saveFoodToCloud, syncLibraryWeightDontKnowBtn, syncPackSizeFieldMode, toggleBanFromLibraryDetail, toggleExForm, togglePantryForm } from './fuel.js';
+import { cancelExEdit, cancelFoodEdit, closeLibraryDetail, deleteItem, editExercise, editFood, editFromLibraryDetail, filterBoot, loadExercises, loadInventory, openExerciseDetail, openExerciseDetailByName, openFoodDetail, openLibraryDontKnowWeight, saveExerciseIncrementsFromDetail, saveExerciseToCloud, saveExerciseWorkingWeightFromDetail, saveFoodToCloud, syncLibraryWeightDontKnowBtn, syncPackSizeFieldMode, toggleBanFromLibraryDetail, toggleExForm, togglePantryForm } from './fuel.js';
 import { calculatePlates, cancelSpontaneousEvent, closeBodyFatModal, closeExecutionZone, closeExerciseSetsModal, closeHydrationModal, closeWeightModal, commitWorkoutSession, configureJournalModal, discardInProgressWorkout, dismissJournalModal, dismissSessionWrapModal, drawModalExerciseChart, redrawModalExerciseChart, editLoggedWorkoutSession, editOrphanWorkoutLogs, filterCardioTypeList, finalizeWorkoutLog, beginManualWorkoutSession, beginExerciseLog, manualAdd, openBodyFatModal, openExerciseSetsModal, openHydrationModal, openSpontaneousEventModal, openWeightModal, overrideRest, parkInProgressWorkout, playRestAlarm, populateCardioTypePicker, renderExerciseSets, renderWorkoutLog, resumeInProgressWorkout, selectCardioTypeInLog, setWorkoutLogFilter, showConstraintInfo, startExecution, startManualWorkout, startPendingFinderRest, startLactateBaselineStopwatch, stopInProgressWorkout, stopLactateBaselineStopwatch, submitBlindReroute, submitBodyFatLog, submitHydrationLog, submitLactateBaselineResult, submitLog, submitSpontaneousEvent, submitWeightLog, swapExerciseInLog, switchCableEquipmentAndRefresh, switchLoadEquipmentAndRefresh, syncGlobalRestBanners, toggleConstraint, togglePrepChildExpand, togglePrepPartExpand, toggleStretchListExpand, toggleStretchGroupComplete, toggleStretchMuscleGroupComplete, startStretchTimer, toggleSessionStretchExclude, startHitTimer, logHitWorkNow, skipHitTimerRest, adjustHitTimerRest, setLactateBaselineInputKind, setLactateBaselineSpeedUnit, toggleExerciseDiary, togglePreviousExerciseDiary, updateCoreChildWeight, updateExerciseDiaryNotes, onExerciseDiaryMediaSelected, removeExerciseDiaryMedia, toggleSetComplete, toggleToolsMenu, updateWorkoutSet, workoutCardDragLeave, workoutCardDragOver, workoutCardDragStart, workoutCardDragEnd, workoutCardDrop, workoutReorderGapOver, workoutReorderGapLeave, workoutReorderGapDrop, workoutCardTouchEnd, workoutCardTouchStart, openManualGymRestModal, closeManualGymRestModal, toggleManualRestCustomFields, confirmManualGymRestPrefs } from './drive.js';
-import { confirmEquipmentPicks } from './equipment-ui.js';
+import { confirmCableIncrementsNo, confirmCableIncrementsYes, confirmEquipmentPicks } from './equipment-ui.js';
 import { dismissPlannedWarmupFromLog, dismissPlannedStretchFromLog, hydrateStretchSettingsDom, saveSessionPrepSettings } from '../domain/session-prep.js';
 import { closeLactateHitPicker, confirmLactateHitPicker, filterLactateHitOptions, openLactateHitPicker, toggleLactateHitType, selectLactateDesiredRpe, confirmLactateDesiredRpe, confirmLactateTrackLength, lactateWizardBackToTypes, lactateWizardBackToRpe, openLactateBaselineRedo, toggleLactateRedoType, confirmLactateRedoSelection, submitLactateBaselineStep, adjustLactateSessionRpe, openLactateBaselineRedoFromSession, redoLactateBaselineForType } from './lactate-ui.js';
 import { onCoreStrengthSettingChange } from './core-strength-ui.js';
@@ -137,6 +137,7 @@ export function bindUi() {
   window.editFromLibraryDetail = editFromLibraryDetail;
   window.toggleBanFromLibraryDetail = toggleBanFromLibraryDetail;
   window.openExerciseDetail = openExerciseDetail;
+  window.openExerciseDetailByName = openExerciseDetailByName;
   window.openFoodDetail = openFoodDetail;
   window.saveExerciseWorkingWeightFromDetail = saveExerciseWorkingWeightFromDetail;
   window.syncLibraryWeightDontKnowBtn = syncLibraryWeightDontKnowBtn;
@@ -270,6 +271,8 @@ export function bindUi() {
   window.submitLactateBaselineResult = submitLactateBaselineResult;
   window.dismissSessionWrapModal = dismissSessionWrapModal;
   window.confirmEquipmentPicks = confirmEquipmentPicks;
+  window.confirmCableIncrementsYes = confirmCableIncrementsYes;
+  window.confirmCableIncrementsNo = confirmCableIncrementsNo;
   window.saveExerciseIncrementsFromDetail = saveExerciseIncrementsFromDetail;
   window.setWorkoutLogFilter = setWorkoutLogFilter;
   window.closeExerciseSetsModal = closeExerciseSetsModal;

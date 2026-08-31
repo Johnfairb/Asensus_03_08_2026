@@ -10,7 +10,7 @@ import {
     resolveLoadProfile,
     roundUpLoad
 } from '../domain/load-increments.js';
-import { buildHypertrophyWarmupSets } from '../domain/hypertrophy-engine.js';
+import { buildHypertrophyWarmupSets, clusterItemsByEquipment, sessionUsesHypertrophyProgramming } from '../domain/hypertrophy-engine.js';
 
 let _pendingConfirmAfterPick = null;
 
@@ -117,6 +117,13 @@ export function confirmEquipmentPicks() {
     applyToItems(store.currentGhostItems);
     applyToItems(store.activeLog?.items);
 
+    if (sessionUsesHypertrophyProgramming()) {
+        store.currentGhostItems = clusterItemsByEquipment(store.currentGhostItems || []);
+        if (Array.isArray(store.activeLog?.items)) {
+            store.activeLog.items = clusterItemsByEquipment(store.activeLog.items);
+        }
+    }
+
     // Rebuild warmups for chosen equipment where work weight already known
     (store.currentGhostItems || []).forEach((it) => {
         if (!it?.equipmentChoice || !it.exercise?.name) return;
@@ -178,7 +185,158 @@ export function saveExerciseIncrementOverrides(exName, overridesByCode) {
         ...(store.userConfig.exerciseIncrements[exName] || {}),
         ...overridesByCode
     };
+    persistCableOrIncrementConfig();
+}
+
+function persistCableOrIncrementConfig() {
+    try { localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig)); } catch (e) { /* ignore */ }
     try {
         import('../domain/thermodynamics.js').then((m) => m.persistUserConfigToCloud?.()).catch(() => {});
     } catch (e) { /* ignore */ }
 }
+
+function cableChoiceOfItem(it) {
+    const name = it?.exercise?.name || it?.name;
+    if (!name) return null;
+    const choice = it.equipmentChoice || it.exercise?.equipmentChoice || null;
+    const code = choice || resolveLoadProfile(name, choice)?.code;
+    return code === 'Fca' || code === 'Cca' ? code : null;
+}
+
+function firstItemUsingCable(items, code) {
+    return (items || []).find((it) => cableChoiceOfItem(it) === code) || null;
+}
+
+export function isCableStackConfirmed(code) {
+    return !!(store.userConfig?.cableStackConfirmed?.[code]);
+}
+
+export function markCableStackConfirmed(code) {
+    if (!code) return;
+    if (!store.userConfig.cableStackConfirmed || typeof store.userConfig.cableStackConfirmed !== 'object') {
+        store.userConfig.cableStackConfirmed = {};
+    }
+    store.userConfig.cableStackConfirmed[code] = true;
+    persistCableOrIncrementConfig();
+}
+
+function sessionItemsForCableCheck() {
+    if (Array.isArray(store.activeLog?.items) && store.activeLog.items.length) return store.activeLog.items;
+    return store.currentGhostItems || [];
+}
+
+export function unconfirmedCableTypesInItems(items) {
+    const list = items || sessionItemsForCableCheck();
+    const found = [];
+    ['Fca', 'Cca'].forEach((code) => {
+        if (isCableStackConfirmed(code)) return;
+        if (firstItemUsingCable(list, code)) found.push(code);
+    });
+    return found;
+}
+
+let _cableQueue = [];
+let _cableAfter = null;
+let _cableExName = '';
+
+function ensureCableIncrementModal() {
+    let el = document.getElementById('cable-increment-modal');
+    const host = document.querySelector('.iphone-screen') || document.body;
+    const coverCss = 'position:fixed;inset:0;width:100%;height:100%;display:flex;justify-content:center;align-items:flex-end;padding:0;box-sizing:border-box;z-index:22100;background:rgba(0,0,0,0.45);pointer-events:auto;';
+    if (el) {
+        if (el.parentElement !== host) host.appendChild(el);
+        el.style.cssText = coverCss;
+        return el;
+    }
+    el = document.createElement('div');
+    el.id = 'cable-increment-modal';
+    el.className = 'hidden';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.style.cssText = coverCss;
+    el.innerHTML = `
+        <div class="modal-content stealth-panel equipment-pick-sheet" onclick="event.stopPropagation()">
+            <div class="sheet-handle" style="margin:0 auto 12px;"></div>
+            <div style="padding:0 16px 4px;">
+                <div style="font-family:'Roboto Mono';font-size:10px;color:var(--gold-accent);font-weight:800;letter-spacing:1px;text-transform:uppercase;">Cable stack</div>
+                <h2 id="cable-increment-title" style="color:var(--text-main);font-family:'Roboto Mono',monospace;font-size:15px;text-transform:uppercase;margin:4px 0 0;letter-spacing:1px;">Are the weights correct?</h2>
+                <p id="cable-increment-body" style="font-size:13px;color:var(--text-muted);line-height:1.45;margin:8px 0 0;"></p>
+            </div>
+            <div style="padding:12px 16px calc(16px + env(safe-area-inset-bottom, 0px));border-top:1px solid var(--border-subtle);display:flex;flex-direction:column;gap:8px;">
+                <button type="button" class="btn-primary is-primary" style="margin:0;width:100%;" onclick="confirmCableIncrementsYes()">Yes — weights look right</button>
+                <button type="button" class="btn-primary is-secondary" style="margin:0;width:100%;" onclick="confirmCableIncrementsNo()">No — correct increments</button>
+            </div>
+        </div>`;
+    host.appendChild(el);
+    return el;
+}
+
+function showNextCableConfirm() {
+    const code = _cableQueue[0];
+    if (!code) {
+        document.getElementById('cable-increment-modal')?.classList.add('hidden');
+        const cb = _cableAfter;
+        _cableAfter = null;
+        if (typeof cb === 'function') cb();
+        return;
+    }
+    const items = sessionItemsForCableCheck();
+    const it = firstItemUsingCable(items, code);
+    _cableExName = it?.exercise?.name || it?.name || '';
+    const label = optionLabel(code);
+    const modal = ensureCableIncrementModal();
+    const title = document.getElementById('cable-increment-title');
+    const body = document.getElementById('cable-increment-body');
+    if (title) title.textContent = `${label} — are the weights correct?`;
+    if (body) {
+        body.textContent = `First time using ${label.toLowerCase()}. Check that the stack min and increment match the machine. If they don't, we'll open the increment editor for ${ _cableExName || 'this exercise' }.`;
+    }
+    modal.classList.remove('hidden');
+}
+
+/**
+ * @returns {boolean} true if confirm can proceed; false if modal opened
+ */
+export function gateConfirmForCableIncrements(onReady, items) {
+    const needed = unconfirmedCableTypesInItems(items || sessionItemsForCableCheck());
+    if (!needed.length) return true;
+    _cableQueue = needed.slice();
+    _cableAfter = onReady;
+    showNextCableConfirm();
+    return false;
+}
+
+export function maybePromptCableIncrementConfirm(onReady) {
+    return gateConfirmForCableIncrements(typeof onReady === 'function' ? onReady : () => {});
+}
+
+export function confirmCableIncrementsYes() {
+    const code = _cableQueue.shift();
+    if (code) markCableStackConfirmed(code);
+    showNextCableConfirm();
+}
+
+export function confirmCableIncrementsNo() {
+    const code = _cableQueue.shift();
+    const exName = _cableExName;
+    if (code) markCableStackConfirmed(code);
+    document.getElementById('cable-increment-modal')?.classList.add('hidden');
+    _cableQueue = [];
+    const cb = _cableAfter;
+    _cableAfter = null;
+    if (typeof cb === 'function') cb();
+    openCableIncrementEditor(exName);
+}
+
+async function openCableIncrementEditor(exName) {
+    if (!exName) return;
+    try {
+        const { openMyExercises } = await import('./navigation.js');
+        const { openExerciseDetailByName } = await import('./fuel.js');
+        openMyExercises();
+        openExerciseDetailByName(exName, { scrollToIncrements: true });
+    } catch (e) {
+        console.warn('openCableIncrementEditor', e);
+    }
+}
+

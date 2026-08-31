@@ -680,7 +680,7 @@ export function openExerciseDetail(id) {
                     </div>`;
             }).join('');
             bodyParts.push(`
-                <div class="detail-metric-row">
+                <div class="detail-metric-row" id="library-increment-editor">
                     <div class="hud-label" style="margin:0 0 8px 0;">Edit increments</div>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Pound stacks keep min and step in lbs. Each pin is converted to kg at 2.2 lb/kg, then that kg weight is rounded. Barbell and dumbbell use Manual / bar defaults.</div>
                     ${panels}
@@ -697,6 +697,23 @@ export function openExerciseDetail(id) {
     const editBtn = document.getElementById('library-detail-edit-btn');
     if (editBtn) editBtn.classList.add('hidden');
     document.getElementById('library-detail-sheet')?.classList.remove('hidden');
+}
+
+export function openExerciseDetailByName(name, opts = {}) {
+    const want = String(resolveCatalogName(name) || name || '').trim();
+    if (!want) return false;
+    const ex = (store.globalExerciseDB || []).find((e) => {
+        const n = String(e?.name || '');
+        return n === name || n === want || resolveCatalogName(n) === want || resolveCatalogName(n) === name;
+    });
+    if (!ex) return false;
+    openExerciseDetail(ex.id);
+    if (opts.scrollToIncrements) {
+        setTimeout(() => {
+            document.getElementById('library-increment-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+    }
+    return true;
 }
 
 export function syncLibraryWeightDontKnowBtn() {

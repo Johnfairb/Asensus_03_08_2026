@@ -627,6 +627,7 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
                         isIsolation: !!it.isIsolation,
                         isExtra: !!it.isExtra,
                         isSuperset: !!it.isSuperset,
+                        equipmentChoice: it.equipmentChoice || it.exercise?.equipmentChoice || null,
                         sides: it.sides
                     })),
                 note: locked.source === 'custom' ? 'Hypertrophy · custom workout' : 'Hypertrophy · confirmed',
@@ -653,6 +654,7 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
                         isIsolation: !!(it.isIsolation),
                         isExtra: !!it.isExtra,
                         isSuperset: !!it.isSuperset,
+                        equipmentChoice: it.equipmentChoice || it.exercise?.equipmentChoice || null,
                         sides: it.sides
                     })),
                 note: 'Hypertrophy · custom workout',
@@ -831,6 +833,92 @@ export function usesHypertrophyProgramming(focus) {
     return focus === 'Full Body / Strength' || focus === 'Gym' || focus === 'Gym Workout';
 }
 
+/** Live session focus: hypertrophy GPS days, not Strength A/B. */
+export function currentSessionFocus() {
+    try {
+        return window.manualSessionKind
+            || document.getElementById('today-focus')?.value
+            || '';
+    } catch (e) {
+        return '';
+    }
+}
+
+export function sessionUsesHypertrophyProgramming(focus) {
+    return usesHypertrophyProgramming(focus || currentSessionFocus());
+}
+
+/** Default RIR on new hypertrophy work sets is 0; strength stays at 2. */
+export function defaultWorkSetRir(focus) {
+    return sessionUsesHypertrophyProgramming(focus) ? 0 : 2;
+}
+
+function liftNameForCluster(it) {
+    return it?.exercise?.name || it?.name || '';
+}
+
+function isIsolationForCluster(it) {
+    if (it?.isIsolation || it?.isStrengthIsolation) return true;
+    const name = liftNameForCluster(it);
+    return HYPERTROPHY_EXERCISE_META[name]?.role === 'isolation';
+}
+
+function equipmentClusterKey(it) {
+    const name = liftNameForCluster(it);
+    if (!name) return 'B';
+    const choice = it?.equipmentChoice || it?.exercise?.equipmentChoice || null;
+    const profile = resolveLoadProfile(name, choice);
+    return profile?.code || 'B';
+}
+
+function isClusterableLift(it) {
+    if (!it) return false;
+    if (it.isWarmupGroup || it.isStretchGroup || it.isCustomStretch) return false;
+    if (it.isSteadyCardio || it.isCoreBlock || it.isLactateHit || it.isSportSessionBlock) return false;
+    if (it.isPower || it.skipHypertrophyWarmup) return false;
+    const domain = String(it.exercise?.domain || '').toLowerCase();
+    if (domain === 'cardio' || domain === 'mobility' || domain === 'sport') return false;
+    return !!liftNameForCluster(it);
+}
+
+/**
+ * Cluster lifts by required equipment (first-seen order from the random pick),
+ * compounds before isolations inside each equipment group.
+ * Pinned blocks (warmup / stretch / cardio) keep their slots.
+ */
+export function clusterItemsByEquipment(items) {
+    const list = Array.isArray(items) ? items : [];
+    if (list.length < 2) return list;
+    const liftIdx = [];
+    list.forEach((it, i) => {
+        if (isClusterableLift(it)) liftIdx.push(i);
+    });
+    if (liftIdx.length < 2) return list;
+
+    const lifts = liftIdx.map((i) => list[i]);
+    const eqOrder = [];
+    const seenEq = new Set();
+    lifts.forEach((it) => {
+        const k = equipmentClusterKey(it);
+        if (!seenEq.has(k)) {
+            seenEq.add(k);
+            eqOrder.push(k);
+        }
+    });
+    const compounds = lifts.filter((it) => !isIsolationForCluster(it));
+    const isos = lifts.filter((it) => isIsolationForCluster(it));
+    const ordered = [];
+    eqOrder.forEach((eq) => {
+        ordered.push(...compounds.filter((it) => equipmentClusterKey(it) === eq));
+        ordered.push(...isos.filter((it) => equipmentClusterKey(it) === eq));
+    });
+    const out = list.slice();
+    liftIdx.forEach((idx, j) => {
+        if (ordered[j]) out[idx] = ordered[j];
+    });
+    return out;
+}
+
 /** Lockout is created by hypertrophy programming only — never by Strength A/B. */
 export function sessionAppliesMuscleLockout(kind) {
     return usesHypertrophyProgramming(kind);
@@ -905,7 +993,7 @@ export function avoidLockedMuscleOnItems(items) {
 
 function finalizeHypPlan(plan) {
     if (!plan || !Array.isArray(plan.items)) return plan;
-    const next = { ...plan, items: avoidLockedMuscleOnItems(plan.items) };
+    const next = { ...plan, items: clusterItemsByEquipment(avoidLockedMuscleOnItems(plan.items)) };
     window.currentHypertrophySession = next;
     return next;
 }
@@ -1234,7 +1322,7 @@ export function applyHypertrophyWorkWeight(item, workKg, opts = {}) {
             ...prev,
             weight: w,
             reps: prev.reps || workReps,
-            rpe: prev.rpe === '' || prev.rpe == null ? 2 : prev.rpe,
+            rpe: prev.rpe === '' || prev.rpe == null ? defaultWorkSetRir() : prev.rpe,
             completed: false,
             restTime: prev.restTime != null ? prev.restTime : rest,
             isWarmup: false
@@ -1246,6 +1334,7 @@ export function applyHypertrophyWorkWeight(item, workKg, opts = {}) {
     item.needsBwGate = false;
     item.bwGateResolved = true;
     item.workWeightKg = w;
+    item.baseWorkWeightKg = opts.baseWorkWeightKg != null ? Number(opts.baseWorkWeightKg) : w;
     if (skipWarmups) {
         item.finderReplacedWarmup = true;
         item.pendingFinderRestSec = warmupToWorkRestSec(isIso, { ...restResolved, exName });
@@ -1290,7 +1379,7 @@ export function applyWorkWeightToSupersetSide(item, sideKey, workKg, opts = {}) 
         newWork.push({
             weight: w,
             reps: prev.reps || workReps,
-            rpe: prev.rpe === '' || prev.rpe == null ? 2 : prev.rpe,
+            rpe: prev.rpe === '' || prev.rpe == null ? defaultWorkSetRir() : prev.rpe,
             completed: false,
             isWarmup: false,
             isDropSet: false,
@@ -1341,6 +1430,7 @@ export function applyWorkWeightToSupersetSide(item, sideKey, workKg, opts = {}) 
     });
     item.plannedSets = rounds;
     sideMeta.workWeightKg = w;
+    sideMeta.baseWorkWeightKg = opts.baseWorkWeightKg != null ? Number(opts.baseWorkWeightKg) : w;
     sideMeta.weightFinderResolved = true;
     sideMeta.needsWeightFind = false;
     sideMeta.needsBwGate = false;

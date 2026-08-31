@@ -6,7 +6,6 @@ import { getSeasonPhase } from './fitness-hud.js';
 import { getExerciseMeta, resolveCatalogName } from './exercise-catalog.js';
 import {
     BODYWEIGHT_COMPOUNDS,
-    equipmentForExercise,
     isHypertrophyFocus,
     isHypertrophyPhase,
     roundUpLoad,
@@ -182,17 +181,70 @@ export function lastCompletedWorkingWeight(hist, exName, choice = null) {
     return Number.isFinite(w) ? w : null;
 }
 
+/** Latest athlete bodyweight from Drive / Sunday weigh-in / Settings. */
+export function latestAthleteWeightKg() {
+    const w = Number(store.userConfig?.weight);
+    return Number.isFinite(w) && w > 0 ? w : 0;
+}
+
+/**
+ * Scale an added load by `factor`, including bodyweight in the total for BW lifts,
+ * then subtract bodyweight back and round to the exercise increment.
+ */
+export function scaleLoadWithBodyweight(addedKg, exName, factor, choice = null) {
+    const added = Number(addedKg) || 0;
+    const bw = isBodyweightLoadExercise(exName) ? latestAthleteWeightKg() : 0;
+    const scaledAdded = Math.max(0, (added + bw) * Number(factor) - bw);
+    return roundUpLoad(scaledAdded, exName, choice);
+}
+
 /**
  * Strength work load = 15% above hypertrophy equivalent.
  * For bodyweight lifts, bodyweight is included in the total before the +15%, then subtracted back.
  */
-export function strengthLoadFromHypertrophy(hypKg, exName) {
-    const added = Number(hypKg) || 0;
-    const bw = isBodyweightLoadExercise(exName) ? (Number(store.userConfig?.weight) || 0) : 0;
-    const strengthTotal = (added + bw) * 1.15;
-    const strengthAdded = Math.max(0, strengthTotal - bw);
-    const eq = equipmentForExercise(exName);
-    return roundUpLoad(strengthAdded, eq);
+export function strengthLoadFromHypertrophy(hypKg, exName, choice = null) {
+    return scaleLoadWithBodyweight(hypKg, exName, 1.15, choice);
+}
+
+/**
+ * Inverse of strengthLoadFromHypertrophy: hypertrophy work = strength equivalent ÷ 1.15.
+ */
+export function hypertrophyLoadFromStrength(strKg, exName, choice = null) {
+    return scaleLoadWithBodyweight(strKg, exName, 1 / 1.15, choice);
+}
+
+/** Each prior logged exercise in the session reduces load by 5% (bodyweight included). */
+export function applyPriorExerciseLoadReduction(addedKg, exName, priorCount, choice = null) {
+    const n = Math.max(0, Math.round(Number(priorCount) || 0));
+    if (n <= 0) {
+        const raw = Number(addedKg) || 0;
+        return raw > 0 ? roundUpLoad(raw, exName, choice) : Math.max(0, raw);
+    }
+    return scaleLoadWithBodyweight(addedKg, exName, Math.pow(0.95, n), choice);
+}
+
+function isPositionLoadLiftItem(item) {
+    if (!item || item.isWarmupGroup || item.isStretchGroup || item.isCustomStretch) return false;
+    if (item.isSteadyCardio || item.isCoreBlock || item.isLactateHit || item.isSportSessionBlock) return false;
+    if (item.isPower || item.skipHypertrophyWarmup) return false;
+    const domain = String(item.exercise?.domain || '').toLowerCase();
+    if (domain === 'cardio' || domain === 'mobility' || domain === 'sport') return false;
+    return !!(item.exercise?.name || item.name);
+}
+
+export function itemHasLoggedWorkSet(item) {
+    return (item?.sets || []).some((s) =>
+        s && s.completed && !s.isWarmup && !s.isText && !s.isLactateHit && !s.isDropSet
+    );
+}
+
+/** Count other lifts in this session that already have at least one working set saved. */
+export function countPriorLoggedLifts(items, exceptIdx = -1) {
+    return (items || []).reduce((n, it, i) => {
+        if (i === exceptIdx) return n;
+        if (!isPositionLoadLiftItem(it) || !itemHasLoggedWorkSet(it)) return n;
+        return n + 1;
+    }, 0);
 }
 
 export function latestPhaseWeight(hist, exName, phaseBucket) {

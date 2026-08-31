@@ -7,7 +7,9 @@ import { store } from '../state/store.js';
 import {
     applyHypertrophyWorkWeight,
     applyWorkWeightToSupersetSide,
+    defaultWorkSetRir,
     isHypertrophyPhase,
+    sessionUsesHypertrophyProgramming,
     workWeightFromFinder
 } from '../domain/hypertrophy-engine.js';
 import {
@@ -21,6 +23,8 @@ import {
 } from '../domain/bodyweight-lifts.js';
 import { excludeBannedExercises } from '../domain/bans.js';
 import { isStrengthPhase } from '../domain/strength-engine.js';
+import { equipmentChoiceFromItem } from '../domain/load-increments.js';
+import { applyPriorExerciseLoadReduction, countPriorLoggedLifts } from '../domain/periodization-logs.js';
 
 let _finderOpen = false;
 let _finderExIdx = null;
@@ -127,7 +131,7 @@ function sideHasWorkWeight(side, item) {
 
 function sideNeedsWeight(side, item) {
     if (!side) return false;
-    if (sideHasWorkWeight(side, item)) {
+    if (sideHasWorkWeight(side, item) && !side.needsWeightFind) {
         side.needsWeightFind = false;
         side.weightFinderResolved = true;
         return false;
@@ -297,7 +301,7 @@ function openPromptForCurrentTarget(exIdx) {
     const isBwLift = isBwGateExercise(name);
     if (!isBwLift && item.needsBwGate) item.needsBwGate = false;
     const needsBw = isBwLift && !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
-    if (itemHasWorkWeight(item)) markItemWeightResolved(item);
+    if (itemHasWorkWeight(item) && !item.needsWeightFind) markItemWeightResolved(item);
     const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;
     if (needsBw) {
         openSheet(exIdx, renderBwCompetencyQuestion);
@@ -332,7 +336,7 @@ export function maybePromptWeightFinder(exIdx, opts = {}) {
     const isBwLift = isBwGateExercise(name);
     if (!isBwLift && item.needsBwGate) item.needsBwGate = false;
     const needsBw = isBwLift && !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
-    if (itemHasWorkWeight(item)) markItemWeightResolved(item);
+    if (itemHasWorkWeight(item) && !item.needsWeightFind) markItemWeightResolved(item);
     const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;
     if (!needsBw && !needsWeight) return false;
 
@@ -346,6 +350,21 @@ function applyWorkWeight(item, kg, opts = {}) {
         return applyWorkWeightToSupersetSide(item, _finderSide, kg, opts);
     }
     return applyHypertrophyWorkWeight(item, kg, opts);
+}
+
+function applySessionAwareWorkWeight(item, kg, opts = {}) {
+    const base = Number(kg);
+    const raw = Number.isFinite(base) && base >= 0 ? base : 0;
+    let work = raw;
+    if (sessionUsesHypertrophyProgramming()) {
+        const name = item.isSuperset
+            ? (activeSideMeta(item)?.exercise?.name || '')
+            : (item.exercise?.name || '');
+        const choice = equipmentChoiceFromItem(item);
+        const n = countPriorLoggedLifts(store.activeLog?.items, _finderExIdx);
+        work = applyPriorExerciseLoadReduction(raw, name, n, choice);
+    }
+    return applyWorkWeight(item, work, { ...opts, baseWorkWeightKg: raw });
 }
 
 function markSideBwResolved(side, opts = {}) {
@@ -371,7 +390,7 @@ export function confirmBwGateYes() {
         const name = side?.exercise?.name || '';
         recordBwCanDo(name);
         markSideBwResolved(side, { needsWeight: !usesPressUpWeightFinder(name) && !sideHasWorkWeight(side, item) });
-        if (usesPressUpWeightFinder(name) || sideHasWorkWeight(side, item)) {
+        if (usesPressUpWeightFinder(name) || (!side.needsWeightFind && sideHasWorkWeight(side, item))) {
             if (usesPressUpWeightFinder(name)) applyWorkWeightToSupersetSide(item, _finderSide, 0);
             if (side) {
                 side.needsWeightFind = false;
@@ -389,7 +408,7 @@ export function confirmBwGateYes() {
     item.needsBwGate = false;
     item.bwGateResolved = true;
 
-    if (usesPressUpWeightFinder(name) || itemHasWorkWeight(item)) {
+    if (usesPressUpWeightFinder(name) || (!item.needsWeightFind && itemHasWorkWeight(item))) {
         if (usesPressUpWeightFinder(name)) applyHypertrophyWorkWeight(item, 0);
         markItemWeightResolved(item);
         finishWeightFinderAndMaybeOpenLog();
@@ -462,7 +481,7 @@ export function confirmBwGateNo() {
     const reps = workSets[0]?.reps || 10;
     const rest = workSets[0]?.restTime != null ? workSets[0].restTime : 90;
     item.sets = Array.from({ length: planned }, () => ({
-        weight: 0, reps, rpe: 2, completed: false, restTime: rest, isWarmup: false
+        weight: 0, reps, rpe: defaultWorkSetRir(), completed: false, restTime: rest, isWarmup: false
     }));
     renderKnowWeightQuestion(exIdx);
     refreshSetsUi();
@@ -490,7 +509,7 @@ export function submitKnownWorkWeight() {
         dismissWeightFinder();
         return;
     }
-    const applied = applyWorkWeight(item, kg);
+    const applied = applySessionAwareWorkWeight(item, kg);
     if (applied < 0) {
         showError('Could not apply that weight.');
         return;
@@ -518,7 +537,7 @@ export function submitFinderWorkWeight() {
         ? (activeSideMeta(item)?.exercise?.name || '')
         : (item.exercise?.name || '');
     const work = finder === 0 ? 0 : workWeightFromFinder(finder, exName, { forStrength: finderForStrength() });
-    const applied = applyWorkWeight(item, work, { skipWarmups: true });
+    const applied = applySessionAwareWorkWeight(item, work, { skipWarmups: true });
     if (applied < 0) {
         showError('Could not apply that weight.');
         return;

@@ -13,6 +13,8 @@ export const store = {
     gymWillingness: 4, maxGymTime: 90, bandAuxiliary: false, dumbbellIncrement: 2,
     dbIncrements: { low: 1, mid: 2, high: 2 },
     exerciseIncrements: {},
+    /** First-use confirmation for Functional / Crossover cable stack increments. */
+    cableStackConfirmed: {},
     /** Seed working weights by exercise name (kg). Used until real logs drive progression. */
     exerciseWorkingWeights: {},
     /** Last entered optional loads for core-circuit exercises, keyed by name. */
