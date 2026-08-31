@@ -18,7 +18,8 @@ import {
     loadWorkoutSessionSnapshots,
     normalizeLoggedSessionKind,
     prettyWorkoutTypeLabel,
-    sessionItemsAreStretchOnly
+    sessionItemsAreStretchOnly,
+    strengthLabelForLetter
 } from '../domain/route-planner.js';
 import { formatDurationMs, formatExerciseDurationLabel } from './workout-timer.js';
 import { buildStructuredStretchParts, stretchPartDisplayLabel } from '../domain/session-prep.js';
@@ -27,6 +28,7 @@ import { computeAimBarLayout, formatMacroAimLabel, getMacroRange } from '../lib/
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from '../domain/meal-planner.js';
 import { resolveLogPeriodization } from '../domain/periodization-logs.js';
 import { getDiaryFieldsForMode } from '../domain/diary-schema.js';
+import { inferStrengthLetterFromItems } from '../domain/strength-engine.js';
 
 // ==========================================
 // 10. DASHBOARD, FORECAST, & TIMELINE
@@ -231,6 +233,7 @@ export function shiftAdherenceMonth(delta) {
 }
 
 export function renderAdherenceCalendar() {
+    hydrateDiaryMarksFromStorage();
     const gridEl = document.getElementById('calendar-grid');
     if (!gridEl) return;
 
@@ -267,24 +270,12 @@ export function renderAdherenceCalendar() {
         const dayJournal = loadDayJournal(dateStr);
         const gymJournal = loadGymJournalEntry(dateStr) || loadGymJournalEntry(iso);
         const exerciseDiaries = loadExerciseDiariesForDate(dateStr, iso);
-        const hasDiary = !!(dayJournal && (
-            dayJournal.source === 'practice' ||
-            dayJournal.source === 'match' ||
-            dayJournal.source === 'gym' ||
-            dayJournal.source === 'journal' ||
-            dayJournal.type === 'lactate' ||
-            dayJournal.type === 'gym' ||
-            dayJournal.notes ||
-            (dayJournal.media && dayJournal.media.length)
-        )) || !!gymJournal
-            || Object.keys(exerciseDiaries || {}).length > 0
-            || daySessions.some(s =>
-                String(s?.journalNotes || '').trim()
-                || s?.journalMental != null
-                || (s.items || []).some(it =>
-                    String(it?.diaryNotes || '').trim() || (Array.isArray(it?.diaryMedia) && it.diaryMedia.length)
-                )
-            );
+        const hasDiary = dayHasAdherenceDiary(dateStr, iso, {
+            dayJournal,
+            gymJournal,
+            exerciseDiaries,
+            daySessions
+        });
         const hasWorkout = !!(data && data.hasWorkout) || daySessions.length > 0;
 
         let bgStyle = 'background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle);';
@@ -312,7 +303,7 @@ export function renderAdherenceCalendar() {
         }
 
         if (hasDiary) {
-            markers += `<div class="grid-diary-star" title="Diary entry">★</div>`;
+            markers += `<div class="grid-diary-star" title="Diary entry" style="color:#0A84FF;">★</div>`;
         }
 
         const isToday = d.toDateString() === now.toDateString();
@@ -395,7 +386,9 @@ export async function openDayDetail(dateStr, isoHint) {
     const wks = data ? data.items.filter(i => i.type === 'workout') : [];
     const foods = data ? data.items.filter(i => i.type === 'food') : [];
 
-    const hasAnything = !!(data || gymJournal || practiceJournal || matchJournal || sessions.length);
+    const hasAnything = !!(data || gymJournal || practiceJournal || matchJournal || sessions.length
+        || Object.keys(loadExerciseDiariesForDate(dateStr, iso) || {}).length
+        || dayHasDiaryMark(dateStr, iso));
 
     if (!hasAnything) {
         document.getElementById('modal-summary').innerText = 'No telemetry recorded.';
@@ -1068,8 +1061,15 @@ function resolveAdherenceSessionKind(snap) {
         const d = (it?.exercise?.domain || '').toLowerCase();
         return d === 'strength' || d === 'power' || d === 'hypertrophy' || it?.isPower;
     });
+    if (hasLift) {
+        if (/Strength\s*[AB]/i.test(kind || '') || /Strength Session [AB]/i.test(kind || '')) return kind;
+        const letter = inferStrengthLetterFromItems(snap?.items);
+        if (letter && (norm === 'Full Body / Strength' || !kind || kind === 'Workout' || kind === 'Strength Session')) {
+            return strengthLabelForLetter(letter);
+        }
+        return kind;
+    }
     // Never collapse a lifting session to Steady State because stretch/row names look like cardio
-    if (hasLift) return kind;
     if (inferred === 'Cardio (Steady)' && (!kind || kind === 'Workout' || norm === 'Full Body / Strength')) {
         return 'Cardio (Steady)';
     }
@@ -1102,9 +1102,13 @@ function synthesizeAdherenceSessionFromLogs(dateStr, iso, logs) {
     const hasStretchOnly = items.length > 0 && items.every(it => /stretch/i.test(it.name || '') || it.isStretchGroup);
     const inferred = sessionKindFromAdherenceItems(items);
     const hasCardioLogs = (logs || []).some(l => isCardioWorkoutLogRow(l));
-    const kind = hasStretchOnly || sessionItemsAreStretchOnly(items)
+    let kind = hasStretchOnly || sessionItemsAreStretchOnly(items)
         ? 'Stretching'
         : (inferred || (hasCardioLogs ? 'Cardio (Steady)' : 'Full Body / Strength'));
+    if (kind === 'Full Body / Strength' || kind === 'Strength Session') {
+        const letter = inferStrengthLetterFromItems(items);
+        if (letter) kind = strengthLabelForLetter(letter);
+    }
     const snap = {
         id: `orphan-day-${iso || dateStr}`,
         dateIso: iso,
@@ -2486,6 +2490,7 @@ export function savePracticeJournalEntry(isoDate, entry) {
     const isoKey = dateToISO(d);
     localStorage.setItem('ascensus_practice_journal_' + localeKey, payload);
     localStorage.setItem('ascensus_practice_journal_' + isoKey, payload);
+    markAdherenceDiaryDay(isoDate);
     if (entry.notes) localStorage.setItem('ascensus_journal_' + localeKey, entry.notes);
 }
 
@@ -2508,6 +2513,7 @@ export function saveMatchJournalEntry(isoDate, entry) {
     const isoKey = dateToISO(d);
     localStorage.setItem('ascensus_match_journal_' + localeKey, payload);
     localStorage.setItem('ascensus_match_journal_' + isoKey, payload);
+    markAdherenceDiaryDay(isoDate);
     if (entry.notes) localStorage.setItem('ascensus_journal_' + localeKey, entry.notes);
 }
 
@@ -2532,6 +2538,7 @@ export function saveGymJournalEntry(isoDate, entry) {
     const isoKey = dateToISO(d);
     localStorage.setItem('ascensus_gym_journal_' + isoKey, payload);
     localStorage.setItem('ascensus_gym_journal_' + localeKey, payload);
+    markAdherenceDiaryDay(isoDate);
     if (entry.notes) localStorage.setItem('ascensus_journal_' + localeKey, entry.notes);
 }
 
@@ -2567,6 +2574,7 @@ export function saveExerciseDiariesForDate(isoDate, items) {
         all[k] = { ...(all[k] || {}), ...day };
     });
     try { localStorage.setItem(EXERCISE_DIARIES_KEY, JSON.stringify(all)); } catch (e) { /* ignore */ }
+    markAdherenceDiaryDay(isoDate);
 }
 
 export function loadExerciseDiariesForDate(dateStr, isoHint) {
@@ -2585,6 +2593,82 @@ export function loadExerciseDiariesForDate(dateStr, isoHint) {
         });
     });
     return merged;
+}
+
+const ADHERENCE_DIARY_DAYS_KEY = 'ascensus_adherence_diary_days_v1';
+
+function readDiaryDayMarks() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(ADHERENCE_DIARY_DAYS_KEY) || '{}');
+        return raw && typeof raw === 'object' ? raw : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function hydrateDiaryMarksFromStorage() {
+    const all = readDiaryDayMarks();
+    let changed = false;
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i) || '';
+            const m = /^(?:ascensus_(?:gym|practice|match)_journal_|ascensus_journal_)(.+)$/.exec(key);
+            if (!m || !m[1] || all[m[1]]) continue;
+            all[m[1]] = true;
+            changed = true;
+        }
+        const diaries = readExerciseDiaryStore();
+        Object.keys(diaries || {}).forEach((k) => {
+            if (k && !all[k] && diaries[k] && Object.keys(diaries[k]).length) {
+                all[k] = true;
+                changed = true;
+            }
+        });
+    } catch (e) { /* ignore */ }
+    if (changed) {
+        try { localStorage.setItem(ADHERENCE_DIARY_DAYS_KEY, JSON.stringify(all)); } catch (e) { /* ignore */ }
+    }
+}
+
+function markAdherenceDiaryDay(isoDate) {
+    const keys = journalStorageKeysForDate(isoDate);
+    if (!keys.length) return;
+    const all = readDiaryDayMarks();
+    keys.forEach((k) => { all[k] = true; });
+    try { localStorage.setItem(ADHERENCE_DIARY_DAYS_KEY, JSON.stringify(all)); } catch (e) { /* ignore */ }
+}
+
+function dayHasDiaryMark(dateStr, isoHint) {
+    const all = readDiaryDayMarks();
+    return [...journalLookupKeys(dateStr), ...journalLookupKeys(isoHint)].some((k) => all[k]);
+}
+
+function gymJournalHasContent(journal) {
+    if (!journal) return false;
+    if (String(journal.notes || '').trim()) return true;
+    if (journal.rpe != null && journal.rpe !== '') return true;
+    if (journal.mental != null && journal.mental !== '') return true;
+    if (journal.athletic != null && journal.athletic !== '') return true;
+    if (Number(journal.hydration_ml) > 0) return true;
+    if (journal.media && journal.media.length) return true;
+    if (journal.fields && Object.keys(journal.fields).some((k) => journal.fields[k] != null && journal.fields[k] !== '')) return true;
+    if (journal.type === 'lactate' || journal.hitTypes?.length || journal.lactateSummary) return true;
+    if (journal.source === 'gym' || journal.source === 'practice' || journal.source === 'match' || journal.source === 'journal') return true;
+    if (journal.type === 'gym' || journal.type === 'practice' || journal.type === 'match') return true;
+    return true;
+}
+
+function dayHasAdherenceDiary(dateStr, iso, { dayJournal, gymJournal, exerciseDiaries, daySessions } = {}) {
+    if (dayHasDiaryMark(dateStr, iso)) return true;
+    if (gymJournalHasContent(dayJournal) || gymJournalHasContent(gymJournal)) return true;
+    if (exerciseDiaries && Object.keys(exerciseDiaries).length > 0) return true;
+    return (daySessions || []).some((s) =>
+        String(s?.journalNotes || '').trim()
+        || s?.journalMental != null
+        || (s.items || []).some((it) =>
+            String(it?.diaryNotes || '').trim() || (Array.isArray(it?.diaryMedia) && it.diaryMedia.length)
+        )
+    );
 }
 
 function journalStorageKeysForDate(isoDate) {

@@ -4,7 +4,7 @@ import { getLactateProtocolForSlot } from './lactate-engine.js';
 import { assignPairedSessionSlots, dateToISO, foldMisfiledGymTailSessions, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listLoggedCreditKeysForDate, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, planSessionSwapButtonHtml, resolveStrengthEventLetter, saveWorkoutSessionSnapshots, strengthLabelForLetter } from './route-planner.js';
 import { loadDayJournal } from '../ui/journey.js';
 import { getSportData } from './sports-matrix.js';
-import { buildStrengthSessionRoutine, getGymPlanPrefs, isStrengthFocus, resolveStrengthSession } from './strength-engine.js';
+import { buildStrengthSessionRoutine, getGymPlanPrefs, inferStrengthLetterFromItems, isStrengthFocus, resolveStrengthSession } from './strength-engine.js';
 import { buildPowerSessionRoutine, isPowerEvent } from './power-engine.js';
 import {
     getHypertrophySessionRoutine,
@@ -573,27 +573,28 @@ export function generateDailyExerciseLog() {
     try {
         const planned = (typeof getPlannedDayEvents === 'function') ? (getPlannedDayEvents(new Date()) || []) : [];
         const plannedLetter = resolveStrengthEventLetter(planned.find(e => isStrengthEvent(e) && !/Hypertrophy/i.test(e)) || '');
-        const stored = localStorage.getItem('ascensus_strength_ab');
-        const letter = plannedLetter || (stored === 'A' || stored === 'B' ? stored : null);
-        if (letter === 'A' || letter === 'B') {
-            const labelled = strengthLabelForLetter(letter);
-            let changed = false;
+        let changed = false;
+        sessions.forEach((sess) => {
+            if (resolveStrengthEventLetter(sess.kind)) return;
+            if (normalizeLoggedSessionKind(sess.kind) !== 'Full Body / Strength') return;
+            const letter = inferStrengthLetterFromItems(sess.items)
+                || plannedLetter
+                || (localStorage.getItem('ascensus_strength_ab') === 'B' ? 'B'
+                    : localStorage.getItem('ascensus_strength_ab') === 'A' ? 'A'
+                    : null);
+            if (letter !== 'A' && letter !== 'B') return;
+            sess.kind = strengthLabelForLetter(letter);
+            changed = true;
+        });
+        if (changed) {
+            const snaps = loadWorkoutSessionSnapshots();
             sessions.forEach((sess) => {
-                if (resolveStrengthEventLetter(sess.kind)) return;
-                if (normalizeLoggedSessionKind(sess.kind) !== 'Full Body / Strength') return;
-                sess.kind = labelled;
-                changed = true;
+                if (snaps[sess.id] && snaps[sess.id].kind !== sess.kind) {
+                    snaps[sess.id].kind = sess.kind;
+                    snaps[sess.id].updatedAt = new Date().toISOString();
+                }
             });
-            if (changed) {
-                const snaps = loadWorkoutSessionSnapshots();
-                sessions.forEach((sess) => {
-                    if (snaps[sess.id] && snaps[sess.id].kind !== sess.kind) {
-                        snaps[sess.id].kind = sess.kind;
-                        snaps[sess.id].updatedAt = new Date().toISOString();
-                    }
-                });
-                saveWorkoutSessionSnapshots(snaps);
-            }
+            saveWorkoutSessionSnapshots(snaps);
         }
     } catch (e) { /* keep generic Strength Session label */ }
 

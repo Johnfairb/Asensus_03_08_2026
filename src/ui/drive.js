@@ -5,7 +5,7 @@ import { resolveSessionRpe, getTonightSleepTargetHours } from '../domain/sleep-r
 import { calculateLiveFitnessScores, generateDailyExerciseLog, getSeasonPhase, getTodayFocus, getWorkoutSessionAdvice, isGuidanceOff } from '../domain/fitness-hud.js';
 import { applyInjuryPainFollowUpFromJournal, injuryAreaLabel, needsInjuryPainFollowUp } from '../domain/periodization.js';
 import { HIT_TYPE_OPTIONS, HIT_FLEXIBLE_INPUT_META, mergeModalityBaselineTest, recalculateLactatePlanIntensities, resolveHitClassRecovery, modalityUsesFlexibleBaselineInput, getModalityBaselineInputKind, getModalitySpeedUnit, saveModalityBaselineInputPrefs, parseBaselineResultInput, formatBaselineStoredValue, baselineResultUnit, baselineTestDisplayLabel, getBaselineTestSequence } from '../domain/lactate-engine.js';
-import { commitMatchSession, commitPracticeSession, dateToISO, formVideoThumbButtonHtml, generateFutureTimeline, getWorkoutSessionSnapshot, loadWorkoutSessionSnapshots, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isCustomWorkoutKind, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, isLastPlannedSessionOfDay, looksLikeSteadyCardioExercise, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, resolveStrengthEventLetter, sessionItemsAreStretchOnly, setRouteOverride, addDaysISO, isPowerEvent, strengthLabelForLetter } from '../domain/route-planner.js';
+import { applySpontaneousAdd, applySpontaneousCancel, commitMatchSession, commitPracticeSession, dateToISO, formVideoThumbButtonHtml, generateFutureTimeline, getWorkoutSessionSnapshot, loadWorkoutSessionSnapshots, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isCustomWorkoutKind, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, isLastPlannedSessionOfDay, looksLikeSteadyCardioExercise, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, resolveStrengthEventLetter, sessionItemsAreStretchOnly, setRouteOverride, addDaysISO, isPowerEvent, strengthLabelForLetter } from '../domain/route-planner.js';
 import { lactateSessionRpeBarHtml, openLactateHitPicker, shouldPromptLactateHitTypes, syncLactateIntensitiesIntoActiveLog } from './lactate-ui.js';
 
 const HIT_TYPE_LABELS_RE = new RegExp(
@@ -17,6 +17,7 @@ import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog,
 import { populateSportSelects } from '../domain/sports-matrix.js';
 import { applyPowerExerciseToItem } from '../domain/power-engine.js';
 import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, hypertrophyRestSeconds, isHypertrophyPhase, sessionAppliesMuscleLockout } from '../domain/hypertrophy-engine.js';
+import { inferStrengthLetterFromItems } from '../domain/strength-engine.js';
 import {
     allowsWeightInput,
     catalogLoadOptions,
@@ -3689,7 +3690,7 @@ export function confirmManualGymRestPrefs() {
 // Bridge for route.js (avoids circular import of beginManualWorkoutSession)
 window._beginManualWorkoutSession = beginManualWorkoutSession;
 
-function withStrengthSessionLetter(kind) {
+function withStrengthSessionLetter(kind, items) {
     if (!kind || /Hypertrophy/i.test(kind)) return kind;
     const norm = normalizeLoggedSessionKind(kind);
     const generic = norm === 'Full Body / Strength'
@@ -3702,6 +3703,7 @@ function withStrengthSessionLetter(kind) {
         || resolveStrengthEventLetter(kind)
         || resolveStrengthEventLetter(window.manualSessionKind)
         || resolveStrengthEventLetter(window.plannedGpsSlot?.event)
+        || inferStrengthLetterFromItems(items)
         || (localStorage.getItem('ascensus_strength_ab') === 'B' ? 'B'
             : localStorage.getItem('ascensus_strength_ab') === 'A' ? 'A'
             : null);
@@ -3720,9 +3722,9 @@ export function resolveActiveSessionKind(itemsArg) {
         const manualNorm = normalizeLoggedSessionKind(fromManual);
         if (inferred && inferred !== 'Full Body / Strength'
             && (manualNorm === 'Full Body / Strength' || fromManual === 'Gym' || fromManual === 'Gym Workout')) {
-            return withStrengthSessionLetter(inferred);
+            return withStrengthSessionLetter(inferred, items);
         }
-        return withStrengthSessionLetter(fromManual);
+        return withStrengthSessionLetter(fromManual, items);
     }
     const focus = document.getElementById('today-focus')?.value || '';
     const fromFocus = (focus && focus !== 'Rest' && !isPracticeEvent(focus) && !isGameEvent(focus))
@@ -3731,11 +3733,11 @@ export function resolveActiveSessionKind(itemsArg) {
     if (fromFocus) {
         if (inferred && inferred !== 'Full Body / Strength'
             && (normalizeLoggedSessionKind(fromFocus) === 'Full Body / Strength' || fromFocus === 'Gym Workout')) {
-            return withStrengthSessionLetter(inferred);
+            return withStrengthSessionLetter(inferred, items);
         }
-        return withStrengthSessionLetter(fromFocus);
+        return withStrengthSessionLetter(fromFocus, items);
     }
-    if (inferred) return withStrengthSessionLetter(inferred);
+    if (inferred) return withStrengthSessionLetter(inferred, items);
     if (items.some(i => i.isLactateHit || (i.sets || []).some(s => s && s.isLactateHit)
         || /lactate|sprint|interval|30s\s*on|attack bike|skier|battle rope|hit\s*class/i.test(i.exercise?.name || ''))) {
         return 'Lactate';
@@ -3748,11 +3750,11 @@ export function resolveActiveSessionKind(itemsArg) {
         if (i.isStretchGroup || i.isCustomStretch || /stretch/i.test(i.exercise?.name || i.name || '')) return false;
         return isStrengthEvent(i.exercise?.name) || (i.exercise?.domain || '').toLowerCase() === 'strength';
     })) {
-        return withStrengthSessionLetter('Full Body / Strength');
+        return withStrengthSessionLetter('Full Body / Strength', items);
     }
     if (inferred === 'Stretching') return 'Stretching';
-    if (items.length) return withStrengthSessionLetter(inferred || 'Full Body / Strength');
-    return withStrengthSessionLetter('Full Body / Strength');
+    if (items.length) return withStrengthSessionLetter(inferred || 'Full Body / Strength', items);
+    return withStrengthSessionLetter('Full Body / Strength', items);
 }
 
 function inferSessionKindFromItems(items) {
@@ -3893,7 +3895,7 @@ export function editOrphanWorkoutLogs(exerciseNamesCsv, logIdsCsv) {
         if (!hasLift && items.some(i => ((i.exercise?.domain || '').toLowerCase() === 'cardio') || looksLikeSteadyCardioExercise(i.exercise?.name))) {
             return 'Cardio (Steady)';
         }
-        return withStrengthSessionLetter('Full Body / Strength');
+        return withStrengthSessionLetter('Full Body / Strength', items);
     })();
 
     const sessionId = `orphan_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -5127,7 +5129,10 @@ export async function commitWorkoutSession() {
     }
 
     // Persist gym / lactate diary (custom fields + media)
-    if (window.journalMode === 'workout' || window.journalMode === 'lactate') {
+    const hasExerciseDiary = (store.activeLog.items || []).some(it => exerciseDiaryHasContent(it));
+    const shouldSaveGymDiary = window.journalMode === 'workout' || window.journalMode === 'lactate'
+        || !!(String(jNotes || '').trim() || hasExerciseDiary);
+    if (shouldSaveGymDiary) {
         let media = [];
         try {
             media = await persistPendingJournalMedia(dateIso);
@@ -5203,6 +5208,7 @@ export async function commitWorkoutSession() {
 
     closeExecutionZone({ discard: true });
     document.body.classList.remove('workout-focus-mode');
+    try { renderAdherenceCalendar(); } catch (e) { /* ignore */ }
 
     const dash = document.getElementById('drive-dashboard');
     if (dash) dash.style.display = 'block';
@@ -5595,6 +5601,7 @@ export function openSpontaneousEventModal() {
 
 /**
  * Schedule a spontaneous event onto the Route for a day within the next 3 days.
+ * Merges onto that date only — never writes the repeating fixed schedule.
  * Logging happens later from Exercise (normal practice/match/workout flow).
  * After log: RPE&gt;8 → rest next day; RPE&gt;6 practice → counts as lactate.
  */
@@ -5603,23 +5610,38 @@ export async function submitSpontaneousEvent() {
     const dayIso = document.getElementById('spontaneous-day')?.value || dateToISO(new Date());
     if (!type) return alert('Choose an event type.');
 
-    let scheduleVal = type;
-
     try {
-        if (!store.specificSchedules || typeof store.specificSchedules !== 'object') {
-            store.specificSchedules = JSON.parse(localStorage.getItem('ascensus_specific_schedules') || '{}') || {};
-        }
-        store.specificSchedules[dayIso] = { event: scheduleVal, note: 'Spontaneous' };
-        localStorage.setItem('ascensus_specific_schedules', JSON.stringify(store.specificSchedules));
-        invalidateWeekPlanCache();
+        const result = applySpontaneousAdd(dayIso, type);
+        if (!result.ok) return alert(result.reason || 'Could not schedule event.');
         document.getElementById('spontaneous-event-modal')?.classList.add('hidden');
-        try { generateFutureTimeline(); } catch (e) { /* ignore */ }
-        try { getTodayFocus(); } catch (e) { /* ignore */ }
         const pretty = prettyWorkoutTypeLabel(type);
         const when = new Date(dayIso + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+        if (result.restored) {
+            alert(`${pretty} is back on the Route for ${when}.`);
+            return;
+        }
         alert(`${pretty} added to Route for ${when}.\nLog it from Exercise when done — RPE>8 triggers rest; practice RPE>6 counts as lactate.`);
     } catch (e) {
         console.warn(e);
         alert('Could not schedule event.');
+    }
+}
+
+/** Skip one event on the chosen day only. Repeating locks stay in the fixed schedule. */
+export function cancelSpontaneousEvent() {
+    const type = document.getElementById('spontaneous-type')?.value;
+    const dayIso = document.getElementById('spontaneous-day')?.value || dateToISO(new Date());
+    if (!type) return alert('Choose an event type to cancel.');
+
+    try {
+        const result = applySpontaneousCancel(dayIso, type);
+        if (!result.ok) return alert(result.reason || 'Could not cancel event.');
+        document.getElementById('spontaneous-event-modal')?.classList.add('hidden');
+        const pretty = prettyWorkoutTypeLabel(type);
+        const when = new Date(dayIso + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+        alert(`${pretty} cancelled for ${when} only.\nIf it is in your fixed schedule, it will return next week.`);
+    } catch (e) {
+        console.warn(e);
+        alert('Could not cancel event.');
     }
 }

@@ -457,28 +457,8 @@ export function renderWeeklyExerciseGoals() {
         if (txt) txt.textContent = ''; // no numbers per spec
     });
 
-    let logicEl = document.getElementById('weekly-goals-logic');
-    if (!logicEl) {
-        const panel = document.getElementById('drive-panel-goals');
-        const card = panel?.querySelector('.card');
-        if (card) {
-            logicEl = document.createElement('div');
-            logicEl.id = 'weekly-goals-logic';
-            card.appendChild(logicEl);
-        }
-    }
-    if (logicEl) {
-        const prep = scores.preparation;
-        const str = scores.strength;
-        logicEl.style.cssText = 'margin-top:10px; font-size:10px; color:var(--text-muted); line-height:1.45; font-family:Roboto Mono,monospace;';
-        logicEl.innerHTML = `
-            <div style="color:var(--text-silver); font-weight:700; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:6px;">How these fill</div>
-            <div>Anaerobic · 2 HIT / hard practice-match sessions</div>
-            <div>Aerobic · 2 Steady State sessions</div>
-            <div>Flexibility · ticked stretch blocks ÷ planned sessions (${prep.target} this week)</div>
-            <div>Preparation · ticked session warmups ÷ planned sessions (${prep.value}/${prep.target})</div>
-            <div>Strength · gym work-sets completed (not Power / Auxiliary)${str.pct > 0 ? ` · ${Math.round(str.pct * 100)}%` : ''}</div>`;
-    }
+    const logicEl = document.getElementById('weekly-goals-logic');
+    if (logicEl) logicEl.remove();
 
     let pointsEl = document.getElementById('asensus-points-row');
     if (!pointsEl) {

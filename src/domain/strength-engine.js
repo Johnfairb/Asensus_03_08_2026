@@ -1,5 +1,5 @@
 import { store } from '../state/store.js';
-import { buildWeeklyTrainingPlan, getMondayISO, isStrengthEvent } from './route-planner.js';
+import { buildWeeklyTrainingPlan, getMondayISO, getPlannedDayEvents, isStrengthEvent, resolveStrengthEventLetter } from './route-planner.js';
 import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, getSportData } from './sports-matrix.js';
 import { HYPERTROPHY_POOLS, isHypertrophyPhase } from './hypertrophy-engine.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
@@ -396,6 +396,30 @@ export function saveStrengthMonthPlan(plan) {
     return plan;
 }
 
+function stabilizeMonthPlan(plan) {
+    if (!isUsableMonthPlan(plan)) return plan;
+    let changed = false;
+    if (!plan.compoundPicks || typeof plan.compoundPicks !== 'object') {
+        plan.compoundPicks = {};
+        changed = true;
+    }
+    const isos = Array.isArray(plan.isolations) ? plan.isolations : [];
+    const missingSession = isos.filter((iso) => iso && iso.session !== 'A' && iso.session !== 'B');
+    if (missingSession.length) {
+        let aCount = isos.filter((iso) => iso.session === 'A').length;
+        let bCount = isos.filter((iso) => iso.session === 'B').length;
+        missingSession.forEach((iso) => {
+            iso.session = aCount <= bCount ? 'A' : 'B';
+            if (iso.session === 'A') aCount += 1;
+            else bCount += 1;
+        });
+        plan.isolations = isos;
+        changed = true;
+    }
+    if (changed) saveStrengthMonthPlan(plan);
+    return plan;
+}
+
 export function loadStrengthMonthPlan(sportData) {
     const month = getStrengthMonthKey();
     let plan = peekStoredStrengthMonthPlan();
@@ -407,16 +431,16 @@ export function loadStrengthMonthPlan(sportData) {
     if (fromCycle && isIsoDayKey(fromCycle.month) && plan && isIsoDayKey(plan.month) && fromCycle.month < plan.month) {
         plan = { ...fromCycle };
         saveStrengthMonthPlan(plan);
-        return plan;
+        return stabilizeMonthPlan(plan);
     }
     if (!plan && fromCycle) {
         plan = { ...fromCycle, month: fromCycle.month || month };
         saveStrengthMonthPlan(plan);
-        return plan;
+        return stabilizeMonthPlan(plan);
     }
 
     if (isUsableMonthPlan(plan)) {
-        return plan;
+        return stabilizeMonthPlan(plan);
     }
 
     plan = buildFreshMonthPlan(sportData || getSportData());
@@ -513,12 +537,66 @@ export function pickStrengthPoolExercise(poolId, overrides = {}) {
 }
 
 export function resolveStrengthSession(focus) {
-    if (!focus || typeof focus !== 'string') return null;
-    if (/Strength\s*A/i.test(focus) || focus.endsWith(' A')) return 'A';
-    if (/Strength\s*B/i.test(focus) || focus.endsWith(' B')) return 'B';
-    if (focus.includes('Strength')) {
+    if (focus && typeof focus === 'string') {
+        if (/Strength\s*A/i.test(focus) || focus.endsWith(' A')) return 'A';
+        if (/Strength\s*B/i.test(focus) || focus.endsWith(' B')) return 'B';
+    }
+    try {
+        const slotLetter = resolveStrengthEventLetter(window.plannedGpsSlot?.event || '');
+        if (slotLetter === 'A' || slotLetter === 'B') return slotLetter;
+    } catch (e) { /* ignore */ }
+    try {
+        const focusEl = typeof document !== 'undefined' ? document.getElementById('today-focus')?.value : '';
+        const fromFocus = resolveStrengthEventLetter(focusEl || '');
+        if (fromFocus === 'A' || fromFocus === 'B') return fromFocus;
+    } catch (e) { /* ignore */ }
+    try {
+        const planned = (getPlannedDayEvents(new Date()) || []).find((e) => isStrengthEvent(e) && !/Hypertrophy/i.test(e || ''));
+        const fromPlan = resolveStrengthEventLetter(planned || '');
+        if (fromPlan === 'A' || fromPlan === 'B') return fromPlan;
+    } catch (e) { /* ignore */ }
+    if (window.currentStrengthSession === 'A' || window.currentStrengthSession === 'B') {
+        return window.currentStrengthSession;
+    }
+    if (focus && typeof focus === 'string' && focus.includes('Strength')) {
         return (localStorage.getItem('ascensus_strength_ab') === 'B') ? 'B' : 'A';
     }
+    return null;
+}
+
+/** Match logged/planned lifts to the locked month A/B recipes. */
+export function inferStrengthLetterFromItems(items) {
+    const plan = peekStoredStrengthMonthPlan() || peekCycleStrengthPlan();
+    if (!plan) return null;
+    const names = new Set();
+    (items || []).forEach((it) => {
+        const n = String(it?.exercise?.name || it?.name || '').trim().toLowerCase();
+        if (n) names.add(n);
+        if (it?.isSuperset && Array.isArray(it.sides)) {
+            it.sides.forEach((side) => {
+                const s = String(side?.exercise?.name || side?.name || '').trim().toLowerCase();
+                if (s) names.add(s);
+            });
+        }
+    });
+    if (!names.size) return null;
+    const score = (session) => {
+        let n = 0;
+        const slots = session === 'B' ? plan.sessionB : plan.sessionA;
+        (slots || []).forEach((id) => {
+            const pick = plan.compoundPicks && plan.compoundPicks[id];
+            if (pick && names.has(String(pick).toLowerCase())) n += 2;
+        });
+        (plan.isolations || []).filter((iso) => iso.session === session).forEach((iso) => {
+            if (iso?.name && names.has(String(iso.name).toLowerCase())) n += 1;
+        });
+        return n;
+    };
+    const a = score('A');
+    const b = score('B');
+    if (a === 0 && b === 0) return null;
+    if (a > b) return 'A';
+    if (b > a) return 'B';
     return null;
 }
 

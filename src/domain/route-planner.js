@@ -1904,7 +1904,7 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
         ? Math.max(0, (hypPrefs.sessionCount || 0) - (loggedCredits.strength || 0))
         : 0;
     const cacheKey = [
-        'v11-week-extra-merge',
+        'v12-spontaneous-cancel-merge',
         weekStartISO,
         store.userConfig?.sport || '',
         ignoreLoggedCredits ? 'full' : 'net',
@@ -2045,6 +2045,7 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
     }
     persistWeekStrengthTail(days);
     applyPlanSessionExchanges(days, weekStartISO);
+    applyCancelledEventsToPlan(days, specificScheds);
     store._weekPlanCache = { key: cacheKey, plan: days };
     return days;
 }
@@ -2258,23 +2259,134 @@ export function getSpecificEventTime(dateStr, eventName) {
     if (!dateStr || !eventName) return '';
     const raw = loadSpecificSchedulesMap()[dateStr];
     if (!raw || typeof raw !== 'object') return '';
-    const name = specificEventName(raw);
-    if (!name || !sameSportEvent(name, eventName)) return '';
-    return raw.time || '';
+    const rows = [];
+    if (Array.isArray(raw.events)) {
+        raw.events.forEach((ev) => {
+            const name = scheduleEventName(ev);
+            if (name) rows.push({ name, time: (ev && typeof ev === 'object' ? (ev.time || '') : (raw.time || '')) });
+        });
+    }
+    const top = specificEventName(raw);
+    if (top) rows.push({ name: top, time: raw.time || '' });
+    const hit = rows.find((r) => r.name === eventName || sameSportEvent(r.name, eventName));
+    return hit?.time || '';
 }
 
 function specificEntryEvents(raw) {
     if (!raw) return [];
-    if (Array.isArray(raw)) return raw.map(scheduleEventName).filter(Boolean);
+    if (Array.isArray(raw)) return raw.map(scheduleEventName).filter((n) => n && n !== 'None');
     if (typeof raw === 'object' && Array.isArray(raw.events)) {
-        return raw.events.map(scheduleEventName).filter(Boolean);
+        return raw.events.map(scheduleEventName).filter((n) => n && n !== 'None');
     }
     const name = specificEventName(raw);
-    return name ? [name] : [];
+    if (!name || name === 'None') return [];
+    return [name];
 }
 
 function isWeekExtraEntry(raw) {
     return !!(raw && typeof raw === 'object' && raw.note === 'Week extra');
+}
+
+function isSpontaneousEntry(raw) {
+    return !!(raw && typeof raw === 'object' && raw.note === 'Spontaneous');
+}
+
+function cancelledEventNames(raw) {
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.cancelled)) return [];
+    return raw.cancelled.map((n) => scheduleEventName(n) || (typeof n === 'string' ? n : '')).filter(Boolean);
+}
+
+function isMergeOverride(raw) {
+    if (!raw || typeof raw !== 'object') return false;
+    return isWeekExtraEntry(raw) || isSpontaneousEntry(raw) || cancelledEventNames(raw).length > 0 || !!raw.cancelLocks;
+}
+
+function eventMatchesCancelTarget(name, target) {
+    if (!name || !target) return false;
+    if (name === target) return true;
+    if (sameSportEvent(name, target)) return true;
+    if (isPracticeEvent(name) && isPracticeEvent(target)) return true;
+    if (isGameEvent(name) && isGameEvent(target)) return true;
+    if (isLactateEvent(name) && isLactateEvent(target)) return true;
+    if (isSteadyCardio(name) && isSteadyCardio(target)) return true;
+    if (isPowerEvent(name) && isPowerEvent(target)) return true;
+    const nameHyp = /hypertrophy/i.test(name);
+    const targetHyp = /hypertrophy/i.test(target);
+    const nameStr = /strength/i.test(name);
+    const targetStr = /strength/i.test(target);
+    if (nameHyp && targetHyp) return true;
+    if (nameStr && targetStr && !nameHyp && !targetHyp) return true;
+    return false;
+}
+
+function eventIsCancelled(name, cancelled) {
+    if (!name || !cancelled?.length) return false;
+    return cancelled.some((c) => eventMatchesCancelTarget(name, c));
+}
+
+function applyCancelledEventsToPlan(days, specificScheds) {
+    (days || []).forEach((day) => {
+        const cancelled = cancelledEventNames(specificScheds?.[day.dateStr]);
+        if (!cancelled.length) return;
+        day.events = (day.events || []).filter((e) => !eventIsCancelled(e, cancelled));
+        if (!day.events.length) day.events = ['Rest'];
+    });
+}
+
+function normalizeSpecificDayEntry(raw) {
+    const events = [];
+    if (raw && typeof raw === 'object' && Array.isArray(raw.events)) {
+        raw.events.forEach((ev) => {
+            const name = scheduleEventName(ev);
+            if (name && name !== 'None') {
+                const time = (ev && typeof ev === 'object' ? (ev.time || '') : '') || raw.time || '';
+                events.push({ event: name, time });
+            }
+        });
+    } else {
+        const name = specificEventName(raw);
+        if (name && name !== 'None') {
+            const time = (raw && typeof raw === 'object') ? (raw.time || '') : '';
+            events.push({ event: name, time });
+        }
+    }
+    const note = (raw && typeof raw === 'object' && raw.note) ? raw.note : 'Spontaneous';
+    return {
+        note,
+        events,
+        cancelled: cancelledEventNames(raw),
+        cancelLocks: !!(raw && typeof raw === 'object' && raw.cancelLocks)
+    };
+}
+
+function serializeSpecificDayEntry(entry) {
+    const events = (entry.events || []).filter((r) => r.event && r.event !== 'None');
+    const cancelled = [...new Set((entry.cancelled || []).filter(Boolean))];
+    const cancelLocks = !!entry.cancelLocks;
+    if (!events.length && !cancelled.length && !cancelLocks) return null;
+    return {
+        event: events[0]?.event || 'None',
+        time: events[0]?.time || '',
+        note: entry.note || 'Spontaneous',
+        cancelLocks,
+        events,
+        cancelled
+    };
+}
+
+function writeSpecificDayEntry(map, dateStr, entry) {
+    const serialized = serializeSpecificDayEntry(entry);
+    if (!serialized) delete map[dateStr];
+    else map[dateStr] = serialized;
+}
+
+function persistSpecificDayMap(map) {
+    store.specificSchedules = map;
+    localStorage.setItem('ascensus_specific_schedules', JSON.stringify(map));
+    invalidateWeekPlanCache();
+    try { generateFutureTimeline(); } catch (e) { /* ignore */ }
+    try { getTodayFocus(); } catch (e) { /* ignore */ }
+    try { persistUserConfigToCloud(); } catch (e) { /* ignore */ }
 }
 
 function weekSpecificFingerprint(weekStartISO) {
@@ -2288,30 +2400,125 @@ function weekSpecificFingerprint(weekStartISO) {
 }
 
 /**
- * Seed a day from repeating locks plus optional one-off / Sunday extras.
- * Week extras merge onto locks when a slot is free; Rest extras cancel the day.
- * Calendar / spontaneous entries still replace the whole day.
+ * Seed a day from repeating locks plus optional one-off extras / spontaneous adds.
+ * Week extras and spontaneous entries merge onto locks when a slot is free.
+ * Rest extras cancel the day. Cancelled names drop that event for this date only
+ * (repeating locks stay in the fixed schedule). Legacy calendar entries still
+ * replace the whole day.
  */
 export function seedEventsForDate(dateStr, dayOfWeek, specificScheds, fixedScheds) {
     const locks = (fixedScheds?.[dayOfWeek] || []).map(scheduleEventName).filter(Boolean);
     const raw = specificScheds?.[dateStr];
     const extras = specificEntryEvents(raw);
-    if (!extras.length) return locks.slice();
+    const cancelled = cancelledEventNames(raw);
+    if (!raw) return locks.slice();
 
-    if (!isWeekExtraEntry(raw)) return extras.slice(0, 2);
-
-    const extra = extras[0];
-    if (isRestEvent(extra)) return [extra];
-    if (locks.some(isRestEvent)) return extras.slice(0, 2);
-    if (locks.some((e) => e === extra || sameSportEvent(e, extra))) return locks.slice();
-
-    const merged = locks.slice();
-    const check = canAddScheduleEvent(merged, extra);
-    if (check.ok) {
-        merged.push(extra);
-        return merged.slice(0, 2);
+    if (!isMergeOverride(raw)) {
+        if (!extras.length && !cancelled.length) return locks.slice();
+        return extras.filter((e) => !eventIsCancelled(e, cancelled)).slice(0, 2);
     }
-    return extras.slice(0, 2);
+
+    const cancelLocks = !!raw.cancelLocks || (specificEventName(raw) === 'None' && !extras.length && !cancelled.length);
+    if (extras.some(isRestEvent)) return extras.filter(isRestEvent).slice(0, 1);
+
+    let base = cancelLocks ? [] : locks.filter((e) => !eventIsCancelled(e, cancelled));
+    if (base.some(isRestEvent) && extras.length) base = [];
+
+    const merged = base.slice();
+    for (const extra of extras) {
+        if (!extra || extra === 'None') continue;
+        if (eventIsCancelled(extra, cancelled)) continue;
+        if (merged.some((e) => e === extra || sameSportEvent(e, extra))) continue;
+        const check = canAddScheduleEvent(merged, extra);
+        if (check.ok) merged.push(extra);
+        else if (!merged.length) merged.push(extra);
+        if (merged.length >= 2) break;
+    }
+    return merged.slice(0, 2);
+}
+
+/** Add a one-off event to this date only — never writes the repeating fixed schedule. */
+export function applySpontaneousAdd(dateStr, eventName, time = 'Afternoon') {
+    if (!dateStr || !eventName) return { ok: false, reason: 'Choose an event type.' };
+    const map = { ...loadSpecificSchedulesMap() };
+    const d = new Date(dateStr + 'T12:00:00');
+    if (isNaN(d.getTime())) return { ok: false, reason: 'Pick a valid day.' };
+    const dow = d.getDay();
+    const fixed = loadFixedSchedules();
+    const entry = normalizeSpecificDayEntry(map[dateStr]);
+    if (entry.note !== 'Week extra') entry.note = 'Spontaneous';
+
+    if (isRestEvent(eventName)) {
+        entry.events = [{ event: 'Rest', time: '' }];
+        entry.cancelLocks = true;
+        entry.cancelled = [];
+        writeSpecificDayEntry(map, dateStr, entry);
+        persistSpecificDayMap(map);
+        return { ok: true };
+    }
+
+    if (eventIsCancelled(eventName, entry.cancelled)) {
+        entry.cancelled = entry.cancelled.filter((c) => !eventMatchesCancelTarget(eventName, c));
+        writeSpecificDayEntry(map, dateStr, entry);
+        persistSpecificDayMap(map);
+        return { ok: true, restored: true };
+    }
+
+    const preview = serializeSpecificDayEntry(entry);
+    const projected = seedEventsForDate(dateStr, dow, { ...map, [dateStr]: preview }, fixed);
+    if (projected.some((e) => eventMatchesCancelTarget(e, eventName))) {
+        return { ok: false, reason: 'That event is already on this day.' };
+    }
+    const check = canAddScheduleEvent(projected, eventName);
+    if (!check.ok) return check;
+
+    entry.events.push({ event: eventName, time: time || 'Afternoon' });
+    entry.cancelLocks = false;
+    writeSpecificDayEntry(map, dateStr, entry);
+    persistSpecificDayMap(map);
+    return { ok: true };
+}
+
+/**
+ * Drop one event from this date only. Repeating locks stay in the fixed schedule
+ * and return next week. Other events that day are left alone.
+ */
+export function applySpontaneousCancel(dateStr, eventName) {
+    if (!dateStr || !eventName) return { ok: false, reason: 'Choose an event type to cancel.' };
+    const map = { ...loadSpecificSchedulesMap() };
+    const d = new Date(dateStr + 'T12:00:00');
+    if (isNaN(d.getTime())) return { ok: false, reason: 'Pick a valid day.' };
+    const dow = d.getDay();
+    const fixed = loadFixedSchedules();
+    const locks = (fixed[dow] || []).map(scheduleEventName).filter(Boolean);
+    const entry = normalizeSpecificDayEntry(map[dateStr]);
+    if (entry.note !== 'Week extra') entry.note = 'Spontaneous';
+
+    const lockHit = locks.find((e) => eventMatchesCancelTarget(e, eventName));
+    const extraIdx = entry.events.findIndex((r) => eventMatchesCancelTarget(r.event, eventName));
+    let plannedHit = false;
+    try {
+        plannedHit = (getPlannedDayEvents(d) || []).some((e) => eventMatchesCancelTarget(e, eventName));
+    } catch (e) { /* ignore */ }
+
+    if (!lockHit && extraIdx < 0 && !plannedHit) {
+        return { ok: false, reason: 'That event is not on this day’s route.' };
+    }
+
+    if (extraIdx >= 0) entry.events.splice(extraIdx, 1);
+    if (lockHit) {
+        if (!entry.cancelled.some((c) => eventMatchesCancelTarget(lockHit, c))) {
+            entry.cancelled.push(lockHit);
+        }
+    } else if (plannedHit && extraIdx < 0) {
+        if (!entry.cancelled.some((c) => eventMatchesCancelTarget(eventName, c))) {
+            entry.cancelled.push(eventName);
+        }
+    }
+
+    writeSpecificDayEntry(map, dateStr, entry);
+    persistSpecificDayMap(map);
+    return { ok: true };
 }
 
 /** True if any fixed-schedule entry that day is Morning. */

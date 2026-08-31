@@ -643,7 +643,7 @@ h2 {
     top: 2px;
     right: 2px;
     transform: none;
-    color: #0A84FF;
+    color: #0A84FF !important;
     font-size: 13px;
     line-height: 1;
     pointer-events: none;

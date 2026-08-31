@@ -1474,8 +1474,8 @@
 
             <div style="border-top: 1px dashed #333; padding-top: 15px; margin-top: 4px;">
                 <label style="font-family:'Roboto Mono', monospace; color:var(--gold-accent); margin-top:0;">Coming week extras</label>
-                <p style="font-size: 10px; color:var(--text-muted); margin-bottom:10px; font-family:'Roboto Mono', monospace;">Add Practice, Match, or Rest for any day this week. Repeating locks stay; extras merge when a slot is free. Rest cancels that day. Leave as None to skip.</p>
-                <div id="sunday-week-events-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom: 16px; max-height: 220px; overflow-y:auto; padding-right:5px;"></div>
+                <p style="font-size: 10px; color:var(--text-muted); margin-bottom:10px; font-family:'Roboto Mono', monospace;">Add up to two extras on a free day (still max two events including repeating locks). Extras stay on this week only — they are not added to your fixed schedule. Keep repeating leaves the lock. None means that scheduled event is not happening this week. Rest cancels the day.</p>
+                <div id="sunday-week-events-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom: 16px; max-height: 320px; overflow-y:auto; padding-right:5px;"></div>
             </div>
 
             <button class="btn-primary is-primary" style="margin-top:0;" onclick="executeSundayForecast()">Generate 7-day plan</button>
@@ -1713,7 +1713,7 @@
                 <h2 style="color:var(--text-main); font-family:'Roboto Mono', monospace; text-transform: uppercase; letter-spacing: 1px; margin:0; font-size:14px;">Spontaneous Event</h2>
                 <button onclick="document.getElementById('spontaneous-event-modal').classList.add('hidden')" style="background:none; border:none; color:var(--text-stealth); font-size:24px; cursor:pointer;">&times;</button>
             </div>
-            <p style="font-size:11px; color:var(--text-muted); line-height:1.45; margin:0 0 14px 0;">Adds an event to your Route for the next 3 days. Log it later from Exercise — RPE&gt;8 triggers rest; practice-type events with RPE&gt;6 count as a HIT credit.</p>
+            <p style="font-size:11px; color:var(--text-muted); line-height:1.45; margin:0 0 14px 0;">Adds an event to your Route for the next 3 days, or cancels one event on that day only. Cancelled repeating locks stay in your fixed schedule and return next week. Log added events later from Exercise — RPE&gt;8 triggers rest; practice-type events with RPE&gt;6 count as a HIT credit.</p>
 
             <label style="margin-top:0;">Day</label>
             <select id="spontaneous-day" class="input-field"></select>
@@ -1723,6 +1723,7 @@
             </select>
 
             <button class="btn-primary" style="margin-top:10px; background: rgba(212, 175, 55, 0.05); border-color: var(--gold-accent); color: var(--gold-accent);" onclick="submitSpontaneousEvent()">Add to Route</button>
+            <button type="button" class="btn-primary is-secondary" style="margin-top:8px;" onclick="cancelSpontaneousEvent()">Cancel event</button>
         </div>
     </div>
 
