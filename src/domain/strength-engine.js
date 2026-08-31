@@ -1,4 +1,5 @@
 import { store } from '../state/store.js';
+import { withUserId } from '../lib/owned.js';
 import { buildWeeklyTrainingPlan, getMondayISO, getPlannedDayEvents, isStrengthEvent, resolveStrengthEventLetter } from './route-planner.js';
 import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, getSportData } from './sports-matrix.js';
 import { HYPERTROPHY_POOLS, isHypertrophyPhase } from './hypertrophy-engine.js';
@@ -1190,11 +1191,11 @@ export async function migrateStrengthExerciseLabels() {
                         .update({ name, domain: meta.domain, muscle_group: meta.muscle_group })
                         .eq('id', existingNorm.id);
                 } else {
-                    await store.supabaseClient.from('exercise_inventory').insert({
+                    await store.supabaseClient.from('exercise_inventory').insert(withUserId({
                         name,
                         domain: meta.domain,
                         muscle_group: meta.muscle_group
-                    });
+                    }));
                 }
             }
         }

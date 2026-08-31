@@ -1,5 +1,5 @@
 // Ascensus Offline GPS Cache (The Tunnel Protocol)
-const CACHE_NAME = 'ascensus-gps-v47';
+const CACHE_NAME = 'ascensus-gps-v48';
 
 // The critical assets required to render the UI offline
 const ASSETS_TO_CACHE = [
@@ -19,6 +19,7 @@ const ASSETS_TO_CACHE = [
   './src/lib/format.js',
   './src/lib/storage.js',
   './src/lib/idb-journal.js',
+  './src/lib/owned.js',
   './src/services/supabase.js',
   './src/services/auth.js',
   './src/services/offline-queue.js',

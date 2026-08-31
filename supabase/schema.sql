@@ -1,6 +1,7 @@
--- Ascensus full schema bootstrap
--- Run once in Supabase → SQL Editor for project yargrkdfgscxknicdtrt
--- Then reload the app and sign in with THEO / TYLER / JOHN
+-- Ascensus schema (idempotent). Safe to paste over the SQL editor and Run.
+-- Does NOT drop tables or delete rows. Creates anything missing, adds new
+-- columns, then switches from shared-dev RLS to per-user RLS.
+-- Existing rows are assigned to john@ascensus.com (else the oldest auth user).
 
 -- ---------------------------------------------------------------------------
 -- Profiles (settings / onboarding)
@@ -92,9 +93,136 @@ create table if not exists public.user_templates (
 );
 
 -- ---------------------------------------------------------------------------
--- RLS
--- Shared-dev model: any signed-in user can read/write inventory + logs.
--- Profiles stay per-user.
+-- Add any columns the live tables may still be missing
+-- (CREATE TABLE IF NOT EXISTS does not alter tables that already exist)
+-- ---------------------------------------------------------------------------
+alter table public.food_inventory add column if not exists price_per_100g numeric default 0;
+alter table public.food_inventory add column if not exists protein_per_100g numeric default 0;
+alter table public.food_inventory add column if not exists carbs_per_100g numeric default 0;
+alter table public.food_inventory add column if not exists fat_per_100g numeric default 0;
+alter table public.food_inventory add column if not exists water_per_100g numeric default 0;
+alter table public.food_inventory add column if not exists stock_g numeric default 0;
+alter table public.food_inventory add column if not exists preference_score numeric default 0;
+alter table public.food_inventory add column if not exists heading text;
+alter table public.food_inventory add column if not exists pack_g numeric;
+alter table public.food_inventory add column if not exists pack_unit text;
+alter table public.food_inventory add column if not exists unit_count numeric;
+alter table public.food_inventory add column if not exists pack_price numeric;
+alter table public.food_inventory add column if not exists price_cheap numeric;
+alter table public.food_inventory add column if not exists price_middle numeric;
+alter table public.food_inventory add column if not exists price_quality numeric;
+alter table public.food_inventory add column if not exists is_custom boolean default false;
+alter table public.food_inventory add column if not exists source text default 'seed';
+alter table public.food_inventory add column if not exists created_at timestamptz not null default now();
+alter table public.food_inventory add column if not exists user_id uuid references auth.users (id) on delete cascade;
+
+alter table public.exercise_inventory add column if not exists domain text;
+alter table public.exercise_inventory add column if not exists muscle_group text;
+alter table public.exercise_inventory add column if not exists created_at timestamptz not null default now();
+alter table public.exercise_inventory add column if not exists user_id uuid references auth.users (id) on delete cascade;
+
+alter table public.food_logs add column if not exists meal_name text;
+alter table public.food_logs add column if not exists calories numeric default 0;
+alter table public.food_logs add column if not exists protein numeric default 0;
+alter table public.food_logs add column if not exists carbs numeric default 0;
+alter table public.food_logs add column if not exists fat numeric default 0;
+alter table public.food_logs add column if not exists cost numeric default 0;
+alter table public.food_logs add column if not exists food_details text;
+alter table public.food_logs add column if not exists created_at timestamptz not null default now();
+alter table public.food_logs add column if not exists user_id uuid references auth.users (id) on delete cascade;
+
+alter table public.workout_logs add column if not exists exercise text;
+alter table public.workout_logs add column if not exists sets integer default 0;
+alter table public.workout_logs add column if not exists reps numeric default 0;
+alter table public.workout_logs add column if not exists weight_kg numeric default 0;
+alter table public.workout_logs add column if not exists distance_km numeric default 0;
+alter table public.workout_logs add column if not exists time_minutes numeric default 0;
+alter table public.workout_logs add column if not exists rpe numeric default 0;
+alter table public.workout_logs add column if not exists type text;
+alter table public.workout_logs add column if not exists session_duration_min numeric default 0;
+alter table public.workout_logs add column if not exists periodization_phase text;
+alter table public.workout_logs add column if not exists created_at timestamptz not null default now();
+alter table public.workout_logs add column if not exists user_id uuid references auth.users (id) on delete cascade;
+
+alter table public.body_metrics add column if not exists weight_kg numeric;
+alter table public.body_metrics add column if not exists body_fat numeric;
+alter table public.body_metrics add column if not exists created_at timestamptz not null default now();
+alter table public.body_metrics add column if not exists user_id uuid references auth.users (id) on delete cascade;
+
+alter table public.user_templates add column if not exists type text;
+alter table public.user_templates add column if not exists name text;
+alter table public.user_templates add column if not exists details text;
+alter table public.user_templates add column if not exists "sessionKind" text;
+alter table public.user_templates add column if not exists created_at timestamptz not null default now();
+alter table public.user_templates add column if not exists user_id uuid references auth.users (id) on delete cascade;
+
+comment on column public.food_inventory.water_per_100g is
+  'Estimated water content in grams per 100 g edible (ml per 100 ml for liquids).';
+comment on column public.workout_logs.periodization_phase is
+  'hypertrophy | strength — used to filter progress graphs by current periodization';
+
+-- ---------------------------------------------------------------------------
+-- Own existing sandbox rows (does not delete anything)
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  owner_id uuid;
+begin
+  select id into owner_id from auth.users where email ilike 'john@ascensus.com' limit 1;
+  if owner_id is null then
+    select id into owner_id from auth.users order by created_at asc limit 1;
+  end if;
+  if owner_id is null then
+    raise notice 'No auth.users yet — skipping backfill';
+    return;
+  end if;
+
+  update public.food_inventory set user_id = owner_id where user_id is null;
+  update public.exercise_inventory set user_id = owner_id where user_id is null;
+  update public.food_logs set user_id = owner_id where user_id is null;
+  update public.workout_logs set user_id = owner_id where user_id is null;
+  update public.body_metrics set user_id = owner_id where user_id is null;
+  update public.user_templates set user_id = owner_id where user_id is null;
+end $$;
+
+alter table public.food_inventory alter column user_id set default auth.uid();
+alter table public.exercise_inventory alter column user_id set default auth.uid();
+alter table public.food_logs alter column user_id set default auth.uid();
+alter table public.workout_logs alter column user_id set default auth.uid();
+alter table public.body_metrics alter column user_id set default auth.uid();
+alter table public.user_templates alter column user_id set default auth.uid();
+
+do $$
+begin
+  if not exists (select 1 from public.food_inventory where user_id is null) then
+    alter table public.food_inventory alter column user_id set not null;
+  end if;
+  if not exists (select 1 from public.exercise_inventory where user_id is null) then
+    alter table public.exercise_inventory alter column user_id set not null;
+  end if;
+  if not exists (select 1 from public.food_logs where user_id is null) then
+    alter table public.food_logs alter column user_id set not null;
+  end if;
+  if not exists (select 1 from public.workout_logs where user_id is null) then
+    alter table public.workout_logs alter column user_id set not null;
+  end if;
+  if not exists (select 1 from public.body_metrics where user_id is null) then
+    alter table public.body_metrics alter column user_id set not null;
+  end if;
+  if not exists (select 1 from public.user_templates where user_id is null) then
+    alter table public.user_templates alter column user_id set not null;
+  end if;
+end $$;
+
+create index if not exists food_inventory_user_id_idx on public.food_inventory (user_id);
+create index if not exists exercise_inventory_user_id_idx on public.exercise_inventory (user_id);
+create index if not exists food_logs_user_id_idx on public.food_logs (user_id);
+create index if not exists workout_logs_user_id_idx on public.workout_logs (user_id);
+create index if not exists body_metrics_user_id_idx on public.body_metrics (user_id);
+create index if not exists user_templates_user_id_idx on public.user_templates (user_id);
+
+-- ---------------------------------------------------------------------------
+-- RLS — keep profile policies; replace shared-dev with per-user ownership
 -- ---------------------------------------------------------------------------
 alter table public.user_profiles enable row level security;
 alter table public.food_inventory enable row level security;
@@ -104,7 +232,6 @@ alter table public.workout_logs enable row level security;
 alter table public.body_metrics enable row level security;
 alter table public.user_templates enable row level security;
 
--- Profiles
 drop policy if exists "Users can select own profile" on public.user_profiles;
 drop policy if exists "Users can insert own profile" on public.user_profiles;
 drop policy if exists "Users can update own profile" on public.user_profiles;
@@ -115,7 +242,6 @@ create policy "Users can insert own profile"
 create policy "Users can update own profile"
   on public.user_profiles for update using (auth.uid() = id) with check (auth.uid() = id);
 
--- Shared tables (authenticated full access)
 drop policy if exists "Authenticated full access food_inventory" on public.food_inventory;
 drop policy if exists "Authenticated full access exercise_inventory" on public.exercise_inventory;
 drop policy if exists "Authenticated full access food_logs" on public.food_logs;
@@ -123,21 +249,33 @@ drop policy if exists "Authenticated full access workout_logs" on public.workout
 drop policy if exists "Authenticated full access body_metrics" on public.body_metrics;
 drop policy if exists "Authenticated full access user_templates" on public.user_templates;
 
-create policy "Authenticated full access food_inventory"
-  on public.food_inventory for all to authenticated using (true) with check (true);
-create policy "Authenticated full access exercise_inventory"
-  on public.exercise_inventory for all to authenticated using (true) with check (true);
-create policy "Authenticated full access food_logs"
-  on public.food_logs for all to authenticated using (true) with check (true);
-create policy "Authenticated full access workout_logs"
-  on public.workout_logs for all to authenticated using (true) with check (true);
-create policy "Authenticated full access body_metrics"
-  on public.body_metrics for all to authenticated using (true) with check (true);
-create policy "Authenticated full access user_templates"
-  on public.user_templates for all to authenticated using (true) with check (true);
+drop policy if exists "Users own food_inventory" on public.food_inventory;
+drop policy if exists "Users own exercise_inventory" on public.exercise_inventory;
+drop policy if exists "Users own food_logs" on public.food_logs;
+drop policy if exists "Users own workout_logs" on public.workout_logs;
+drop policy if exists "Users own body_metrics" on public.body_metrics;
+drop policy if exists "Users own user_templates" on public.user_templates;
+
+create policy "Users own food_inventory"
+  on public.food_inventory for all to authenticated
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "Users own exercise_inventory"
+  on public.exercise_inventory for all to authenticated
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "Users own food_logs"
+  on public.food_logs for all to authenticated
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "Users own workout_logs"
+  on public.workout_logs for all to authenticated
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "Users own body_metrics"
+  on public.body_metrics for all to authenticated
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "Users own user_templates"
+  on public.user_templates for all to authenticated
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 
--- Force PostgREST to pick up new tables immediately
 notify pgrst, 'reload schema';

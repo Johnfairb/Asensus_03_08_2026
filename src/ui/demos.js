@@ -1,4 +1,5 @@
 import { store } from '../state/store.js';
+import { asNewOwnedRows, withUserId } from '../lib/owned.js';
 
 // ==========================================
 // 12. DATA EXPORT & DEMO INJECTOR
@@ -25,7 +26,7 @@ export async function exportData() {
 
 export async function injectPitchData(filename) {
     const status = document.getElementById('demo-status');
-    if(!confirm("WARNING: This will wipe your entire database and generate 28 days of simulated history. Proceed?")) return;
+    if(!confirm("WARNING: This will wipe YOUR food, workouts, and body metrics (not other accounts) and generate 28 days of simulated history. Proceed?")) return;
     status.innerText = "⏳ Downloading Demo Profile...";
 
     try {
@@ -44,8 +45,8 @@ export async function injectPitchData(filename) {
         ]);
 
         status.innerText = "⏳ Planting Inventories...";
-        await store.supabaseClient.from('food_inventory').insert(data.food_inventory);
-        await store.supabaseClient.from('exercise_inventory').insert(data.exercise_inventory);
+        await store.supabaseClient.from('food_inventory').insert(asNewOwnedRows(data.food_inventory));
+        await store.supabaseClient.from('exercise_inventory').insert(asNewOwnedRows(data.exercise_inventory));
 
         status.innerText = "⏳ Generating 28 Days of History...";
         let bodyPayload = []; let foodPayload = []; let workPayload = [];
@@ -101,9 +102,9 @@ export async function injectPitchData(filename) {
 
         status.innerText = "⏳ Uploading History to Cloud...";
         const chunkSize = 50;
-        for (let i=0; i<bodyPayload.length; i+=chunkSize) await store.supabaseClient.from('body_metrics').insert(bodyPayload.slice(i, i+chunkSize));
-        for (let i=0; i<foodPayload.length; i+=chunkSize) await store.supabaseClient.from('food_logs').insert(foodPayload.slice(i, i+chunkSize));
-        for (let i=0; i<workPayload.length; i+=chunkSize) await store.supabaseClient.from('workout_logs').insert(workPayload.slice(i, i+chunkSize));
+        for (let i=0; i<bodyPayload.length; i+=chunkSize) await store.supabaseClient.from('body_metrics').insert(withUserId(bodyPayload.slice(i, i+chunkSize)));
+        for (let i=0; i<foodPayload.length; i+=chunkSize) await store.supabaseClient.from('food_logs').insert(withUserId(foodPayload.slice(i, i+chunkSize)));
+        for (let i=0; i<workPayload.length; i+=chunkSize) await store.supabaseClient.from('workout_logs').insert(withUserId(workPayload.slice(i, i+chunkSize)));
 
         status.innerText = "✅ DB Injection Complete! Rebooting...";
         setTimeout(() => window.location.reload(), 1500);

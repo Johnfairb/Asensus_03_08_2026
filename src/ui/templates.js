@@ -1,4 +1,5 @@
 import { store } from '../state/store.js';
+import { withUserId } from '../lib/owned.js';
 import { applyDietFilter } from '../domain/food-catalog.js';
 import { excludeBannedExercises, excludeBannedFoods } from '../domain/bans.js';
 import { getLibraryMuscleGroup, LIBRARY_MUSCLE_ORDER } from '../domain/bodyweight-lifts.js';
@@ -221,7 +222,7 @@ export async function saveCurrentAsTemplate() {
         sessionKind: sessionKind || undefined
     };
 
-    const { data, error } = await store.supabaseClient.from('user_templates').insert([payload]).select();
+    const { data, error } = await store.supabaseClient.from('user_templates').insert([withUserId(payload)]).select();
     if (error || !data || !data[0]) {
         // Offline / cloud failure — keep a local copy so My Workouts / My Recipes still work
         const localRow = { id: 'local_' + Date.now(), ...payload };

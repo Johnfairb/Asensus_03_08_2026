@@ -2,6 +2,7 @@
  * Body metrics helpers — one weight / body-fat / sleep log per calendar day.
  */
 import { store } from '../state/store.js';
+import { withUserId } from '../lib/owned.js';
 
 function toISODate(d = new Date()) {
     const y = d.getFullYear();
@@ -63,7 +64,7 @@ export async function upsertTodayWeight(weightKg) {
         if (bf != null) fields.body_fat = bf;
         ({ error } = await collapseDayToSingleRow(keep.id, fields, rows));
     } else {
-        ({ error } = await store.supabaseClient.from('body_metrics').insert([{ weight_kg: w }]));
+        ({ error } = await store.supabaseClient.from('body_metrics').insert([withUserId({ weight_kg: w })]));
     }
 
     try {
@@ -97,10 +98,10 @@ export async function upsertTodayBodyFat(bodyFatPct) {
     } else {
         const payload = { body_fat: bf };
         if (weight != null) payload.weight_kg = weight;
-        ({ error } = await store.supabaseClient.from('body_metrics').insert([payload]));
+        ({ error } = await store.supabaseClient.from('body_metrics').insert([withUserId(payload)]));
         if (error && weight != null) {
             ({ error } = await store.supabaseClient.from('body_metrics')
-                .insert([{ weight_kg: weight, body_fat: bf }]));
+                .insert([withUserId({ weight_kg: weight, body_fat: bf })]));
         }
     }
 

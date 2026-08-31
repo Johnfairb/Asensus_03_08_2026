@@ -1,4 +1,5 @@
 import { store } from '../state/store.js';
+import { withUserId } from '../lib/owned.js';
 import { generateDailyMealPlan } from '../domain/meal-planner.js';
 import { STRENGTH_EXERCISE_META } from '../domain/strength-engine.js';
 import {
@@ -434,7 +435,7 @@ export async function saveFoodToCloud() {
     if (editId) {
         error = (await store.supabaseClient.from('food_inventory').update(payload).eq('id', editId)).error;
     } else {
-        const res = await store.supabaseClient.from('food_inventory').insert([payload]).select('id').single();
+        const res = await store.supabaseClient.from('food_inventory').insert([withUserId(payload)]).select('id').single();
         error = res.error;
     }
 
@@ -902,7 +903,7 @@ export async function saveExerciseToCloud() {
     const payload = { name, domain, muscle_group: muscle };
     let error;
     if (editId) error = (await store.supabaseClient.from('exercise_inventory').update(payload).eq('id', editId)).error;
-    else error = (await store.supabaseClient.from('exercise_inventory').insert([payload])).error;
+    else error = (await store.supabaseClient.from('exercise_inventory').insert([withUserId(payload)])).error;
     
     if (error) alert("Error saving exercise.");
     else { cancelExEdit(); loadExercises(); }

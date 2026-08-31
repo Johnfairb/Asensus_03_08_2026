@@ -1,4 +1,5 @@
 import { store } from '../state/store.js';
+import { withUserId } from '../lib/owned.js';
 
 // --- OFFLINE SYNC ENGINE ---
 export async function processOfflineQueue() {
@@ -9,7 +10,7 @@ export async function processOfflineQueue() {
     localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
 
     for (let item of pending) {
-        const { error } = await store.supabaseClient.from(item.table).insert(item.payload);
+        const { error } = await store.supabaseClient.from(item.table).insert(withUserId(item.payload));
         if (error) {
             store.offlineQueue.push(item);
             localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));

@@ -1,5 +1,6 @@
 import { store } from '../state/store.js';
 import { FOODS_SEED_VERSION, STORAGE_KEYS } from '../config/constants.js';
+import { withUserId } from '../lib/owned.js';
 
 const CATALOG_URL = 'data/template-foods-catalog.json';
 const SEED_URL = 'data/seed-database.json';
@@ -436,7 +437,7 @@ export async function syncOfficialFoods(client = store.supabaseClient) {
       if (error) console.error('Food update failed:', seedFood.name, error);
       else updated += 1;
     } else {
-      const { error } = await client.from('food_inventory').insert([payload]);
+      const { error } = await client.from('food_inventory').insert([withUserId(payload)]);
       if (error) console.error('Food insert failed:', seedFood.name, error);
       else inserted += 1;
     }
@@ -456,7 +457,7 @@ export async function syncOfficialFoods(client = store.supabaseClient) {
   // Seed exercises only when empty
   const { data: exCheck, error: exCheckErr } = await client.from('exercise_inventory').select('id').limit(1);
   if (!exCheckErr && (!exCheck || exCheck.length === 0) && seedData.exercises?.length) {
-    const { error: exErr } = await client.from('exercise_inventory').insert(seedData.exercises);
+    const { error: exErr } = await client.from('exercise_inventory').insert(withUserId(seedData.exercises));
     if (exErr) console.error('❌ Error inserting exercises:', exErr);
     else console.log('✅ Exercises seeded!');
   }

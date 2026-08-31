@@ -1,4 +1,5 @@
 import { store } from '../state/store.js';
+import { withUserId } from '../lib/owned.js';
 import { getEquivalentExercises, resolveItemSlotLabel } from '../domain/exercise-slots.js';
 import { sessionTypeIdFromFocus, updateLockedExerciseInPlan } from '../domain/workout-cycle.js';
 import { resolveSessionRpe, getTonightSleepTargetHours } from '../domain/sleep-rpe.js';
@@ -4396,10 +4397,10 @@ export async function submitHydrationLog() {
     }];
     try {
         if (!navigator.onLine) throw new Error('Offline');
-        const { error } = await store.supabaseClient.from('food_logs').insert(payload);
+        const { error } = await store.supabaseClient.from('food_logs').insert(withUserId(payload));
         if (error) throw error;
     } catch (e) {
-        store.offlineQueue.push({ table: 'food_logs', payload });
+        store.offlineQueue.push({ table: 'food_logs', payload: withUserId(payload) });
         localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
     }
     document.getElementById('status-badge-hydration')?.classList.add('completed');
@@ -4657,10 +4658,10 @@ export async function submitLog() {
         
         try {
             if (!navigator.onLine) throw new Error("Offline");
-            const { error } = await store.supabaseClient.from('food_logs').insert(payload);
+            const { error } = await store.supabaseClient.from('food_logs').insert(withUserId(payload));
             if (error) throw error;
         } catch(e) {
-            store.offlineQueue.push({ table: 'food_logs', payload: payload });
+            store.offlineQueue.push({ table: 'food_logs', payload: withUserId(payload) });
             localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
             saveError = "offline"; 
         }
@@ -5015,17 +5016,17 @@ export async function commitWorkoutSession() {
     if (logsToSave.length > 0) {
         try {
             if (!navigator.onLine) throw new Error("Offline");
-            let { data, error } = await store.supabaseClient.from('workout_logs').insert(logsToSave).select();
+            let { data, error } = await store.supabaseClient.from('workout_logs').insert(withUserId(logsToSave)).select();
             // Column may not exist yet — retry without periodization_phase
             if (error && /periodization_phase/i.test(String(error.message || error.details || ''))) {
-                const stripped = logsToSave.map(({ periodization_phase, ...rest }) => rest);
+                const stripped = withUserId(logsToSave.map(({ periodization_phase, ...rest }) => rest));
                 const retry = await store.supabaseClient.from('workout_logs').insert(stripped).select();
                 data = retry.data;
                 error = retry.error;
                 if (!error && liftPhase) rememberLogPhasesByFingerprint(logsToSave.map((l) => ({ ...l, created_at: l.created_at || dateIso })), liftPhase);
             }
             if (error && /created_at/i.test(String(error.message || error.details || ''))) {
-                const stripped = logsToSave.map(({ created_at, ...rest }) => rest);
+                const stripped = withUserId(logsToSave.map(({ created_at, ...rest }) => rest));
                 const retry = await store.supabaseClient.from('workout_logs').insert(stripped).select();
                 data = retry.data;
                 error = retry.error;
@@ -5041,7 +5042,7 @@ export async function commitWorkoutSession() {
         } catch (e) {
             console.error("Workout save error:", e);
             if (liftPhase) rememberLogPhasesByFingerprint(logsToSave.map((l) => ({ ...l, created_at: l.created_at || dateIso })), liftPhase);
-            store.offlineQueue.push({ table: 'workout_logs', payload: logsToSave });
+            store.offlineQueue.push({ table: 'workout_logs', payload: withUserId(logsToSave) });
             localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
             saveError = "offline";
             // Optimistic local rows so Log updates immediately even offline

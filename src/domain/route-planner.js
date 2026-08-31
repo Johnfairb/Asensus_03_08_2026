@@ -1,4 +1,5 @@
 import { store } from '../state/store.js';
+import { withUserId } from '../lib/owned.js';
 import {
     DOMAIN_LABELS,
     buildPlainSessionCardHtml,
@@ -3269,10 +3270,10 @@ export async function commitPracticeSession() {
 
     try {
         if (!navigator.onLine) throw new Error('Offline');
-        const { error } = await store.supabaseClient.from('workout_logs').insert(payload);
+        const { error } = await store.supabaseClient.from('workout_logs').insert(withUserId(payload));
         if (error) throw error;
     } catch (e) {
-        store.offlineQueue.push({ table: 'workout_logs', payload });
+        store.offlineQueue.push({ table: 'workout_logs', payload: withUserId(payload) });
         localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
     }
 
@@ -3358,10 +3359,10 @@ export async function commitMatchSession() {
 
     try {
         if (!navigator.onLine) throw new Error('Offline');
-        const { error } = await store.supabaseClient.from('workout_logs').insert(payload);
+        const { error } = await store.supabaseClient.from('workout_logs').insert(withUserId(payload));
         if (error) throw error;
     } catch (e) {
-        store.offlineQueue.push({ table: 'workout_logs', payload });
+        store.offlineQueue.push({ table: 'workout_logs', payload: withUserId(payload) });
         localStorage.setItem('ascensus_offline_queue', JSON.stringify(store.offlineQueue));
     }
 
