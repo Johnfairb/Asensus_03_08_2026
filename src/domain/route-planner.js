@@ -27,7 +27,7 @@ import { upsertTodaySleep } from './body-metrics.js';
 import { getTonightSleepTargetHours, sleepHoursFromTotalRpe } from './sleep-rpe.js';
 import { configureJournalModal } from '../ui/drive.js';
 import { buildDiaryEntryFromForm } from '../ui/diary-ui.js';
-import { loadDayJournal, loadHistory, persistPendingJournalMedia, renderJournalMediaPreview, resetJournalMedia, saveMatchJournalEntry, savePracticeJournalEntry, deleteMatchJournalEntry, deletePracticeJournalEntry } from '../ui/journey.js';
+import { loadDayJournal, loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveMatchJournalEntry, savePracticeJournalEntry, deleteMatchJournalEntry, deletePracticeJournalEntry } from '../ui/journey.js';
 import { canProgramPower, isPowerEvent, POWER_EVENT } from './power-engine.js';
 import { getExerciseTeachingPoints, getTeachingPointVideoUrl, getExerciseFormVideos } from './exercise-catalog.js';
 import {
@@ -812,12 +812,19 @@ export function recordLoggedWorkoutSession({
     planSlotKey: slotKey = null,
     skipCredit = false,
     journalNotes = null,
-    journalMental = null
+    journalMental = null,
+    journal = null
 } = {}) {
     if (!dateIso || !sessionId) return null;
     const creditKind = normalizeLoggedSessionKind(kind);
     // Keep the original session label for Log/display; only credits are collapsed
-    const displayKind = kind || creditKind || 'Workout';
+    let displayKind = kind || creditKind || 'Workout';
+    try {
+        if (isGenericGymKind(displayKind)) {
+            const when = /^\d{4}-\d{2}-\d{2}$/.test(dateIso) ? new Date(dateIso + 'T12:00:00') : new Date();
+            displayKind = specializeGymSessionKind(displayKind, when);
+        }
+    } catch (e) { /* keep original */ }
 
     // If loaded from GPS picker we have a slot; otherwise (new logs only) match first open week slot
     let resolvedSlotKey = slotKey || null;
@@ -880,7 +887,10 @@ export function recordLoggedWorkoutSession({
         journalNotes: journalNotes != null ? String(journalNotes) : (prev.journalNotes || ''),
         journalMental: journalMental != null && Number.isFinite(Number(journalMental))
             ? Number(journalMental)
-            : (prev.journalMental != null ? prev.journalMental : null)
+            : (prev.journalMental != null ? prev.journalMental : null),
+        journal: (journal && typeof journal === 'object')
+            ? { ...journal }
+            : (prev.journal && typeof prev.journal === 'object' ? prev.journal : null)
     };
     saveWorkoutSessionSnapshots(snaps);
 
@@ -949,9 +959,71 @@ export function isLastPlannedSessionOfDay(dateObj = new Date()) {
     return true;
 }
 
+/** Generic gym picker / leftover kinds that still need a PPL or Strength A/B label. */
+export function isGenericGymKind(kind) {
+    const k = String(kind || '').trim();
+    if (!k || k === 'Gym' || k === 'Gym Workout' || k === 'Workout' || k === 'Strength Session') return true;
+    if (k === 'Full Body / Strength') return true;
+    if (isHypertrophyEvent(k) || resolveStrengthEventLetter(k)) return false;
+    try {
+        if (Object.values(HYPERTROPHY_DISPLAY_LABELS || {}).some((label) => label === k)) return false;
+    } catch (e) { /* ignore */ }
+    return normalizeLoggedSessionKind(k) === 'Full Body / Strength';
+}
+
+/**
+ * Expand "Gym" / "Full Body / Strength" into the session the athlete is actually doing:
+ * today's planned hypertrophy (Pecs / Back / Legs) or Strength A/B, else the next rotation.
+ */
+export function specializeGymSessionKind(kind, dateObj = new Date()) {
+    const raw = String(kind || '').trim();
+    if (raw && !isGenericGymKind(raw)) return raw;
+
+    const day = dateObj instanceof Date && !isNaN(dateObj.getTime()) ? dateObj : new Date();
+    try {
+        const planned = getPlannedDayEvents(day) || [];
+        const hyp = planned.find(isHypertrophyEvent);
+        if (hyp) return hyp;
+        const str = planned.find(isStrengthABEvent);
+        if (str) return str;
+    } catch (e) { /* ignore */ }
+
+    try {
+        if (isHypertrophyPhase()) {
+            const prefs = getHypertrophyPlanPrefs();
+            let hypKind = prefs.split === 'ppl' ? 'push' : prefs.split === 'ul' ? 'upper' : 'full';
+            try {
+                const tail = localStorage.getItem('ascensus_hypertrophy_tail');
+                if (tail) hypKind = nextHypertrophyRotation([tail], prefs.split);
+            } catch (e) { /* keep split default */ }
+            return hypertrophyEventForKind(hypKind);
+        }
+    } catch (e) { /* fall through to strength A/B */ }
+
+    let letter = resolveStrengthEventLetter(raw)
+        || resolveStrengthEventLetter(typeof window !== 'undefined' ? window.plannedGpsSlot?.event : '')
+        || resolveStrengthEventLetter(typeof window !== 'undefined' ? window.manualSessionKind : '');
+    if (letter !== 'A' && letter !== 'B' && typeof window !== 'undefined') {
+        if (window.currentStrengthSession === 'A' || window.currentStrengthSession === 'B') {
+            letter = window.currentStrengthSession;
+        }
+    }
+    if (letter !== 'A' && letter !== 'B') {
+        try {
+            letter = localStorage.getItem('ascensus_strength_ab') === 'B' ? 'B' : 'A';
+        } catch (e) {
+            letter = 'A';
+        }
+    }
+    return strengthLabelForLetter(letter === 'B' ? 'B' : 'A');
+}
+
 export function prettyWorkoutTypeLabel(kind) {
     // Hypertrophy / Strength A·B keep their plan labels (do not collapse to a generic gym title)
     if (isHypertrophyEvent(kind)) return prettyFocusName(kind) || kind;
+    try {
+        if (kind && Object.values(HYPERTROPHY_DISPLAY_LABELS || {}).includes(kind)) return kind;
+    } catch (e) { /* ignore */ }
     if (kind === 'Full Body / Strength A' || /Strength\s*A/i.test(kind || '')) return 'Strength Session A';
     if (kind === 'Full Body / Strength B' || /Strength\s*B/i.test(kind || '')) return 'Strength Session B';
     if (/steady(\s*state)?/i.test(kind || '')) return 'Steady State';
@@ -2787,6 +2859,11 @@ export function resolveDayEvents(options) {
 export function prettyFocusName(focus) {
     if (!focus || typeof focus !== 'string') return focus;
     if (HYPERTROPHY_DISPLAY_LABELS[focus]) return HYPERTROPHY_DISPLAY_LABELS[focus];
+    try {
+        for (const [eventKey, label] of Object.entries(HYPERTROPHY_DISPLAY_LABELS || {})) {
+            if (focus === label) return label;
+        }
+    } catch (e) { /* ignore */ }
     if (isHypertrophyEvent(focus)) {
         const kind = resolveHypertrophySessionKind(focus);
         const key = kind ? hypertrophyEventForKind(kind) : null;
@@ -3239,6 +3316,7 @@ export async function commitPracticeSession() {
         if (Array.isArray(added) && added.length) media = media.concat(added);
     } catch (e) { console.warn(e); }
     savePracticeJournalEntry(dateStr, { ...entry, notes, rpe, athletic: ath, mental: ment, hydration_ml: hydrationMl, type: 'practice', media });
+    try { renderAdherenceCalendar(); } catch (e) { /* ignore */ }
     try { calculateTDEE(); } catch (e) { /* ignore */ }
     if (hydrationMl > 0) recordHydrationMl(hydrationMl, 'practice', dateStr);
     resetJournalMedia();
@@ -3329,6 +3407,7 @@ export async function commitMatchSession() {
         if (Array.isArray(added) && added.length) media = media.concat(added);
     } catch (e) { console.warn(e); }
     saveMatchJournalEntry(dateStr, { ...entry, notes, rpe, athletic: ath, mental: ment, matchPerformance: matchPerf, hydration_ml: hydrationMl, media });
+    try { renderAdherenceCalendar(); } catch (e) { /* ignore */ }
     try { calculateTDEE(); } catch (e) { /* ignore */ }
     if (hydrationMl > 0) recordHydrationMl(hydrationMl, 'match', dateStr);
     resetJournalMedia();

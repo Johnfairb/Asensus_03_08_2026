@@ -1,13 +1,14 @@
 import { store } from '../state/store.js';
 import { generateDailyMealPlan, generateDailyFoodLog, getPlannedDayCost } from './meal-planner.js';
 import { getLactateProtocolForSlot } from './lactate-engine.js';
-import { assignPairedSessionSlots, dateToISO, foldMisfiledGymTailSessions, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listLoggedCreditKeysForDate, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, planSessionSwapButtonHtml, resolveStrengthEventLetter, saveWorkoutSessionSnapshots, strengthLabelForLetter } from './route-planner.js';
+import { assignPairedSessionSlots, dateToISO, foldMisfiledGymTailSessions, formatEventsLabel, generateFutureTimeline, getDayMacroTargets, getLactateSlotForDate, getPlannedDayEvents, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isGameEvent, isLactateEvent, isLiftingEvent, isPracticeEvent, isRestEvent, isSteadyCardio, isStrengthEvent, listLoggedCreditKeysForDate, listWorkoutSessionsForDate, loadWorkoutSessionSnapshots, normalizeLoggedSessionKind, pickPrimaryFocus, prettyFocusName, prettyWorkoutTypeLabel, planSessionSwapButtonHtml, resolveStrengthEventLetter, saveWorkoutSessionSnapshots, specializeGymSessionKind, strengthLabelForLetter } from './route-planner.js';
 import { loadDayJournal } from '../ui/journey.js';
 import { getSportData } from './sports-matrix.js';
 import { buildStrengthSessionRoutine, getGymPlanPrefs, inferStrengthLetterFromItems, isStrengthFocus, resolveStrengthSession } from './strength-engine.js';
 import { buildPowerSessionRoutine, isPowerEvent } from './power-engine.js';
 import {
     getHypertrophySessionRoutine,
+    isHypertrophyEvent,
     isHypertrophyFocus,
     isHypertrophyPhase,
     usesHypertrophyProgramming
@@ -575,8 +576,20 @@ export function generateDailyExerciseLog() {
         const plannedLetter = resolveStrengthEventLetter(planned.find(e => isStrengthEvent(e) && !/Hypertrophy/i.test(e)) || '');
         let changed = false;
         sessions.forEach((sess) => {
+            if (isHypertrophyEvent(sess.kind) || /Hypertrophy/i.test(sess.kind || '')) return;
             if (resolveStrengthEventLetter(sess.kind)) return;
             if (normalizeLoggedSessionKind(sess.kind) !== 'Full Body / Strength') return;
+            try {
+                const when = sess.dateIso && /^\d{4}-\d{2}-\d{2}$/.test(sess.dateIso)
+                    ? new Date(sess.dateIso + 'T12:00:00')
+                    : new Date();
+                const specialized = specializeGymSessionKind(sess.kind, when);
+                if (specialized && specialized !== sess.kind) {
+                    sess.kind = specialized;
+                    changed = true;
+                    return;
+                }
+            } catch (e) { /* fall through to A/B letter */ }
             const letter = inferStrengthLetterFromItems(sess.items)
                 || plannedLetter
                 || (localStorage.getItem('ascensus_strength_ab') === 'B' ? 'B'

@@ -6,7 +6,7 @@ import { resolveSessionRpe, getTonightSleepTargetHours } from '../domain/sleep-r
 import { calculateLiveFitnessScores, generateDailyExerciseLog, getSeasonPhase, getTodayFocus, getWorkoutSessionAdvice, isGuidanceOff } from '../domain/fitness-hud.js';
 import { applyInjuryPainFollowUpFromJournal, injuryAreaLabel, needsInjuryPainFollowUp } from '../domain/periodization.js';
 import { HIT_TYPE_OPTIONS, HIT_FLEXIBLE_INPUT_META, mergeModalityBaselineTest, recalculateLactatePlanIntensities, resolveHitClassRecovery, modalityUsesFlexibleBaselineInput, getModalityBaselineInputKind, getModalitySpeedUnit, saveModalityBaselineInputPrefs, parseBaselineResultInput, formatBaselineStoredValue, baselineResultUnit, baselineTestDisplayLabel, getBaselineTestSequence } from '../domain/lactate-engine.js';
-import { applySpontaneousAdd, applySpontaneousCancel, commitMatchSession, commitPracticeSession, dateToISO, formVideoThumbButtonHtml, generateFutureTimeline, getWorkoutSessionSnapshot, loadWorkoutSessionSnapshots, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isCustomWorkoutKind, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, isLastPlannedSessionOfDay, looksLikeSteadyCardioExercise, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, resolveStrengthEventLetter, sessionItemsAreStretchOnly, setRouteOverride, addDaysISO, isPowerEvent, strengthLabelForLetter } from '../domain/route-planner.js';
+import { applySpontaneousAdd, applySpontaneousCancel, commitMatchSession, commitPracticeSession, dateToISO, formVideoThumbButtonHtml, generateFutureTimeline, getWorkoutSessionSnapshot, loadWorkoutSessionSnapshots, saveWorkoutSessionSnapshots, invalidateWeekPlanCache, isAuxEvent, isCardioWorkoutLogRow, isCustomWorkoutKind, isLactateEvent, isLiftingEvent, isPracticeEvent, isGameEvent, isSteadyCardio, isStrengthEvent, isLastPlannedSessionOfDay, looksLikeSteadyCardioExercise, normalizeLoggedSessionKind, openMatchLogModal, openPracticeLogModal, openVideoModal, prettyWorkoutTypeLabel, recordLoggedWorkoutSession, resolveStrengthEventLetter, sessionItemsAreStretchOnly, setRouteOverride, addDaysISO, isPowerEvent, strengthLabelForLetter, specializeGymSessionKind } from '../domain/route-planner.js';
 import { lactateSessionRpeBarHtml, openLactateHitPicker, shouldPromptLactateHitTypes, syncLactateIntensitiesIntoActiveLog } from './lactate-ui.js';
 
 const HIT_TYPE_LABELS_RE = new RegExp(
@@ -3693,7 +3693,7 @@ export function startManualWorkout(buttonElement = null) {
 
 /** Called after Steady / Lactate / Gym is chosen for a manual session. */
 export function beginManualWorkoutSession(kind, opts = {}) {
-    const normalized = kind || window.manualSessionKind || 'Full Body / Strength';
+    const normalized = specializeGymSessionKind(kind || window.manualSessionKind || 'Full Body / Strength');
 
     if (!opts.afterHitPicker && hasWorkoutDraft()) {
         const draft = loadWorkoutDraft();
@@ -3824,6 +3824,8 @@ window._beginManualWorkoutSession = beginManualWorkoutSession;
 
 function withStrengthSessionLetter(kind, items) {
     if (!kind || /Hypertrophy/i.test(kind)) return kind;
+    try { kind = specializeGymSessionKind(kind); } catch (e) { /* keep original */ }
+    if (/Hypertrophy/i.test(kind || '')) return kind;
     const norm = normalizeLoggedSessionKind(kind);
     const generic = norm === 'Full Body / Strength'
         || kind === 'Gym'
@@ -4183,7 +4185,9 @@ export function startExecution(type, buttonElement = null, eventFocus = null, op
         // Planned GPS session — keep the exact plan label (not credit-collapsed Full Body)
         const focusNow = document.getElementById('today-focus')?.value || focus || '';
         if (window.manualSessionKind !== 'Practice' && window.manualSessionKind !== 'Match') {
-            window.manualSessionKind = focusNow || 'Full Body / Strength';
+            window.manualSessionKind = specializeGymSessionKind(focusNow || 'Full Body / Strength');
+            const input = document.getElementById('today-focus');
+            if (input) input.value = window.manualSessionKind;
         }
     } else {
         window.manualSessionKind = null;
@@ -5211,7 +5215,15 @@ export async function commitWorkoutSession() {
                 planSlotKey: (sessionKind === 'Stretching') ? null : (window.plannedGpsSlot?.slotKey || null),
                 skipCredit: sessionKind === 'Stretching' || !!(window.plannedGpsSlot?.completed),
                 journalNotes: jNotes,
-                journalMental: mentFat
+                journalMental: mentFat,
+                journal: {
+                    notes: jNotes,
+                    rpe: globalRPE,
+                    mental: mentFat,
+                    fields: diaryFields,
+                    type: window.journalMode === 'lactate' ? 'lactate' : 'gym',
+                    source: window.journalMode === 'lactate' ? 'gym' : 'gym'
+                }
             });
             window.plannedGpsSlot = null;
             invalidateWeekPlanCache();
@@ -5260,11 +5272,15 @@ export async function commitWorkoutSession() {
         try { getTodayFocus(); } catch (e) { console.warn(e); }
     }
 
-    // Persist gym / lactate diary (custom fields + media)
+    // Persist gym / lactate diary (custom fields + media) — always for gym/HIT so Adherence can show it
     const hasExerciseDiary = (store.activeLog.items || []).some(it => exerciseDiaryHasContent(it));
-    const shouldSaveGymDiary = window.journalMode === 'workout' || window.journalMode === 'lactate'
-        || !!(String(jNotes || '').trim() || hasExerciseDiary);
-    if (shouldSaveGymDiary) {
+    const diaryHasFields = diaryFields && Object.keys(diaryFields).some((k) => diaryFields[k] != null && diaryFields[k] !== '');
+    const isSportSilent = window.journalMode === 'workout-silent'
+        && (window.manualSessionKind === 'Practice' || window.manualSessionKind === 'Match'
+            || isPracticeEvent(sessionKind) || isGameEvent(sessionKind));
+    const shouldSaveGymDiary = !isSportSilent && (window.journalMode === 'workout' || window.journalMode === 'lactate'
+        || !!(String(jNotes || '').trim() || hasExerciseDiary || diaryHasFields));
+    if (shouldSaveGymDiary && window.journalMode !== 'practice' && window.journalMode !== 'match') {
         let media = [];
         try {
             media = await persistPendingJournalMedia(dateIso);
@@ -5286,6 +5302,15 @@ export async function commitWorkoutSession() {
                 entry.lactateSummary = window._lactateHitSelection.summary || '';
             }
             saveGymJournalEntry(dateIso, entry);
+            try {
+                const snaps = loadWorkoutSessionSnapshots();
+                if (snaps[sessionId]) {
+                    snaps[sessionId].journal = { ...entry, source: 'gym' };
+                    snaps[sessionId].journalNotes = entry.notes || snaps[sessionId].journalNotes || '';
+                    if (entry.mental != null) snaps[sessionId].journalMental = entry.mental;
+                    saveWorkoutSessionSnapshots(snaps);
+                }
+            } catch (e) { /* snapshot journal is best-effort */ }
             const hydrationMl = Math.max(0, Number(entry.hydration_ml) || 0);
             if (hydrationMl > 0) {
                 recordHydrationMl(hydrationMl, window.journalMode === 'lactate' ? 'lactate' : 'gym', dateIso);

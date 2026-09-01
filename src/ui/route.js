@@ -1,6 +1,6 @@
 import { store } from '../state/store.js';
 import { getTodayFocus } from '../domain/fitness-hud.js';
-import { generateFutureTimeline, invalidateWeekPlanCache, isGameEvent, isPracticeEvent, listWeekGpsPlanSessions, prettyWorkoutTypeLabel, isLactateEvent } from '../domain/route-planner.js';
+import { generateFutureTimeline, invalidateWeekPlanCache, isGameEvent, isPracticeEvent, listWeekGpsPlanSessions, prettyWorkoutTypeLabel, isLactateEvent, specializeGymSessionKind } from '../domain/route-planner.js';
 import { persistUserConfigToCloud } from '../domain/thermodynamics.js';
 import { specificEventName } from '../lib/food-parse.js';
 import { populateSportSelects } from '../domain/sports-matrix.js';
@@ -375,7 +375,7 @@ export async function selectLoadedGpsSession(slotKey) {
 }
 
 export function beginManualWorkoutAfterType(kind) {
-    const normalized = kind || window.manualSessionKind || 'Full Body / Strength';
+    const normalized = specializeGymSessionKind(kind || window.manualSessionKind || 'Full Body / Strength');
     window.manualSessionKind = normalized;
     applySessionKindToFocus(normalized);
     if (typeof window._beginManualWorkoutSession === 'function') {

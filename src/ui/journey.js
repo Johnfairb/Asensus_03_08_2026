@@ -19,6 +19,7 @@ import {
     normalizeLoggedSessionKind,
     prettyWorkoutTypeLabel,
     sessionItemsAreStretchOnly,
+    specializeGymSessionKind,
     strengthLabelForLetter
 } from '../domain/route-planner.js';
 import { formatDurationMs, formatExerciseDurationLabel } from './workout-timer.js';
@@ -719,11 +720,16 @@ function renderSportDiaryBlockHtml(kind, journal, workoutLogs = []) {
 function gymJournalFromSessions(sessions) {
     const list = sessions || [];
     const snap = list.find(s => s && (
-        String(s.journalNotes || '').trim()
+        (s.journal && typeof s.journal === 'object')
+        || String(s.journalNotes || '').trim()
         || s.journalMental != null
         || s.rpe != null
     ));
     if (!snap) return null;
+    if (snap.journal && typeof snap.journal === 'object') {
+        const isLactate = snap.journal.type === 'lactate' || isLactateEvent(snap.kind) || snap.kind === 'Lactate';
+        return { ...snap.journal, source: snap.journal.source || 'gym', type: snap.journal.type || (isLactate ? 'lactate' : 'gym') };
+    }
     const isLactate = isLactateEvent(snap.kind) || snap.kind === 'Lactate';
     return {
         notes: snap.journalNotes || '',
@@ -745,8 +751,8 @@ function renderGymDiaryBlockHtml(journal) {
     const fieldLines = Object.keys(fields)
         .filter(k => fields[k] != null && fields[k] !== '' && !['rpe', 'mental', 'athletic', 'matchPerformance'].includes(k))
         .map(k => `<div style="display:flex; justify-content:space-between; gap:10px; margin-top:8px; font-size:12px;">
-            <span style="color:var(--text-muted);">${escapeHtml(k)}</span>
-            <span style="color:var(--text-main); font-weight:700;">${escapeHtml(fields[k])}</span>
+            <span style="color:var(--text-muted);">${escapeHtml(diaryFieldDisplayLabel(k, isLactate ? 'lactate' : 'gym'))}</span>
+            <span style="color:var(--text-main); font-weight:700;">${escapeHtml(fields[k])}${k === 'hydration_ml' ? ' ml' : ''}</span>
         </div>`).join('');
 
     const hasContent = journal.notes
@@ -1054,6 +1060,7 @@ function sessionKindFromAdherenceItems(items) {
 function resolveAdherenceSessionKind(snap) {
     if (sessionItemsAreStretchOnly(snap?.items)) return 'Stretching';
     const kind = snap?.kind;
+    if (/Hypertrophy/i.test(kind || '')) return kind;
     const inferred = sessionKindFromAdherenceItems(snap?.items);
     const norm = normalizeLoggedSessionKind(kind);
     const hasLift = (snap?.items || []).some(it => {
@@ -1062,7 +1069,15 @@ function resolveAdherenceSessionKind(snap) {
         return d === 'strength' || d === 'power' || d === 'hypertrophy' || it?.isPower;
     });
     if (hasLift) {
+        if (/Hypertrophy/i.test(kind || '')) return kind;
         if (/Strength\s*[AB]/i.test(kind || '') || /Strength Session [AB]/i.test(kind || '')) return kind;
+        try {
+            const when = snap?.dateIso && /^\d{4}-\d{2}-\d{2}$/.test(snap.dateIso)
+                ? new Date(snap.dateIso + 'T12:00:00')
+                : new Date();
+            const specialized = specializeGymSessionKind(kind || 'Full Body / Strength', when);
+            if (specialized && specialized !== kind) return specialized;
+        } catch (e) { /* ignore */ }
         const letter = inferStrengthLetterFromItems(snap?.items);
         if (letter && (norm === 'Full Body / Strength' || !kind || kind === 'Workout' || kind === 'Strength Session')) {
             return strengthLabelForLetter(letter);
@@ -1415,10 +1430,11 @@ function renderAdherenceSessionSheet() {
         actionsEl.innerHTML = `
             <div style="display:flex; flex-direction:column; gap:8px;">
                 <button type="button" class="btn-primary is-secondary" style="margin:0;" onclick="editLoggedWorkoutSession('${sid}')">Edit workout</button>
-                <button type="button" id="btn-gym-diary" class="btn-primary is-secondary" style="margin:0;" onclick="showGymSessionDiary('${safeDate}')">View diary</button>
+                <button type="button" id="btn-gym-diary" class="btn-primary is-secondary" style="margin:0;" onclick="showGymSessionDiary('${safeDate}')">Hide diary</button>
             </div>`;
     }
     sheet.classList.remove('hidden');
+    showGymSessionDiary(dateStr || snap.dateIso).catch(() => {});
 }
 
 /** Open a non-lactate logged session from the adherence calendar (mirrors Drive → Log). */
@@ -1529,7 +1545,8 @@ export async function showGymSessionDiary(dateStr) {
     window._gymSessionDiaryOpen = true;
     if (diaryBtn) diaryBtn.textContent = 'Hide diary';
 
-    const entry = loadGymJournalEntry(dateStr)
+    const entry = (snap?.journal && typeof snap.journal === 'object' ? { ...snap.journal, source: snap.journal.source || 'gym' } : null)
+        || loadGymJournalEntry(dateStr)
         || loadGymJournalEntry(snap?.dateIso)
         || loadGymJournalEntry(resolveIsoFromDateStr(dateStr))
         || gymJournalFromSessions([snap]);
@@ -2663,7 +2680,8 @@ function dayHasAdherenceDiary(dateStr, iso, { dayJournal, gymJournal, exerciseDi
     if (gymJournalHasContent(dayJournal) || gymJournalHasContent(gymJournal)) return true;
     if (exerciseDiaries && Object.keys(exerciseDiaries).length > 0) return true;
     return (daySessions || []).some((s) =>
-        String(s?.journalNotes || '').trim()
+        (s?.journal && typeof s.journal === 'object' && gymJournalHasContent(s.journal))
+        || String(s?.journalNotes || '').trim()
         || s?.journalMental != null
         || (s.items || []).some((it) =>
             String(it?.diaryNotes || '').trim() || (Array.isArray(it?.diaryMedia) && it.diaryMedia.length)
@@ -2700,10 +2718,6 @@ function journalLookupKeys(dateStr) {
             const d = new Date(dateStr + 'T12:00:00');
             if (!isNaN(d.getTime())) keys.push(dateToISO(d), d.toLocaleDateString());
         } else {
-            const maybe = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T12:00:00');
-            if (!isNaN(maybe.getTime())) {
-                keys.push(dateToISO(maybe), maybe.toLocaleDateString());
-            }
             const resolved = resolveIsoFromDateStr(dateStr);
             if (resolved) {
                 keys.push(resolved);

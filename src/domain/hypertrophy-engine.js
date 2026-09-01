@@ -114,7 +114,8 @@ export function resolveHypertrophySessionKind(focus) {
     if (/Legs/i.test(focus) && !/Full/i.test(focus)) return 'legs';
     if (/Upper/i.test(focus)) return 'upper';
     if (/Lower/i.test(focus)) return 'lower';
-    if (/Full\s*Body/i.test(focus)) return 'full';
+    // "Full Body / Strength" is a generic gym label — not hypertrophy full-body
+    if (/Full\s*Body/i.test(focus) && !/Strength/i.test(focus)) return 'full';
     if (isHypertrophyEvent(focus)) return 'full';
     return null;
 }
@@ -602,7 +603,9 @@ export function clearHypertrophyDayPlanCache() {
  * Stable hypertrophy routine for the monthly cycle — same picks until cycle decision.
  */
 export function getHypertrophySessionRoutine(focus, date = new Date()) {
-    const kind = resolveHypertrophySessionKind(focus) || 'full';
+    const prefsForKind = getHypertrophyPlanPrefs();
+    const kind = resolveHypertrophySessionKind(focus)
+        || (prefsForKind.split === 'ppl' ? 'push' : prefsForKind.split === 'ul' ? 'upper' : 'full');
     const sessionTypeId = `hyp_${kind}`;
 
     // Prefer locked cycle plan (keep / custom / confirmed / generated for this month)
