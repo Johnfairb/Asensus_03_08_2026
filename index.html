@@ -127,7 +127,7 @@
             </div>
         </div>
 
-        <!-- STEP 2: The Chassis (Weight & Goal) -->
+        <!-- STEP 2: Goals and experience -->
         <div id="ob-step-2" class="ob-step hidden">
             <div class="ob-step-body">
                 <div style="display: flex; gap: 10px; margin-bottom: 15px;">
@@ -136,19 +136,10 @@
                 </div>
 
                 <label style="margin-top:0;">Lifting Experience</label>
-                <select id="ob-experience" class="input-field" onchange="document.getElementById('1rm-container').style.display = this.value === 'Advanced' ? 'block' : 'none'">
+                <select id="ob-experience" class="input-field">
                     <option value="Beginner">Beginner (&lt; 1 Year)</option>
                     <option value="Advanced">Advanced (&gt; 1 Year)</option>
                 </select>
-
-                <div id="1rm-container" style="display:none; background:var(--bg-surface-elevated); padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid var(--border-subtle);">
-                    <label style="margin-top:0; color:var(--gold-accent);">Current 1 Rep Max (kg)</label>
-                    <div style="display:flex; gap:8px;">
-                        <input type="number" id="ob-1rm-squat" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Squat">
-                        <input type="number" id="ob-1rm-bench" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Bench">
-                        <input type="number" id="ob-1rm-dead" class="input-field" style="margin:0; padding:10px; font-size:12px;" placeholder="Deadlift">
-                    </div>
-                </div>
 
                 <label style="margin-top:0;">Primary Directive</label>
                 <div class="ob-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 8px; gap: 8px;">
@@ -172,10 +163,6 @@
 
         <!-- STEP 3: The Engine (Diet & Sport) -->
         <div id="ob-step-3" class="ob-step hidden">
-            <div class="ob-step-actions ob-step-actions-top">
-                <button type="button" id="btn-lock-boot-gps" class="btn-primary is-primary" style="margin-top:0;" onclick="triggerBootSequence()">LOCK &amp; BOOT GPS</button>
-                <p style="font-size:10px; color:var(--text-muted); text-align:center; margin:8px 0 0; font-family:'Roboto Mono';">Scroll for options · tick both boxes below · then press LOCK &amp; BOOT GPS</p>
-            </div>
             <div class="ob-step-body">
                 <div style="margin-bottom: 15px; border: 1px solid var(--border-highlight); padding: 12px; border-radius: 8px;">
                     <label style="display:flex; align-items:center; gap:10px; color:var(--text-main); font-size:11px; margin:0 0 10px 0;">
@@ -215,17 +202,11 @@
 
                 <div style="background:var(--bg-surface-elevated); padding:12px; border-radius:8px; border:1px solid var(--border-subtle); margin-bottom:15px;">
                     <label style="margin-top:0;">Injury History (Prehab Injection)</label>
-                    <select id="ob-injury" class="input-field" style="margin-bottom:10px; padding:10px; font-size:12px;">
+                    <select id="ob-injury" class="input-field" style="margin-bottom:0; padding:10px; font-size:12px;">
                         <option value="None">None</option>
                         <option value="Shoulder">Shoulder / Rotator Cuff</option>
                         <option value="LowerBack">Lower Back / Disc</option>
                         <option value="Knee">Knees / Patellar</option>
-                    </select>
-
-                    <label style="margin-top:0;">Can you do 5 strict Pull-Ups &amp; Dips?</label>
-                    <select id="ob-bodyweight-test" class="input-field" style="margin-bottom:0; padding:10px; font-size:12px;">
-                        <option value="Yes">Yes</option>
-                        <option value="No">No (Use Machine Alternatives)</option>
                     </select>
                 </div>
             </div>
@@ -789,10 +770,6 @@
             </select>
             <div id="set-shop-style-tip" class="hidden" style="font-size:11px; color:var(--text-silver); line-height:1.45; margin:-6px 0 12px 0; padding:10px 12px; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-surface-elevated); font-family:'Roboto Mono';"></div>
 
-            <div style="display: flex; gap: 10px;">
-                <div style="flex: 1;"><label>Can do 5 Pullups/Dips?</label><select id="set-bw-test" class="input-field"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-            </div>
-
             <label>Core Strength</label>
             <select id="set-core-strength" class="input-field" onchange="onCoreStrengthSettingChange()">
                 <option value="">Not set yet</option>
@@ -973,9 +950,6 @@
             <select id="set-training-window" class="input-field"><option value="Morning">Morning (Pre-Breakfast)</option><option value="Afternoon" selected>Afternoon (Post-Lunch)</option><option value="Evening">Evening (Post-Dinner)</option></select>
             <label>Meals Per Day</label><select id="set-meals-per-day" class="input-field"><option value="2">2 Meals (IF)</option><option value="3" selected>3 Meals</option><option value="4">4 Meals</option><option value="5">5 Meals</option></select>
             <label>Daily Budget (£)</label><input type="number" step="0.01" id="set-budget" class="input-field">
-            <div style="display: flex; gap: 10px; margin-top: 15px;">
-                <div style="flex: 1;"><label style="margin-top:0;">Days/Wk</label><input type="number" id="set-training-freq" class="input-field" value="4" style="margin-bottom:0;"></div>
-            </div>
             <p style="font-size:11px; color:var(--text-muted); margin-top:8px; line-height:1.4;">Daily calories follow your training plan and prior-day session RPE (no separate activity level).</p>
         </div>
 
@@ -1028,7 +1002,7 @@
                 <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:6px;">Theo · Video</div>
                 <div style="font-size:14px; font-weight:bold; color:var(--text-main); margin-bottom:6px;">Session B squat depth — Q&amp;A recap</div>
                 <div style="font-size:12px; color:var(--text-silver); line-height:1.45; margin-bottom:10px;">Clip from this week's live Q&amp;A. Form first, load second.</div>
-                <button type="button" class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="openVideoModal('Session B squat depth', 'https://www.youtube.com/embed/placeholder')">Watch</button>
+                <button type="button" class="btn-icon" style="padding:6px 10px; font-size:10px;" onclick="openVideoModal('Squat')">Watch</button>
             </div>
             <div class="card" style="padding:16px; margin-bottom:10px;">
                 <div style="font-size:10px; color:var(--gold-accent); font-family:'Roboto Mono'; margin-bottom:6px;">John · Challenge</div>

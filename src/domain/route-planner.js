@@ -1167,21 +1167,30 @@ function saveStrengthWeekSticky(weekStart, sessions, lastLetter) {
     } catch (e) { /* ignore */ }
 }
 
+function letterFromStickyRow(row) {
+    if (!row || typeof row !== 'object') return null;
+    if (row.lastLetter === 'A' || row.lastLetter === 'B') return row.lastLetter;
+    const sessions = Array.isArray(row.sessions) ? row.sessions : [];
+    const last = sessions.length ? sessions[sessions.length - 1] : null;
+    if (last?.letter === 'A' || last?.letter === 'B') return last.letter;
+    return null;
+}
+
 export function getWeekStartStrengthLetter(weekStartISO) {
     if (!weekStartISO) return 'A';
-    const sticky = loadStrengthWeekSticky(weekStartISO);
-    const first = sticky.sessions && sticky.sessions[0] && sticky.sessions[0].letter;
-    if (first === 'A' || first === 'B') return first;
-
-    const prevISO = addDaysISO(weekStartISO, -7);
-    const prev = loadStrengthWeekSticky(prevISO);
-    if (prev.lastLetter === 'A' || prev.lastLetter === 'B') {
-        return prev.lastLetter === 'A' ? 'B' : 'A';
+    const weeks = loadAllStrengthWeekSticky();
+    let iso = addDaysISO(weekStartISO, -7);
+    for (let n = 0; n < STRENGTH_STICKY_KEEP_WEEKS; n++) {
+        const prevLetter = letterFromStickyRow(weeks[iso]);
+        if (prevLetter === 'A' || prevLetter === 'B') {
+            return prevLetter === 'A' ? 'B' : 'A';
+        }
+        iso = addDaysISO(iso, -7);
     }
-    // Legacy single-tail keys — only valid when they actually belong to last week
     try {
         const prevWeek = localStorage.getItem('ascensus_strength_plan_tail_week');
         const prevTail = localStorage.getItem('ascensus_strength_plan_tail');
+        const prevISO = addDaysISO(weekStartISO, -7);
         if (prevWeek === prevISO && (prevTail === 'A' || prevTail === 'B')) {
             return prevTail === 'A' ? 'B' : 'A';
         }
@@ -1192,48 +1201,38 @@ export function getWeekStartStrengthLetter(weekStartISO) {
 export function persistWeekStrengthTail(days) {
     if (!days || !days.length) return;
     const weekStart = days[0].dateStr;
-    const existing = loadStrengthWeekSticky(weekStart);
-    const byDate = Object.create(null);
-    (existing.sessions || []).forEach((s) => {
-        if (s && s.dateStr && (s.letter === 'A' || s.letter === 'B')) byDate[s.dateStr] = s.letter;
-    });
-    let lastLetter = existing.lastLetter === 'B' || existing.lastLetter === 'A' ? existing.lastLetter : null;
+    const sessions = [];
     for (let i = 0; i < days.length; i++) {
         const ev = (days[i].events || []).find(isStrengthABEvent);
         if (!ev) continue;
         const letter = resolveStrengthEventLetter(ev) || 'A';
-        byDate[days[i].dateStr] = letter;
-        lastLetter = letter;
+        sessions.push({ dateStr: days[i].dateStr, letter });
     }
-    const sessions = Object.keys(byDate).sort().map((dateStr) => ({ dateStr, letter: byDate[dateStr] }));
     if (!sessions.length) return;
-    lastLetter = sessions[sessions.length - 1].letter;
+    const lastLetter = sessions[sessions.length - 1].letter;
     saveStrengthWeekSticky(weekStart, sessions, lastLetter);
-    // Keep legacy keys for cloud sync, but never let another week clobber this week's map entry
     try {
         localStorage.setItem('ascensus_strength_plan_tail', lastLetter);
         localStorage.setItem('ascensus_strength_plan_tail_week', weekStart);
     } catch (e) { /* ignore */ }
 }
 
-/** Apply Strength A/B labels. Dates already sticky for this week keep their letter. */
-export function enforceStrengthABAlternation(days, startLetter = 'A', { pinSticky = true } = {}) {
-    const weekStart = days[0] && days[0].dateStr;
-    const sticky = (pinSticky && weekStart) ? loadStrengthWeekSticky(weekStart) : { sessions: [] };
-    const byDate = Object.create(null);
-    (sticky.sessions || []).forEach((s) => {
-        if (s && s.dateStr && (s.letter === 'A' || s.letter === 'B')) byDate[s.dateStr] = s.letter;
-    });
-
+/** Apply Strength A/B labels in calendar order. Always A→B→A→B from startLetter. */
+export function enforceStrengthABAlternation(days, startLetter = 'A') {
     let letter = startLetter === 'B' ? 'B' : 'A';
-    for (let i = 0; i < days.length; i++) {
+    for (let i = 0; i < (days || []).length; i++) {
         const sIdx = (days[i].events || []).findIndex(isStrengthABEvent);
         if (sIdx < 0) continue;
-        const pinned = byDate[days[i].dateStr];
-        const use = (pinned === 'A' || pinned === 'B') ? pinned : letter;
-        days[i].events[sIdx] = strengthLabelForLetter(use);
-        letter = use === 'A' ? 'B' : 'A';
+        days[i].events[sIdx] = strengthLabelForLetter(letter);
+        letter = letter === 'A' ? 'B' : 'A';
     }
+}
+
+function relabelStrengthSessionsAB(days) {
+    if (!days || !days.length) return;
+    const startLetter = getWeekStartStrengthLetter(days[0].dateStr);
+    enforceStrengthABAlternation(days, startLetter);
+    persistWeekStrengthTail(days);
 }
 
 function indexCombinations(arr, k) {
@@ -1331,7 +1330,7 @@ export function placeStrengthSessions(days, count) {
         }
     }
 
-    enforceStrengthABAlternation(days, startLetter, { pinSticky: true });
+    enforceStrengthABAlternation(days, startLetter);
     persistWeekStrengthTail(days);
     return chosen.length;
 }
@@ -2047,6 +2046,7 @@ export function buildWeeklyTrainingPlan(weekStartISO, opts = {}) {
     persistWeekStrengthTail(days);
     applyPlanSessionExchanges(days, weekStartISO);
     applyCancelledEventsToPlan(days, specificScheds);
+    relabelStrengthSessionsAB(days);
     store._weekPlanCache = { key: cacheKey, plan: days };
     return days;
 }
@@ -3598,7 +3598,7 @@ export function formVideoThumbButtonHtml(title, url = '', extraStyle = '') {
             ? 'display:block;width:100%;height:120px;object-fit:cover;'
             : 'display:block;width:72px;height:40px;object-fit:cover;';
         return `<button type="button" onclick="${onclick}" aria-label="Form video" style="padding:0;border:1px solid var(--border-subtle);border-radius:6px;overflow:hidden;background:#111;cursor:pointer;line-height:0;flex-shrink:0;${extraStyle}">
-            <img src="${thumb}" alt="" ${fill ? '' : 'width="72" height="40" '}style="${imgStyle}">
+            <img src="${thumb}" alt="" loading="lazy" decoding="async" ${fill ? '' : 'width="72" height="40" '}style="${imgStyle}">
         </button>`;
     }
     const phStyle = /width:\s*100%/.test(extraStyle)
@@ -3620,7 +3620,7 @@ function youtubeEmbedSrc(url) {
             params.set('origin', location.origin);
         }
     } catch (e) { /* ignore */ }
-    return `https://www.youtube.com/embed/${id}?${params.toString()}`;
+    return `https://www.youtube-nocookie.com/embed/${id}?${params.toString()}`;
 }
 
 function canEmbedYouTube() {

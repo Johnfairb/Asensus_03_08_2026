@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "exercises": {
+    "Crunch": [{ "label": "Crunch", "youtubeId": "s1Bs7GIF-vA" }],
+    "Knees Bench Crunch": [{ "label": "Knees Bench Crunch", "youtubeId": "0-zGaA0lGrM" }],
+    "Feet Up Crunch": [{ "label": "Feet Up Crunch", "youtubeId": "zL-HbZC0Hyg" }],
+    "Reverse Crunch": [{ "label": "Reverse Crunch", "youtubeId": "NI45UO6MCTg" }],
+    "Plank": [{ "label": "Plank", "youtubeId": "qHKB3xebboM" }],
+    "Side Plank": [{ "label": "Side Plank", "youtubeId": "V4d-uuaG-_0" }],
+    "Dead Bug": [{ "label": "Dead Bug", "youtubeId": "3m4-s_6FTXI" }],
+    "Russian Twist": [{ "label": "Russian Twist", "youtubeId": "B2FJAfOC7mM" }],
+    "Halo": [{ "label": "Halo", "youtubeId": "3z69mqHnXeg" }],
+    "Suitcase Carry": [
+      { "label": "Angle 1", "youtubeId": "yCfcmuCDCJs" },
+      { "label": "Angle 2", "youtubeId": "CuNUK64ap4Y" }
+    ],
+    "Turkish Get-up": [{ "label": "Turkish Get-up", "youtubeId": "2VytA1Dparw" }],
+    "Side-sit on Hyperextension Bench": [{ "label": "Side-sit", "youtubeId": "SCBDVgjR3Ik" }],
+    "Hyperextension": [{ "label": "Hyperextension", "youtubeId": "pEaPF-jU_uI" }],
+    "Hanging Knee Raise": [{ "label": "Hanging Knee Raise", "youtubeId": "ZjAqZoHJGBQ" }],
+    "Wood-chop": [{ "label": "Wood-chop", "youtubeId": "5wFGixVCKWo" }],
+    "Standing Cable Rotation": [{ "label": "Standing Cable Rotation", "youtubeId": "PuQtmYqGkeY" }],
+    "Pallof Push": [{ "label": "Pallof Push", "youtubeId": "SKqe1U4whtE" }],
+    "Seated Cable Rotation": [{ "label": "Seated Cable Rotation", "youtubeId": "mYYz6NuCUN0" }],
+    "Cable Crunch": [{ "label": "Cable Crunch", "youtubeId": "N4CLSyLJISk" }],
+    "Standing Side Bend": [{ "label": "Standing Side Bend", "youtubeId": "mxuyW2fF4v8" }],
+    "Squat": [
+      { "label": "Side", "youtubeId": "HKTH3YIc1Jk" },
+      { "label": "Front", "youtubeId": "mqsmfBZ9LqM" }
+    ],
+    "Sumo Squat": [
+      { "label": "Angle 1", "youtubeId": "sySK8kqkNYE" },
+      { "label": "Angle 2", "youtubeId": "7UwaRedGaEA" }
+    ],
+    "Deadlift": [
+      { "label": "Side", "youtubeId": "BCBmj0GKXco" },
+      { "label": "Front", "youtubeId": "v_pOuUwkfZw" }
+    ],
+    "Sumo Deadlift": [
+      { "label": "Front", "youtubeId": "ZfLBFsCAYdc" },
+      { "label": "Side", "youtubeId": "-_-4odMhjCU" }
+    ],
+    "Romanian Deadlift": [
+      { "label": "Side", "youtubeId": "XvHZMbO8jQI" },
+      { "label": "Front", "youtubeId": "7hmkB-B-R5E" }
+    ],
+    "Rack Deadlift": [
+      { "label": "Front", "youtubeId": "IcfJ1DkdMjk" },
+      { "label": "Side", "youtubeId": "Aj3mRqqB5-0" }
+    ],
+    "Single Leg Deadlift": [
+      { "label": "Front", "youtubeId": "JGQKkITdjys" },
+      { "label": "Side", "youtubeId": "OYVHu-oaqIA" }
+    ],
+    "Front Squat": [
+      { "label": "Side (no plates)", "youtubeId": "_Nb4NbvipUk" },
+      { "label": "Front (no plates)", "youtubeId": "HLwExtRbv18" },
+      { "label": "Front (plates)", "youtubeId": "UVnzt1ZUhf0" },
+      { "label": "Side (plates)", "youtubeId": "J8IfN0Feg-0" }
+    ],
+    "Goblet Squat": [
+      { "label": "Side", "youtubeId": "Wjhb0xypIE8" },
+      { "label": "Front", "youtubeId": "cEwa0WnkK3U" }
+    ],
+    "Split Squat": [
+      { "label": "Side", "youtubeId": "U8lFz42Uvu4" },
+      { "label": "Front", "youtubeId": "Jo2OGQh-uug" }
+    ],
+    "Walk Lunge": [
+      { "label": "Angle 1", "youtubeId": "HtjZopOtgFg" },
+      { "label": "Angle 2", "youtubeId": "NaVILGSKmGc" }
+    ],
+    "Bulgarian Squat": [
+      { "label": "Side", "youtubeId": "AoXB7hb1gPI" },
+      { "label": "Front", "youtubeId": "h_YJLxzTVK4" }
+    ],
+    "Pistol Squat": [
+      { "label": "Side", "youtubeId": "BpkYPnzRyzg" },
+      { "label": "Front", "youtubeId": "dipmr2NKCx8" }
+    ],
+    "Leg Press": [{ "label": "Leg Press", "youtubeId": "044j5Fpi5Eo" }],
+    "Leg Extension": [{ "label": "Leg Extension", "youtubeId": "qTZLbQMkhxQ" }],
+    "Calf Raise Barbell": [{ "label": "Barbell Calf Raise", "youtubeId": "YCgB-vclF_U" }],
+    "Single Calf Raise": [{ "label": "Single Calf Raise", "youtubeId": "gCFu0tgVeHE" }],
+    "Lying Hamstring Curl": [{ "label": "Lying Hamstring Curl", "youtubeId": "bjqIuxXYfTc" }],
+    "Calf Raise Machine": [{ "label": "Plate-loaded Calf Raise", "youtubeId": "QGbCiAPUPzo" }],
+    "Machine Bench Press": [{ "label": "Machine Bench Press", "youtubeId": "uAcV8L1R5uI" }],
+    "Neutral Cable Row": [{ "label": "Neutral Cable Row", "youtubeId": "zAB0uShcEHU" }],
+    "Overhand Cable Row": [{ "label": "Overhand Cable Row", "youtubeId": "LwI301603do" }],
+    "Cable Crossover": [{ "label": "Cable Crossover", "youtubeId": "VD2MNWNyAsk" }],
+    "Cable French Press": [{ "label": "Cable French Press", "youtubeId": "uZbX2wvTNC0" }],
+    "Rope Push Down": [
+      { "label": "Rope Push Down 1", "youtubeId": "1Zlp_Lz3CXA" },
+      { "label": "Rope Push Down 2", "youtubeId": "vVq1cqVt02c" }
+    ],
+    "Lat Machine Pull": [
+      { "label": "Lat down", "youtubeId": "U4fzsdQbRvM" },
+      { "label": "Wide grip", "youtubeId": "GpBaP2T-hYY" }
+    ],
+    "Lat Machine Close Grip": [
+      { "label": "Narrow grip", "youtubeId": "jQyy6VZtfp4" },
+      { "label": "Neutral / handle", "youtubeId": "KAWtCJzmIoc" }
+    ],
+    "Lat Machine Single Pull": [{ "label": "Single-arm Lat Pulldown", "youtubeId": "SxDiRzvAH9U" }],
+    "Cable Curl": [{ "label": "Cable Curl", "youtubeId": "JP5WildW4Kw" }],
+    "Cable Lateral Raise (Single)": [{ "label": "Cable Lateral Raise", "youtubeId": "FOFTu0mp1hE" }],
+    "Lateral Rotation": [
+      { "label": "Outwards", "youtubeId": "5LZZB5n4pgQ" },
+      { "label": "Inwards", "youtubeId": "CRQXV4P3wmA" }
+    ],
+    "Pull Up": [
+      { "label": "Pull Up", "youtubeId": "QussPjEvOOM" },
+      { "label": "Weighted", "youtubeId": "xCsC5ep5GyA" }
+    ],
+    "Chin Up": [
+      { "label": "Chin Up", "youtubeId": "zvhWOpuWIdk" },
+      { "label": "Weighted", "youtubeId": "mTEBLjAbM3I" }
+    ],
+    "Neutral Pull Up": [
+      { "label": "Neutral Chin Up", "youtubeId": "qtAHgDvdWxA" },
+      { "label": "Weighted", "youtubeId": "6i4gSCJ4AHM" }
+    ],
+    "Dip": [
+      { "label": "Dip", "youtubeId": "ZEda1n_1yYQ" },
+      { "label": "Weighted", "youtubeId": "HtLQJhraevY" }
+    ],
+    "Bench Press": [
+      { "label": "Barbell", "youtubeId": "t3-qrXXTIok" },
+      { "label": "Dumbbell", "youtubeId": "0P80Zz88aIQ" }
+    ],
+    "Incline Bench Press": [
+      { "label": "Barbell", "youtubeId": "g-WtgvayETM" },
+      { "label": "Dumbbell", "youtubeId": "UseTFRLYJdA" }
+    ],
+    "Decline Bench Press": [
+      { "label": "Barbell", "youtubeId": "OLWK-dx9nfM" },
+      { "label": "Dumbbell", "youtubeId": "KShY1Mq54Do" }
+    ],
+    "Close Grip Bench Press": [{ "label": "Close Grip", "youtubeId": "Uyabxf3RlY4" }],
+    "Flye": [
+      { "label": "Dumbbell", "youtubeId": "ci29MKbYUyM" },
+      { "label": "Decline", "youtubeId": "I2RY34aPWbY" }
+    ],
+    "Incline Flye": [{ "label": "Incline Flye", "youtubeId": "izSw-sdOtG0" }],
+    "Pullover": [{ "label": "Pullover", "youtubeId": "gwlrPy0vN94" }],
+    "Press-up": [{ "label": "Press-up", "youtubeId": "qQgPQ7rX4MA" }],
+    "Decline Push-up": [{ "label": "Decline Push-up", "youtubeId": "jCv6qI_jkTs" }],
+    "Push-up on Knee": [
+      { "label": "Angle 1", "youtubeId": "9g_zOt6Umpo" },
+      { "label": "Angle 2", "youtubeId": "6O92NrTlhp0" }
+    ],
+    "Close Grip Press-up": [{ "label": "Close Grip Press-up", "youtubeId": "rdQQwwHt0Cw" }],
+    "Overhand Barbell Row": [{ "label": "Overhand Barbell Row", "youtubeId": "0tSVYZnWWfM" }],
+    "Underhand Barbell Row": [{ "label": "Underhand Barbell Row", "youtubeId": "FpBrN_JwTkc" }],
+    "Dumbbell Row": [{ "label": "Dumbbell Row", "youtubeId": "4d0heoqUAC4" }],
+    "Reverse Row": [
+      { "label": "Reverse Row", "youtubeId": "EGJMnOdI9Qc" },
+      { "label": "Advanced (on bench)", "youtubeId": "PqKAB5wUgxQ" }
+    ],
+    "Barbell Military Press": [{ "label": "Military Press", "youtubeId": "1_ulFhoG-cw" }],
+    "Seated Dumbbell Shoulder Press": [{ "label": "Dumbbell Shoulder Press", "youtubeId": "4tS3juRA35U" }],
+    "Seated Dumbbell Screw Press": [{ "label": "Screw Press", "youtubeId": "1lMzvTE5yB4" }],
+    "Lateral Raise": [{ "label": "Lateral Raise", "youtubeId": "hbAt223h4Ic" }],
+    "Lying 30 Degree Single Lateral Raise": [{ "label": "Lying 30° Single", "youtubeId": "dDxBejgL2pk" }],
+    "Standing Dumbbell Front Raise": [{ "label": "Front Raise", "youtubeId": "XZ7AWGDEmVM" }],
+    "Incline Dumbbell Front Raise": [{ "label": "Incline Front Raise", "youtubeId": "GRaw8UaSS2s" }],
+    "Bent Over Rear Flye": [{ "label": "Reverse Flye", "youtubeId": "Q2_hFwbmz5A" }],
+    "Skull Crusher": [{ "label": "Skull Crusher", "youtubeId": "coWN4t-ltn8" }],
+    "Upright Row": [{ "label": "Upright Row", "youtubeId": "_qHIBXQLUmE" }],
+    "Barbell Curl": [{ "label": "Barbell Curl", "youtubeId": "Re73RKn6nDo" }],
+    "Dumbbell Curl": [{ "label": "Dumbbell Curl", "youtubeId": "Cf8EOJVN9Lo" }],
+    "Hammer Curl": [{ "label": "Hammer Curl", "youtubeId": "ip9jeZnxAfU" }],
+    "Reverse Curl": [{ "label": "Reverse Curl", "youtubeId": "5wSSK5yDvEY" }],
+    "Seated Curl": [{ "label": "Seated Curl", "youtubeId": "sl8DLnI4GRY" }],
+    "Concentration Curl": [{ "label": "Concentration Curl", "youtubeId": "lJW9py1mmjY" }],
+    "Dumbbell Preacher Curl": [{ "label": "Preacher Curl", "youtubeId": "94VY9GnDXiU" }],
+    "Single Overhead Seated French Press": [{ "label": "Overhead French Press", "youtubeId": "gFP79Cy1dYE" }],
+    "Reverse Dips": [
+      { "label": "Reverse Dips", "youtubeId": "GsZ8E6Zsvog" },
+      { "label": "Advanced (on bench)", "youtubeId": "gcT0g3V05vo" }
+    ],
+    "Machine Overhead Press": [{ "label": "Shoulder Machine", "youtubeId": "gZyDz13UwLA" }],
+    "Kick Back": [{ "label": "Kick Back", "youtubeId": "cwk5zMZ1M1s" }]
+  },
+  "teachingPoints": {
+    "knee angle": { "youtubeId": "nN-MGugsPLg" },
+    "neck angle": { "youtubeId": "Kkg6kc_8e98" },
+    "knees over toes": { "youtubeId": "NrkKf1iEMbY" },
+    "neutral lumbar spine": { "youtubeId": "goAAADaMZfc" }
+  },
+  "prep": {
+    "shoulder": [
+      { "label": "Shoulders 1", "youtubeId": "tAL9fht9SlY" },
+      { "label": "Shoulders 2", "youtubeId": "ekJlpzEX2as" }
+    ],
+    "shoulder girdle": [{ "label": "Shoulder girdle", "youtubeId": "oCWaOWuU-vo" }],
+    "elbow": [{ "label": "Elbow", "youtubeId": "CBCcRFJShn0" }],
+    "y raises": [{ "label": "Y raises", "youtubeId": "DnxiEORpN_E" }],
+    "w raises": [{ "label": "W raises", "youtubeId": "9wTtbQEHR9Q" }],
+    "wall slides": [{ "label": "Wall slides", "youtubeId": "xVT__DQ6xdg" }],
+    "spine": [{ "label": "Spine", "youtubeId": "puhgKkKVlu8" }],
+    "ql": [{ "label": "QL", "youtubeId": "kto7lbx_c3s" }],
+    "hips": [{ "label": "Hips", "youtubeId": "qMs7H3QWIG0" }],
+    "knees": [{ "label": "Knees", "youtubeId": "C7EYa3Ksgtw" }],
+    "ankle": [{ "label": "Ankles", "youtubeId": "_68QTGG57v4" }],
+    "toe tap": [{ "label": "Toe tap", "youtubeId": "kLrWRtcgxbE" }],
+    "heels to toes": [{ "label": "Heels to toes", "youtubeId": "rc4S7GiEnXY" }]
+  },
+  "prepAliases": {
+    "shoulders": "shoulder",
+    "knee": "knees",
+    "ankles": "ankle"
+  }
+}

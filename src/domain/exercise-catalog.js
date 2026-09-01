@@ -5,7 +5,9 @@
  * Machine leg presses/hack squat are library-only (inProgramming: false).
  * Core entries stay out of hypertrophy pools but are programmed in the
  * strength core circuit via coreLevel / coreTarget.
+ * Form clips live in data/form-videos.json — see form-videos.js.
  */
+import { lookupExerciseClips, lookupTeachingPointUrl } from './form-videos.js';
 
 function ex(partial) {
     return {
@@ -827,216 +829,16 @@ const TP_A_LABELS = [
     'Knees over toes'
 ];
 
-/** YouTube clips for shared teaching-point labels (lowercase keys). */
-const TEACHING_POINT_VIDEOS = {
-    'knee angle': 'https://www.youtube.com/watch?v=nN-MGugsPLg',
-    'neck angle': 'https://www.youtube.com/watch?v=Kkg6kc_8e98',
-    'knees over toes': 'https://www.youtube.com/watch?v=NrkKf1iEMbY',
-    'neutral lumbar spine': 'https://www.youtube.com/watch?v=goAAADaMZfc'
-};
-
 /** Watch URL for a teaching-point label, or '' if none is wired yet. */
 export function getTeachingPointVideoUrl(label) {
-    const key = String(label || '').trim().toLowerCase();
-    return TEACHING_POINT_VIDEOS[key] || '';
+    return lookupTeachingPointUrl(label);
 }
-
-function formClip(label, videoId) {
-    return { label, videoUrl: `https://www.youtube.com/watch?v=${videoId}` };
-}
-
-/** Per-lift form clips (front/side, load, or advanced variants). */
-const EXERCISE_FORM_VIDEOS = {
-    'Crunch': [formClip('Crunch', 's1Bs7GIF-vA')],
-    'Knees Bench Crunch': [formClip('Knees Bench Crunch', '0-zGaA0lGrM')],
-    'Feet Up Crunch': [formClip('Feet Up Crunch', 'zL-HbZC0Hyg')],
-    'Reverse Crunch': [formClip('Reverse Crunch', 'NI45UO6MCTg')],
-    'Plank': [formClip('Plank', 'qHKB3xebboM')],
-    'Side Plank': [formClip('Side Plank', 'V4d-uuaG-_0')],
-    'Dead Bug': [formClip('Dead Bug', '3m4-s_6FTXI')],
-    'Russian Twist': [formClip('Russian Twist', 'B2FJAfOC7mM')],
-    'Halo': [formClip('Halo', '3z69mqHnXeg')],
-    'Suitcase Carry': [
-        formClip('Angle 1', 'yCfcmuCDCJs'),
-        formClip('Angle 2', 'CuNUK64ap4Y')
-    ],
-    'Turkish Get-up': [formClip('Turkish Get-up', '2VytA1Dparw')],
-    'Side-sit on Hyperextension Bench': [formClip('Side-sit', 'SCBDVgjR3Ik')],
-    'Hyperextension': [formClip('Hyperextension', 'pEaPF-jU_uI')],
-    'Hanging Knee Raise': [formClip('Hanging Knee Raise', 'ZjAqZoHJGBQ')],
-    'Wood-chop': [formClip('Wood-chop', '5wFGixVCKWo')],
-    'Standing Cable Rotation': [formClip('Standing Cable Rotation', 'PuQtmYqGkeY')],
-    'Pallof Push': [formClip('Pallof Push', 'SKqe1U4whtE')],
-    'Seated Cable Rotation': [formClip('Seated Cable Rotation', 'mYYz6NuCUN0')],
-    'Cable Crunch': [formClip('Cable Crunch', 'N4CLSyLJISk')],
-    'Standing Side Bend': [formClip('Standing Side Bend', 'mxuyW2fF4v8')],
-
-    'Squat': [
-        formClip('Side', 'HKTH3YIc1Jk'),
-        formClip('Front', 'mqsmfBZ9LqM')
-    ],
-    'Sumo Squat': [
-        formClip('Angle 1', 'sySK8kqkNYE'),
-        formClip('Angle 2', '7UwaRedGaEA')
-    ],
-    'Deadlift': [
-        formClip('Side', 'BCBmj0GKXco'),
-        formClip('Front', 'v_pOuUwkfZw')
-    ],
-    'Sumo Deadlift': [
-        formClip('Front', 'ZfLBFsCAYdc'),
-        formClip('Side', '-_-4odMhjCU')
-    ],
-    'Romanian Deadlift': [
-        formClip('Side', 'XvHZMbO8jQI'),
-        formClip('Front', '7hmkB-B-R5E')
-    ],
-    'Rack Deadlift': [
-        formClip('Front', 'IcfJ1DkdMjk'),
-        formClip('Side', 'Aj3mRqqB5-0')
-    ],
-    'Single Leg Deadlift': [
-        formClip('Front', 'JGQKkITdjys'),
-        formClip('Side', 'OYVHu-oaqIA')
-    ],
-    'Front Squat': [
-        formClip('Side (no plates)', '_Nb4NbvipUk'),
-        formClip('Front (no plates)', 'HLwExtRbv18'),
-        formClip('Front (plates)', 'UVnzt1ZUhf0'),
-        formClip('Side (plates)', 'J8IfN0Feg-0')
-    ],
-    'Goblet Squat': [
-        formClip('Side', 'Wjhb0xypIE8'),
-        formClip('Front', 'cEwa0WnkK3U')
-    ],
-    'Split Squat': [
-        formClip('Side', 'U8lFz42Uvu4'),
-        formClip('Front', 'Jo2OGQh-uug')
-    ],
-    'Walk Lunge': [
-        formClip('Angle 1', 'HtjZopOtgFg'),
-        formClip('Angle 2', 'NaVILGSKmGc')
-    ],
-    'Bulgarian Squat': [
-        formClip('Side', 'AoXB7hb1gPI'),
-        formClip('Front', 'h_YJLxzTVK4')
-    ],
-    'Pistol Squat': [
-        formClip('Side', 'BpkYPnzRyzg'),
-        formClip('Front', 'dipmr2NKCx8')
-    ],
-    'Leg Press': [formClip('Leg Press', '044j5Fpi5Eo')],
-    'Leg Extension': [formClip('Leg Extension', 'qTZLbQMkhxQ')],
-    'Calf Raise Barbell': [formClip('Barbell Calf Raise', 'YCgB-vclF_U')],
-    'Single Calf Raise': [formClip('Single Calf Raise', 'gCFu0tgVeHE')],
-    'Lying Hamstring Curl': [formClip('Lying Hamstring Curl', 'bjqIuxXYfTc')],
-    'Calf Raise Machine': [formClip('Plate-loaded Calf Raise', 'QGbCiAPUPzo')],
-
-    'Machine Bench Press': [formClip('Machine Bench Press', 'uAcV8L1R5uI')],
-    'Neutral Cable Row': [formClip('Neutral Cable Row', 'zAB0uShcEHU')],
-    'Overhand Cable Row': [formClip('Overhand Cable Row', 'LwI301603do')],
-    'Cable Crossover': [formClip('Cable Crossover', 'VD2MNWNyAsk')],
-    'Cable French Press': [formClip('Cable French Press', 'uZbX2wvTNC0')],
-    'Rope Push Down': [
-        formClip('Rope Push Down 1', '1Zlp_Lz3CXA'),
-        formClip('Rope Push Down 2', 'vVq1cqVt02c')
-    ],
-    'Lat Machine Pull': [
-        formClip('Lat down', 'U4fzsdQbRvM'),
-        formClip('Wide grip', 'GpBaP2T-hYY')
-    ],
-    'Lat Machine Close Grip': [
-        formClip('Narrow grip', 'jQyy6VZtfp4'),
-        formClip('Neutral / handle', 'KAWtCJzmIoc')
-    ],
-    'Lat Machine Single Pull': [formClip('Single-arm Lat Pulldown', 'SxDiRzvAH9U')],
-    'Cable Curl': [formClip('Cable Curl', 'JP5WildW4Kw')],
-    'Cable Lateral Raise (Single)': [formClip('Cable Lateral Raise', 'FOFTu0mp1hE')],
-    'Lateral Rotation': [
-        formClip('Outwards', '5LZZB5n4pgQ'),
-        formClip('Inwards', 'CRQXV4P3wmA')
-    ],
-    'Pull Up': [
-        formClip('Pull Up', 'QussPjEvOOM'),
-        formClip('Weighted', 'xCsC5ep5GyA')
-    ],
-    'Chin Up': [
-        formClip('Chin Up', 'zvhWOpuWIdk'),
-        formClip('Weighted', 'mTEBLjAbM3I')
-    ],
-    'Neutral Pull Up': [
-        formClip('Neutral Chin Up', 'qtAHgDvdWxA'),
-        formClip('Weighted', '6i4gSCJ4AHM')
-    ],
-    'Dip': [
-        formClip('Dip', 'ZEda1n_1yYQ'),
-        formClip('Weighted', 'HtLQJhraevY')
-    ],
-    'Bench Press': [
-        formClip('Barbell', 't3-qrXXTIok'),
-        formClip('Dumbbell', '0P80Zz88aIQ')
-    ],
-    'Incline Bench Press': [
-        formClip('Barbell', 'g-WtgvayETM'),
-        formClip('Dumbbell', 'UseTFRLYJdA')
-    ],
-    'Decline Bench Press': [
-        formClip('Barbell', 'OLWK-dx9nfM'),
-        formClip('Dumbbell', 'KShY1Mq54Do')
-    ],
-    'Close Grip Bench Press': [formClip('Close Grip', 'Uyabxf3RlY4')],
-    'Flye': [
-        formClip('Dumbbell', 'ci29MKbYUyM'),
-        formClip('Decline', 'I2RY34aPWbY')
-    ],
-    'Incline Flye': [formClip('Incline Flye', 'izSw-sdOtG0')],
-    'Pullover': [formClip('Pullover', 'gwlrPy0vN94')],
-    'Press-up': [formClip('Press-up', 'qQgPQ7rX4MA')],
-    'Decline Push-up': [formClip('Decline Push-up', 'jCv6qI_jkTs')],
-    'Push-up on Knee': [
-        formClip('Angle 1', '9g_zOt6Umpo'),
-        formClip('Angle 2', '6O92NrTlhp0')
-    ],
-    'Close Grip Press-up': [formClip('Close Grip Press-up', 'rdQQwwHt0Cw')],
-    'Overhand Barbell Row': [formClip('Overhand Barbell Row', '0tSVYZnWWfM')],
-    'Underhand Barbell Row': [formClip('Underhand Barbell Row', 'FpBrN_JwTkc')],
-    'Dumbbell Row': [formClip('Dumbbell Row', '4d0heoqUAC4')],
-    'Reverse Row': [
-        formClip('Reverse Row', 'EGJMnOdI9Qc'),
-        formClip('Advanced (on bench)', 'PqKAB5wUgxQ')
-    ],
-    'Barbell Military Press': [formClip('Military Press', '1_ulFhoG-cw')],
-    'Seated Dumbbell Shoulder Press': [formClip('Dumbbell Shoulder Press', '4tS3juRA35U')],
-    'Seated Dumbbell Screw Press': [formClip('Screw Press', '1lMzvTE5yB4')],
-    'Lateral Raise': [formClip('Lateral Raise', 'hbAt223h4Ic')],
-    'Lying 30 Degree Single Lateral Raise': [formClip('Lying 30° Single', 'dDxBejgL2pk')],
-    'Standing Dumbbell Front Raise': [formClip('Front Raise', 'XZ7AWGDEmVM')],
-    'Incline Dumbbell Front Raise': [formClip('Incline Front Raise', 'GRaw8UaSS2s')],
-    'Bent Over Rear Flye': [formClip('Reverse Flye', 'Q2_hFwbmz5A')],
-    'Skull Crusher': [formClip('Skull Crusher', 'coWN4t-ltn8')],
-    'Upright Row': [formClip('Upright Row', '_qHIBXQLUmE')],
-    'Barbell Curl': [formClip('Barbell Curl', 'Re73RKn6nDo')],
-    'Dumbbell Curl': [formClip('Dumbbell Curl', 'Cf8EOJVN9Lo')],
-    'Hammer Curl': [formClip('Hammer Curl', 'ip9jeZnxAfU')],
-    'Reverse Curl': [formClip('Reverse Curl', '5wSSK5yDvEY')],
-    'Seated Curl': [formClip('Seated Curl', 'sl8DLnI4GRY')],
-    'Concentration Curl': [formClip('Concentration Curl', 'lJW9py1mmjY')],
-    'Dumbbell Preacher Curl': [formClip('Preacher Curl', '94VY9GnDXiU')],
-    'Single Overhead Seated French Press': [formClip('Overhead French Press', 'gFP79Cy1dYE')],
-    'Reverse Dips': [
-        formClip('Reverse Dips', 'GsZ8E6Zsvog'),
-        formClip('Advanced (on bench)', 'gcT0g3V05vo')
-    ],
-    'Machine Overhead Press': [formClip('Shoulder Machine', 'gZyDz13UwLA')],
-    'Kick Back': [formClip('Kick Back', 'cwk5zMZ1M1s')]
-};
 
 /** Form clips for a catalog lift. Empty if none are wired yet. */
 export function getExerciseFormVideos(name) {
     const meta = getExerciseMeta(name);
     const key = meta?.name || resolveCatalogName(name) || String(name || '').trim();
-    const clips = EXERCISE_FORM_VIDEOS[key];
-    return Array.isArray(clips) ? clips.map((c) => ({ ...c })) : [];
+    return lookupExerciseClips(key);
 }
 
 /** First form-video URL for a lift, or '' if none. */

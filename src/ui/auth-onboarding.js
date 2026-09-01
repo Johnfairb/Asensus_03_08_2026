@@ -50,7 +50,7 @@ export function nextObStep(stepNumber) {
     const stepEl = document.getElementById(`ob-step-${stepNumber}`);
     if (stepEl) stepEl.classList.remove('hidden');
 
-    const titles = ["OPERATOR BIOMETRICS", "CHASSIS & TARGET", "SYSTEM LOGIC"];
+    const titles = ["OPERATOR BIOMETRICS", "Goals and experience", "SYSTEM LOGIC"];
     document.getElementById('ob-phase-title').innerText = `PHASE ${stepNumber} / 3`;
     document.getElementById('ob-main-title').innerText = titles[stepNumber - 1];
 
@@ -100,16 +100,8 @@ export async function completeOnboarding() {
         store.userConfig.shopStyle = document.getElementById('ob-shop-style')?.value || 'Cheap';
         store.userConfig.sport = document.getElementById('ob-sport').value || 'General fitness';
         store.userConfig.injury = document.getElementById('ob-injury').value || 'None';
-        store.userConfig.canDoPullups = document.getElementById('ob-bodyweight-test').value || 'Yes';
         
         store.userConfig.experience = document.getElementById('ob-experience').value || 'Beginner';
-        if (store.userConfig.experience === 'Advanced') {
-            store.userConfig.oneRepMax = {
-                squat: parseFloat(document.getElementById('ob-1rm-squat').value) || 0,
-                bench: parseFloat(document.getElementById('ob-1rm-bench').value) || 0,
-                deadlift: parseFloat(document.getElementById('ob-1rm-dead').value) || 0
-            };
-        }
         
         calculateTDEE();
 

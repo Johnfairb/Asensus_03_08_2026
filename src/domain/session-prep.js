@@ -4,6 +4,7 @@
  */
 import { store } from '../state/store.js';
 import { getLactateWarmupParts } from './lactate-engine.js';
+import { lookupPrepClips } from './form-videos.js';
 
 const PREFS_KEY = 'ascensus_session_prep_prefs_v1';
 
@@ -12,47 +13,9 @@ export const MOBILISATION_JOINTS = [
     'Spine', 'QL', 'Hips', 'Knees', 'Ankles', 'Toe tap', 'Heels to toes'
 ];
 
-function youtubeEmbedUrl(urlOrId) {
-    const s = String(urlOrId || '').trim();
-    const m = s.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{6,})/)
-        || s.match(/^([A-Za-z0-9_-]{11})$/);
-    return m ? `https://www.youtube.com/embed/${m[1]}` : s;
-}
-
-function prepClip(label, urlOrId) {
-    return { label, videoUrl: youtubeEmbedUrl(urlOrId) };
-}
-
-const SHOULDER_CLIPS = [
-    prepClip('Shoulders 1', 'https://www.youtube.com/watch?v=tAL9fht9SlY'),
-    prepClip('Shoulders 2', 'https://youtu.be/ekJlpzEX2as')
-];
-
-/** YouTube teaching clips keyed by lowercase joint / drill name. */
-const PREP_VIDEOS = {
-    shoulder: SHOULDER_CLIPS,
-    shoulders: SHOULDER_CLIPS,
-    'shoulder girdle': [prepClip('Shoulder girdle', 'https://www.youtube.com/watch?v=oCWaOWuU-vo')],
-    elbow: [prepClip('Elbow', 'https://youtu.be/CBCcRFJShn0')],
-    'y raises': [prepClip('Y raises', 'https://www.youtube.com/watch?v=DnxiEORpN_E')],
-    'w raises': [prepClip('W raises', 'https://www.youtube.com/watch?v=9wTtbQEHR9Q')],
-    'wall slides': [prepClip('Wall slides', 'https://www.youtube.com/watch?v=xVT__DQ6xdg')],
-    spine: [prepClip('Spine', 'https://www.youtube.com/watch?v=puhgKkKVlu8')],
-    ql: [prepClip('QL', 'https://www.youtube.com/watch?v=kto7lbx_c3s')],
-    hips: [prepClip('Hips', 'https://www.youtube.com/watch?v=qMs7H3QWIG0')],
-    knees: [prepClip('Knees', 'https://www.youtube.com/watch?v=C7EYa3Ksgtw')],
-    knee: [prepClip('Knees', 'https://www.youtube.com/watch?v=C7EYa3Ksgtw')],
-    ankle: [prepClip('Ankles', 'https://www.youtube.com/watch?v=_68QTGG57v4')],
-    ankles: [prepClip('Ankles', 'https://www.youtube.com/watch?v=_68QTGG57v4')],
-    'toe tap': [prepClip('Toe tap', 'https://www.youtube.com/watch?v=kLrWRtcgxbE')],
-    'heels to toes': [prepClip('Heels to toes', 'https://www.youtube.com/watch?v=rc4S7GiEnXY')]
-};
-
 /** Teaching clips for a warmup / mobilisation part. Empty if none are wired yet. */
 export function getPrepVideos(name) {
-    const key = String(name || '').trim().toLowerCase();
-    const clips = PREP_VIDEOS[key];
-    return Array.isArray(clips) ? clips.map(c => ({ ...c })) : [];
+    return lookupPrepClips(name);
 }
 
 /** Deep-copy warmup children so video playback cannot mutate the shared part tree. */

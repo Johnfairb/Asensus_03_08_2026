@@ -247,7 +247,6 @@ export function applyUserConfigToDom() {
     setVal('set-sport', store.userConfig.sport);
     setVal('set-bf', store.userConfig.bodyFat);
     setVal('set-injury', store.userConfig.injury || 'None');
-    setVal('set-bw-test', store.userConfig.canDoPullups);
     setVal('set-core-strength', store.userConfig.coreStrength || '');
     if (store.userConfig.seasonPhase === 'InSeason_Maintenance') {
         store.userConfig.seasonPhase = 'OffSeason_Hypertrophy';
@@ -256,7 +255,6 @@ export function applyUserConfigToDom() {
     setVal('set-training-window', store.userConfig.trainingWindow);
     setVal('set-meals-per-day', store.userConfig.mealsPerDay);
     setVal('set-budget', store.userConfig.budget);
-    setVal('set-training-freq', store.userConfig.trainingFreq);
     setVal('set-db-inc-low', store.userConfig.dbIncrements?.low ?? 1);
     setVal('set-db-inc-mid', store.userConfig.dbIncrements?.mid ?? store.userConfig.dumbbellIncrement ?? 2);
     setVal('set-db-inc-high', store.userConfig.dbIncrements?.high ?? store.userConfig.dumbbellIncrement ?? 2);
@@ -331,7 +329,6 @@ export function saveSettings() {
     store.userConfig.goal = document.getElementById('set-goal').value;
     store.userConfig.mealsPerDay = parseInt(document.getElementById('set-meals-per-day').value) || 3;
     store.userConfig.budget = parseFloat(document.getElementById('set-budget').value) || 15.00;
-    store.userConfig.trainingFreq = parseInt(document.getElementById('set-training-freq').value) || 4;
     const prevDiet = store.userConfig.diet;
     store.userConfig.diet = document.getElementById('set-diet').value;
     const shopStyleEl = document.getElementById('set-shop-style');
@@ -340,7 +337,6 @@ export function saveSettings() {
     store.userConfig.injury = document.getElementById('set-injury').value;
     store.userConfig.sport = document.getElementById('set-sport').value;
     store.userConfig.bodyFat = parseFloat(document.getElementById('set-bf').value) || 0;
-    store.userConfig.canDoPullups = document.getElementById('set-bw-test').value || 'Yes';
     const coreStrEl = document.getElementById('set-core-strength');
     if (coreStrEl && coreStrEl.value) store.userConfig.coreStrength = coreStrEl.value;
     store.userConfig.dependentAthlete = document.getElementById('toggle-dependent-athlete').checked;
@@ -396,10 +392,8 @@ export function saveSettings() {
     if (liftEl) store.userConfig.networkShowLift = !!liftEl.checked;
     applyNetworkKillSwitch();
 
-    // Keep lifestyle Days/Wk aligned with gym willingness for HUD scaling
+    // Keep trainingFreq aligned with gym willingness for HUD scaling
     store.userConfig.trainingFreq = store.userConfig.gymWillingness;
-    const freqEl = document.getElementById('set-training-freq');
-    if (freqEl) freqEl.value = String(store.userConfig.trainingFreq);
 
     const bandHint = document.getElementById('band-aux-hint');
     if (bandHint) {

@@ -1586,20 +1586,6 @@ body.dependent-mode .hud-label::after {
     z-index: 5;
 }
 
-#onboarding-container .ob-step-actions-top {
-    border-top: none;
-    border-bottom: 1px solid var(--border-subtle);
-    padding-top: 0;
-    padding-bottom: 10px;
-    margin-bottom: 8px;
-}
-
-#btn-lock-boot-gps {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-}
-
 #boot-screen {
     display: flex; flex-direction: column; justify-content: center; align-items: center;
 }

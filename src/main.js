@@ -9,7 +9,9 @@ import { startNotificationScheduler } from './ui/notifications.js';
 import { syncRestTimersFromWallClock, syncStretchTimersFromWallClock, syncHitTimersFromWallClock } from './ui/drive.js';
 import { unlockAudio } from './ui/audio.js';
 import { onAppBecameVisible } from './domain/thermodynamics.js';
+import { ensureFormVideos } from './domain/form-videos.js';
 
+ensureFormVideos();
 installAlerts();
 bindUi();
 startNotificationScheduler();

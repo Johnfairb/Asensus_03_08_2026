@@ -1,5 +1,5 @@
 // Ascensus Offline GPS Cache (The Tunnel Protocol)
-const CACHE_NAME = 'ascensus-gps-v48';
+const CACHE_NAME = 'ascensus-gps-v50';
 
 // The critical assets required to render the UI offline
 const ASSETS_TO_CACHE = [
@@ -35,6 +35,9 @@ const ASSETS_TO_CACHE = [
   './src/domain/periodization.js',
   './src/domain/recipes.js',
   './src/domain/food-catalog.js',
+  './src/domain/form-videos.js',
+  './src/domain/exercise-catalog.js',
+  './src/domain/session-prep.js',
   './src/ui/alerts.js',
   './src/ui/navigation.js',
   './src/ui/theme.js',
@@ -52,6 +55,7 @@ const ASSETS_TO_CACHE = [
   './src/ui/bind.js',
   './data/seed-database.json',
   './data/template-foods-catalog.json',
+  './data/form-videos.json',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
   'https://cdn.jsdelivr.net/npm/chart.js'
 ];
