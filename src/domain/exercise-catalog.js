@@ -1185,3 +1185,9 @@ export function bodyweightCompoundSet() {
             .map(([n]) => n)
     );
 }
+
+/** Lifts that never take added load (no kg field, always bodyweight). */
+export function isAlwaysBodyweightExercise(name) {
+    const resolved = resolveCatalogName(name) || String(name || '').trim();
+    return resolved === 'Reverse Row';
+}

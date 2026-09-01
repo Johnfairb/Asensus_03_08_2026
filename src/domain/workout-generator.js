@@ -33,7 +33,7 @@ import {
     buildSportSessionBlock,
     cloneWarmupPartChildren
 } from './session-prep.js';
-import { formatCoreRepLabel, formatMuscleList, getExerciseMeta, isUnilateralCompound } from './exercise-catalog.js';
+import { formatCoreRepLabel, formatMuscleList, getExerciseMeta, isAlwaysBodyweightExercise, isUnilateralCompound } from './exercise-catalog.js';
 import { hasCoreStrengthRating } from './core-programming.js';
 import {
     applyPowerExerciseToItem,
@@ -48,9 +48,10 @@ import { renderActiveLog } from '../ui/templates.js';
 import { syncExerciseTimer } from '../ui/workout-timer.js';
 import { ensureCycleStarted, ensureCyclePlansForProgramme, confirmSessionExercises } from './workout-cycle.js';
 import { getEquivalentExercises } from './exercise-slots.js';
-import { latestPhaseWeight, lastCompletedWorkingWeight, latestWorkingLog, strengthLoadFromHypertrophy, hypertrophyLoadFromStrength, resolveLogPeriodization, exerciseLogNamesMatch, applyPriorExerciseLoadReduction, countPriorLoggedLifts } from './periodization-logs.js';
+import { latestPhaseWeight, lastCompletedWorkingWeight, latestWorkingLog, strengthLoadFromHypertrophy, hypertrophyLoadFromStrength, resolveLogPeriodization, exerciseLogNamesMatch, applyPriorExerciseLoadReduction, priorLoggedLiftNames } from './periodization-logs.js';
 import {
     barLoadCodesForExercise,
+    displayLoadKg,
     equipmentChoiceFromItem,
     getExerciseWorkingWeight,
     getExerciseWorkingWeightsByBar
@@ -150,8 +151,9 @@ function buildLiftWorkSets({ exName, isIso, nSets, weight, reps, includeWarmups 
     const work = [];
     for (let i = 0; i < count; i++) {
         work.push({
-            weight: workKg,
+            weight: isAlwaysBodyweightExercise(exName) ? 0 : workKg,
             reps: workReps,
+            prescribedReps: workReps,
             distance_km: 0,
             time_minutes: 0,
             rpe: defaultWorkSetRir(),
@@ -159,7 +161,7 @@ function buildLiftWorkSets({ exName, isIso, nSets, weight, reps, includeWarmups 
             restTime: workRest
         });
     }
-    if (includeWarmups && workKg > 0) {
+    if (includeWarmups && (workKg > 0 || isAlwaysBodyweightExercise(exName))) {
         const wu = buildHypertrophyWarmupSets(exName, workKg, workReps, isIso, {
             workRestSec: workRest,
             mode: restOpts.mode
@@ -170,6 +172,9 @@ function buildLiftWorkSets({ exName, isIso, nSets, weight, reps, includeWarmups 
 }
 
 function resolveExtraLiftLoad(exName, spec = {}) {
+    if (isAlwaysBodyweightExercise(exName)) {
+        return { weight: 0, needsWeightFind: false };
+    }
     if (spec.weightProvided) {
         const w = Number(spec.weight);
         return { weight: Number.isFinite(w) ? w : 0, needsWeightFind: false };
@@ -238,10 +243,11 @@ function ghostWeightLabel(item, sample) {
         }
         return `${fmt('B', bb)} · ${fmt('D', db)}`;
     }
+    if (isAlwaysBodyweightExercise(name)) return 'BW';
     if (isNew) return `<span style="color:var(--gold-accent); font-weight:800;">new exercise</span>`;
-    if (sampleW > 0) return `${sampleW}kg`;
+    if (sampleW > 0) return `${displayLoadKg(sampleW, name, choice)}kg`;
     const seeded = getExerciseWorkingWeight(name, choice);
-    if (seeded != null && seeded > 0) return `${seeded}kg`;
+    if (seeded != null && seeded > 0) return `${displayLoadKg(seeded, name, choice)}kg`;
     return 'BW';
 }
 
@@ -278,9 +284,9 @@ function buildExtraLogEntry(ex, spec = {}) {
     const reps = Number(spec.reps) > 0 ? Math.round(Number(spec.reps)) : defaultExtraReps(ex.name, isIso);
     const { weight, needsWeightFind } = resolveExtraLiftLoad(ex.name, spec);
     let workKg = weight;
-    if (!needsWeightFind && sessionUsesHypertrophyProgramming()) {
-        const n = countPriorLoggedLifts(store.activeLog?.items);
-        workKg = applyPriorExerciseLoadReduction(weight, ex.name, n, spec.equipmentChoice || null);
+    if (!needsWeightFind) {
+        const names = priorLoggedLiftNames(store.activeLog?.items);
+        workKg = applyPriorExerciseLoadReduction(weight, ex.name, names, spec.equipmentChoice || null);
     }
     const sets = buildLiftWorkSets({
         exName: ex.name,
@@ -288,7 +294,7 @@ function buildExtraLogEntry(ex, spec = {}) {
         nSets,
         weight: workKg,
         reps,
-        includeWarmups: !needsWeightFind && workKg > 0
+        includeWarmups: !needsWeightFind && (workKg > 0 || isAlwaysBodyweightExercise(ex.name))
     });
     return {
         exercise: ex,
@@ -301,7 +307,8 @@ function buildExtraLogEntry(ex, spec = {}) {
         needsWeightFind,
         weightFinderResolved: !needsWeightFind,
         workWeightKg: workKg > 0 ? workKg : undefined,
-        baseWorkWeightKg: Number.isFinite(Number(weight)) ? Number(weight) : 0
+        baseWorkWeightKg: Number.isFinite(Number(weight)) ? Number(weight) : 0,
+        prescribedReps: reps
     };
 }
 
@@ -335,7 +342,7 @@ export function applySwappedLiftToItem(item, newEx) {
         nSets,
         weight,
         reps,
-        includeWarmups: !needsWeightFind && weight > 0
+        includeWarmups: !needsWeightFind && (weight > 0 || isAlwaysBodyweightExercise(newEx.name))
     });
     item.workWeightKg = weight > 0 ? weight : undefined;
     item.baseWorkWeightKg = Number.isFinite(Number(weight)) ? Number(weight) : 0;
@@ -543,6 +550,7 @@ export function addSetToExercise(exIdx) {
         distance_km: lastWork.distance_km || 0,
         time_minutes: lastWork.time_minutes || 0,
         rpe: isPower ? '' : defaultWorkSetRir(),
+        prescribedReps: lastWork.prescribedReps || exItem.prescribedReps || lastWork.reps || 0,
         completed: false,
         isDropSet: false,
         isWarmup: false,
@@ -1591,6 +1599,7 @@ export async function generateWorkoutTemplate(opts = {}) {
         const itemReps = item.isAux ? 12
             : (item.isStrengthIsolation ? (item.targetReps || 8)
                 : (useHypertrophy ? 10 : pData.reps));
+        item.prescribedReps = itemReps;
         let itemRest = item.isAux ? 60
             : (item.isStrengthIsolation ? (item.restSec || 120)
                 : (useHypertrophy ? 90
@@ -1658,8 +1667,9 @@ export async function generateWorkoutTemplate(opts = {}) {
                 });
             } else {
                 setsArray.push({
-                    weight: tWeight,
+                    weight: isAlwaysBodyweightExercise(exObj.name) ? 0 : tWeight,
                     reps: itemReps,
+                    prescribedReps: itemReps,
                     rpe: useHypertrophy ? 0 : 2,
                     completed: false,
                     restTime: itemRest,

@@ -213,14 +213,81 @@ export function hypertrophyLoadFromStrength(strKg, exName, choice = null) {
     return scaleLoadWithBodyweight(strKg, exName, 1 / 1.15, choice);
 }
 
-/** Each prior logged exercise in the session reduces load by 5% (bodyweight included). */
-export function applyPriorExerciseLoadReduction(addedKg, exName, priorCount, choice = null) {
-    const n = Math.max(0, Math.round(Number(priorCount) || 0));
-    if (n <= 0) {
+function normalizeMuscleName(m) {
+    return String(m || '').trim().toLowerCase();
+}
+
+function muscleRoleSets(exName) {
+    const meta = getExerciseMeta(exName);
+    if (!meta) return { primary: new Set(), secondary: new Set() };
+    return {
+        primary: new Set((meta.primary || []).map(normalizeMuscleName).filter(Boolean)),
+        secondary: new Set((meta.secondary || []).map(normalizeMuscleName).filter(Boolean))
+    };
+}
+
+/**
+ * Cut from one prior lift: 5% if any muscle is primary on both,
+ * 2.5% if a muscle is primary on one and secondary on the other,
+ * 0% if overlap is secondary on both (or none).
+ */
+export function overlapLoadCutForPair(currentName, priorName) {
+    const a = muscleRoleSets(currentName);
+    const b = muscleRoleSets(priorName);
+    let primaryBoth = false;
+    let mixed = false;
+    a.primary.forEach((m) => {
+        if (b.primary.has(m)) primaryBoth = true;
+        else if (b.secondary.has(m)) mixed = true;
+    });
+    a.secondary.forEach((m) => {
+        if (b.primary.has(m)) mixed = true;
+    });
+    if (primaryBoth) return 0.05;
+    if (mixed) return 0.025;
+    return 0;
+}
+
+export function overlapLoadFactor(exName, priorNames) {
+    let factor = 1;
+    (priorNames || []).forEach((prior) => {
+        const cut = overlapLoadCutForPair(exName, prior);
+        if (cut > 0) factor *= (1 - cut);
+    });
+    return factor;
+}
+
+/** Names of other lifts in this session that already have a completed working set. */
+export function priorLoggedLiftNames(items, exceptIdx = -1) {
+    const names = [];
+    (items || []).forEach((it, i) => {
+        if (i === exceptIdx) return;
+        if (!isPositionLoadLiftItem(it) || !itemHasLoggedWorkSet(it)) return;
+        if (it.isSuperset) {
+            (it.sides || []).forEach((side) => {
+                const n = side?.exercise?.name || side?.name;
+                if (n) names.push(n);
+            });
+        } else {
+            const n = it.exercise?.name || it.name;
+            if (n) names.push(n);
+        }
+    });
+    return names;
+}
+
+/**
+ * Reduce load from other logged lifts that share muscles (stacks across priors).
+ * Bodyweight is included in the scaled total.
+ */
+export function applyPriorExerciseLoadReduction(addedKg, exName, priorNames, choice = null) {
+    const names = Array.isArray(priorNames) ? priorNames : [];
+    const factor = overlapLoadFactor(exName, names);
+    if (!(factor < 1)) {
         const raw = Number(addedKg) || 0;
         return raw > 0 ? roundUpLoad(raw, exName, choice) : Math.max(0, raw);
     }
-    return scaleLoadWithBodyweight(addedKg, exName, Math.pow(0.95, n), choice);
+    return scaleLoadWithBodyweight(addedKg, exName, factor, choice);
 }
 
 function isPositionLoadLiftItem(item) {

@@ -13,7 +13,7 @@ import { renderWorkoutLog } from './drive.js';
 import { clearWorkoutDraft, saveWorkoutDraft } from '../domain/workout-draft.js';
 import { resetWorkoutTimer, armWorkoutTimer } from './workout-timer.js';
 import { sessionTypeIdFromFocus, confirmSessionExercises } from '../domain/workout-cycle.js';
-import { gateConfirmForEquipmentPicks, gateConfirmForCableIncrements } from './equipment-ui.js';
+import { gateConfirmForEquipmentPicks } from './equipment-ui.js';
 
 /** Steady State and HIT have nothing useful to swap — skip the confirm screen. */
 export function shouldSkipWorkoutConfirm(focus = null) {
@@ -681,9 +681,7 @@ export function acceptGhostTemplate() {
 }
 
 function acceptGhostTemplateAfterEquipment() {
-    const proceed = () => acceptGhostTemplateAfterCables();
-    if (!gateConfirmForCableIncrements(proceed, store.currentGhostItems)) return;
-    proceed();
+    acceptGhostTemplateAfterCables();
 }
 
 function acceptGhostTemplateAfterCables() {

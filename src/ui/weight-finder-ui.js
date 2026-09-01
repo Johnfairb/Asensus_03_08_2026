@@ -9,7 +9,6 @@ import {
     applyWorkWeightToSupersetSide,
     defaultWorkSetRir,
     isHypertrophyPhase,
-    sessionUsesHypertrophyProgramming,
     workWeightFromFinder
 } from '../domain/hypertrophy-engine.js';
 import {
@@ -24,7 +23,8 @@ import {
 import { excludeBannedExercises } from '../domain/bans.js';
 import { isStrengthPhase } from '../domain/strength-engine.js';
 import { equipmentChoiceFromItem } from '../domain/load-increments.js';
-import { applyPriorExerciseLoadReduction, countPriorLoggedLifts } from '../domain/periodization-logs.js';
+import { isAlwaysBodyweightExercise } from '../domain/exercise-catalog.js';
+import { applyPriorExerciseLoadReduction, priorLoggedLiftNames } from '../domain/periodization-logs.js';
 
 let _finderOpen = false;
 let _finderExIdx = null;
@@ -131,6 +131,11 @@ function sideHasWorkWeight(side, item) {
 
 function sideNeedsWeight(side, item) {
     if (!side) return false;
+    if (isAlwaysBodyweightExercise(side.exercise?.name)) {
+        side.needsWeightFind = false;
+        side.weightFinderResolved = true;
+        return false;
+    }
     if (sideHasWorkWeight(side, item) && !side.needsWeightFind) {
         side.needsWeightFind = false;
         side.weightFinderResolved = true;
@@ -333,6 +338,14 @@ export function maybePromptWeightFinder(exIdx, opts = {}) {
     }
 
     const name = item.exercise?.name || '';
+    if (isAlwaysBodyweightExercise(name)) {
+        item.needsWeightFind = false;
+        item.weightFinderResolved = true;
+        item.needsBwGate = false;
+        item.bwGateResolved = true;
+        applyHypertrophyWorkWeight(item, 0);
+        return false;
+    }
     const isBwLift = isBwGateExercise(name);
     if (!isBwLift && item.needsBwGate) item.needsBwGate = false;
     const needsBw = isBwLift && !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
@@ -356,14 +369,12 @@ function applySessionAwareWorkWeight(item, kg, opts = {}) {
     const base = Number(kg);
     const raw = Number.isFinite(base) && base >= 0 ? base : 0;
     let work = raw;
-    if (sessionUsesHypertrophyProgramming()) {
-        const name = item.isSuperset
-            ? (activeSideMeta(item)?.exercise?.name || '')
-            : (item.exercise?.name || '');
-        const choice = equipmentChoiceFromItem(item);
-        const n = countPriorLoggedLifts(store.activeLog?.items, _finderExIdx);
-        work = applyPriorExerciseLoadReduction(raw, name, n, choice);
-    }
+    const name = item.isSuperset
+        ? (activeSideMeta(item)?.exercise?.name || '')
+        : (item.exercise?.name || '');
+    const choice = equipmentChoiceFromItem(item);
+    const names = priorLoggedLiftNames(store.activeLog?.items, _finderExIdx);
+    work = applyPriorExerciseLoadReduction(raw, name, names, choice);
     return applyWorkWeight(item, work, { ...opts, baseWorkWeightKg: raw });
 }
 

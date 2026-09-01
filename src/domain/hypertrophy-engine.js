@@ -10,6 +10,7 @@ import {
     bodyweightCompoundSet,
     buildHypertrophyMetaMap,
     getExerciseMeta,
+    isAlwaysBodyweightExercise,
     isUnilateralCompound
 } from './exercise-catalog.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
@@ -884,9 +885,18 @@ function isClusterableLift(it) {
     return !!liftNameForCluster(it);
 }
 
+function isBwCompoundForCluster(it) {
+    const name = liftNameForCluster(it);
+    if (!name || isIsolationForCluster(it)) return false;
+    if (BODYWEIGHT_COMPOUNDS.has(name)) return true;
+    const meta = getExerciseMeta(name);
+    return !!(meta && meta.bodyweight && meta.role === 'compound');
+}
+
 /**
- * Cluster lifts by required equipment (first-seen order from the random pick),
- * compounds before isolations inside each equipment group.
+ * Cluster lifts by required equipment (first-seen order from the random pick).
+ * Groups that include a compound bodyweight lift come first; inside a group,
+ * bodyweight compounds, then other compounds, then isolations.
  * Pinned blocks (warmup / stretch / cardio) keep their slots.
  */
 export function clusterItemsByEquipment(items) {
@@ -908,12 +918,14 @@ export function clusterItemsByEquipment(items) {
             eqOrder.push(k);
         }
     });
-    const compounds = lifts.filter((it) => !isIsolationForCluster(it));
-    const isos = lifts.filter((it) => isIsolationForCluster(it));
+    const withBw = eqOrder.filter((eq) => lifts.some((it) => equipmentClusterKey(it) === eq && isBwCompoundForCluster(it)));
+    const withoutBw = eqOrder.filter((eq) => !withBw.includes(eq));
     const ordered = [];
-    eqOrder.forEach((eq) => {
-        ordered.push(...compounds.filter((it) => equipmentClusterKey(it) === eq));
-        ordered.push(...isos.filter((it) => equipmentClusterKey(it) === eq));
+    [...withBw, ...withoutBw].forEach((eq) => {
+        const eqLifts = lifts.filter((it) => equipmentClusterKey(it) === eq);
+        ordered.push(...eqLifts.filter((it) => isBwCompoundForCluster(it)));
+        ordered.push(...eqLifts.filter((it) => !isIsolationForCluster(it) && !isBwCompoundForCluster(it)));
+        ordered.push(...eqLifts.filter((it) => isIsolationForCluster(it)));
     });
     const out = list.slice();
     liftIdx.forEach((idx, j) => {
@@ -1089,6 +1101,19 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
     const sets = [];
 
     const roundWu = (raw, index) => applyWarmupRounding(raw, profile, index);
+
+    if (isAlwaysBodyweightExercise(exName)) {
+        sets.push({
+            weight: 0,
+            reps,
+            completed: false,
+            isWarmup: true,
+            partName: 'Warmup',
+            notes: 'Knees more bent',
+            restTime: afterFirst
+        });
+        return sets;
+    }
 
     // Pull-ups / chin-ups / dips: <15 kg shrugs then BW; ≥15 kg BW then half load
     if (isPullChinDipWarmupLift(exName)) {
@@ -1300,9 +1325,10 @@ export function applyHypertrophyWorkWeight(item, workKg, opts = {}) {
     const choice = equipmentChoiceFromItem(item);
     const raw = Number(workKg);
     if (!Number.isFinite(raw) || raw < 0) return -1;
-    const w = raw === 0 ? 0 : roundHypertrophyWorkWeight(raw, exName, choice);
+    const w = isAlwaysBodyweightExercise(exName) ? 0 : (raw === 0 ? 0 : roundHypertrophyWorkWeight(raw, exName, choice));
 
-    const workReps = (item.sets || []).find(s => s && !s.isWarmup && !s.isText)?.reps || 10;
+    const workReps = Number(item.prescribedReps) || (item.sets || []).find(s => s && !s.isWarmup && !s.isText)?.reps || 10;
+    item.prescribedReps = Number(item.prescribedReps) || workReps;
     const isIso = !!(item.isIsolation || HYPERTROPHY_EXERCISE_META[exName]?.role === 'isolation');
     const workSets = (item.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isLactateHit);
     const planned = typeof item.plannedSets === 'number' ? item.plannedSets : Math.max(3, workSets.length || 3);
@@ -1325,6 +1351,7 @@ export function applyHypertrophyWorkWeight(item, workKg, opts = {}) {
             ...prev,
             weight: w,
             reps: prev.reps || workReps,
+            prescribedReps: prev.prescribedReps || workReps,
             rpe: prev.rpe === '' || prev.rpe == null ? defaultWorkSetRir() : prev.rpe,
             completed: false,
             restTime: prev.restTime != null ? prev.restTime : rest,
@@ -1356,7 +1383,7 @@ export function applyWorkWeightToSupersetSide(item, sideKey, workKg, opts = {}) 
     const exName = sideMeta.exercise.name || '';
     const raw = Number(workKg);
     if (!Number.isFinite(raw) || raw < 0) return -1;
-    const w = raw === 0 ? 0 : roundHypertrophyWorkWeight(raw, exName);
+    const w = isAlwaysBodyweightExercise(exName) ? 0 : (raw === 0 ? 0 : roundHypertrophyWorkWeight(raw, exName));
 
     const sideWork = (item.sets || []).filter(s =>
         s && s.side === sideKey && !s.isWarmup && !s.isText && !s.isLactateHit
@@ -1382,6 +1409,7 @@ export function applyWorkWeightToSupersetSide(item, sideKey, workKg, opts = {}) 
         newWork.push({
             weight: w,
             reps: prev.reps || workReps,
+            prescribedReps: prev.prescribedReps || workReps,
             rpe: prev.rpe === '' || prev.rpe == null ? defaultWorkSetRir() : prev.rpe,
             completed: false,
             isWarmup: false,

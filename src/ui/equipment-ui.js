@@ -195,16 +195,29 @@ function persistCableOrIncrementConfig() {
     } catch (e) { /* ignore */ }
 }
 
-function cableChoiceOfItem(it) {
+const STACK_CONFIRM_CODES = ['Fca', 'Cca', 'M', 'C'];
+
+function stackChoiceOfItem(it) {
     const name = it?.exercise?.name || it?.name;
     if (!name) return null;
     const choice = it.equipmentChoice || it.exercise?.equipmentChoice || null;
     const code = choice || resolveLoadProfile(name, choice)?.code;
-    return code === 'Fca' || code === 'Cca' ? code : null;
+    return STACK_CONFIRM_CODES.includes(code) ? code : null;
 }
 
-function firstItemUsingCable(items, code) {
-    return (items || []).find((it) => cableChoiceOfItem(it) === code) || null;
+function stackCodesForItem(it) {
+    const codes = [];
+    const add = (obj) => {
+        const code = stackChoiceOfItem(obj);
+        if (code && !codes.includes(code)) codes.push(code);
+    };
+    add(it);
+    if (it?.isSuperset) (it.sides || []).forEach(add);
+    return codes;
+}
+
+function firstItemUsingStack(items, code) {
+    return (items || []).find((it) => stackCodesForItem(it).includes(code)) || null;
 }
 
 export function isCableStackConfirmed(code) {
@@ -228,9 +241,9 @@ function sessionItemsForCableCheck() {
 export function unconfirmedCableTypesInItems(items) {
     const list = items || sessionItemsForCableCheck();
     const found = [];
-    ['Fca', 'Cca'].forEach((code) => {
+    STACK_CONFIRM_CODES.forEach((code) => {
         if (isCableStackConfirmed(code)) return;
-        if (firstItemUsingCable(list, code)) found.push(code);
+        if (firstItemUsingStack(list, code)) found.push(code);
     });
     return found;
 }
@@ -258,7 +271,7 @@ function ensureCableIncrementModal() {
         <div class="modal-content stealth-panel equipment-pick-sheet" onclick="event.stopPropagation()">
             <div class="sheet-handle" style="margin:0 auto 12px;"></div>
             <div style="padding:0 16px 4px;">
-                <div style="font-family:'Roboto Mono';font-size:10px;color:var(--gold-accent);font-weight:800;letter-spacing:1px;text-transform:uppercase;">Cable stack</div>
+                <div style="font-family:'Roboto Mono';font-size:10px;color:var(--gold-accent);font-weight:800;letter-spacing:1px;text-transform:uppercase;">Stack weights</div>
                 <h2 id="cable-increment-title" style="color:var(--text-main);font-family:'Roboto Mono',monospace;font-size:15px;text-transform:uppercase;margin:4px 0 0;letter-spacing:1px;">Are the weights correct?</h2>
                 <p id="cable-increment-body" style="font-size:13px;color:var(--text-muted);line-height:1.45;margin:8px 0 0;"></p>
             </div>
@@ -281,8 +294,8 @@ function showNextCableConfirm() {
         return;
     }
     const items = sessionItemsForCableCheck();
-    const it = firstItemUsingCable(items, code);
-    _cableExName = it?.exercise?.name || it?.name || '';
+    const it = firstItemUsingStack(items, code);
+    _cableExName = it?.exercise?.name || it?.name || _cableExName;
     const label = optionLabel(code);
     const modal = ensureCableIncrementModal();
     const title = document.getElementById('cable-increment-title');
@@ -308,6 +321,20 @@ export function gateConfirmForCableIncrements(onReady, items) {
 
 export function maybePromptCableIncrementConfirm(onReady) {
     return gateConfirmForCableIncrements(typeof onReady === 'function' ? onReady : () => {});
+}
+
+/**
+ * Prompt once per stack type (cables + selector machines) when that exercise is opened to log.
+ * @returns {boolean} true if caller can continue; false if modal opened
+ */
+export function maybePromptStackIncrementForItem(item, onReady) {
+    const needed = stackCodesForItem(item).filter((code) => !isCableStackConfirmed(code));
+    if (!needed.length) return true;
+    _cableQueue = needed.slice();
+    _cableAfter = typeof onReady === 'function' ? onReady : null;
+    _cableExName = item?.exercise?.name || item?.name || '';
+    showNextCableConfirm();
+    return false;
 }
 
 export function confirmCableIncrementsYes() {

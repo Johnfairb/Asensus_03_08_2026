@@ -13,6 +13,7 @@ import {
     isHypertrophyPhase,
     usesHypertrophyProgramming
 } from './hypertrophy-engine.js';
+import { displayLoadKg } from './load-increments.js';
 import { explainDayNutritionTargets, persistUserConfigToCloud } from './thermodynamics.js';
 import { DAILY_HYDRATION_TARGET_L } from '../config/constants.js';
 import { estimateFoodWaterMl, getHydrationLitersForDate, parseFoodLogDetails } from '../lib/food-parse.js';
@@ -627,7 +628,7 @@ export function generateDailyExerciseLog() {
 
     const usedLogIds = new Set();
 
-    const summarizeSetRows = (rows) => {
+    const summarizeSetRows = (rows, opts = {}) => {
         if (!rows || !rows.length) return '';
         const first = rows[0];
         const isSport = first.exercise === 'Practice' || first.exercise === 'Match';
@@ -659,6 +660,20 @@ export function generateDailyExerciseLog() {
             return bits.length ? bits.join(' · ') : `${rows.length} sets`;
         }
 
+        const weightOnly = usesHypertrophyProgramming(opts?.sessKind)
+            || rows.some(r => r.periodization_phase === 'hypertrophy');
+        const exName = first.exercise || '';
+        const loadLabels = rows.map((r) => {
+            const w = Number(r.weight_kg) || 0;
+            if (!(w > 0)) return 'BW';
+            return `${displayLoadKg(w, exName)}kg`;
+        });
+        if (weightOnly) {
+            const uniq = [...new Set(loadLabels)];
+            if (uniq.length === 1) return rows.length > 1 ? `${rows.length}× ${uniq[0]}` : uniq[0];
+            return loadLabels.join(', ');
+        }
+
         const repsList = rows.map(r => Number(r.reps) || 0);
         const weights = rows.map(r => Number(r.weight_kg) || 0);
         const positiveReps = repsList.filter(n => n > 0);
@@ -668,8 +683,8 @@ export function generateDailyExerciseLog() {
 
         if (commonReps != null) {
             let detail = `${rows.length}×${commonReps}`;
-            if (commonWeight != null) detail += ` @ ${commonWeight}kg`;
-            else if (positiveWeights.length) detail += ` @ ${[...new Set(positiveWeights)].join('/')}kg`;
+            if (commonWeight != null) detail += ` @ ${displayLoadKg(commonWeight, exName)}kg`;
+            else if (positiveWeights.length) detail += ` @ ${[...new Set(positiveWeights.map(w => displayLoadKg(w, exName)))].join('/')}kg`;
             return detail;
         }
         if (positiveReps.length) {
@@ -677,7 +692,7 @@ export function generateDailyExerciseLog() {
                 const reps = Number(r.reps) || 0;
                 const w = Number(r.weight_kg) || 0;
                 if (!reps) return null;
-                return w > 0 ? `${reps}@${w}kg` : String(reps);
+                return w > 0 ? `${reps}@${displayLoadKg(w, exName)}kg` : String(reps);
             }).filter(Boolean);
             return parts.length ? `${rows.length} sets (${parts.join(', ')})` : `${rows.length} sets`;
         }
@@ -713,7 +728,7 @@ export function generateDailyExerciseLog() {
         </div>`;
     };
 
-    const renderExerciseLines = (logs, sessionItems) => {
+    const renderExerciseLines = (logs, sessionItems, sessKind) => {
         let block = '';
         const grouped = (logs || []).reduce((acc, w) => {
             const key = w.exercise || 'Workout';
@@ -724,7 +739,7 @@ export function generateDailyExerciseLog() {
         for (const exName in grouped) {
             const rows = grouped[exName];
             rows.forEach(log => { if (log.id != null) usedLogIds.add(String(log.id)); });
-            const detail = summarizeSetRows(rows);
+            const detail = summarizeSetRows(rows, { sessKind });
             block += exerciseRowHtml(exName, detail, durationForName(sessionItems, exName));
         }
         return block;
@@ -770,7 +785,7 @@ export function generateDailyExerciseLog() {
         }).join('<br>');
     };
 
-    const summarizeSnapshotSets = (sets) => {
+    const summarizeSnapshotSets = (sets, opts = {}) => {
         // Only work sets the user checked off — per-lift warmups stay out of the Log overview
         const rows = (sets || []).filter(s => s.completed === true && !s.isWarmup);
         if (!rows.length) return 'No checked sets';
@@ -786,6 +801,18 @@ export function generateDailyExerciseLog() {
             if (dur > 0) bits.push(`${dur} min`);
             return bits.length ? bits.join(' · ') : `${rows.length} sets`;
         }
+        const exName = opts.exName || '';
+        const choice = opts.choice || null;
+        const loadLabels = rows.map((s) => {
+            const w = Number(s.weight) || 0;
+            if (!(w > 0)) return 'BW';
+            return `${displayLoadKg(w, exName, choice)}kg`;
+        });
+        if (opts.weightOnly) {
+            const uniq = [...new Set(loadLabels)];
+            if (uniq.length === 1) return rows.length > 1 ? `${rows.length}× ${uniq[0]}` : uniq[0];
+            return loadLabels.join(', ');
+        }
         const repsList = rows.map(s => {
             if (typeof s.reps === 'string' && s.reps.trim()) return s.reps.trim();
             return Number(s.reps) || 0;
@@ -797,8 +824,8 @@ export function generateDailyExerciseLog() {
         const commonWeight = positiveWeights.length && positiveWeights.every(w => w === positiveWeights[0]) ? positiveWeights[0] : null;
         if (commonReps != null) {
             let detail = `${rows.length}×${commonReps}`;
-            if (commonWeight != null) detail += ` @ ${commonWeight}kg`;
-            else if (positiveWeights.length) detail += ` @ ${[...new Set(positiveWeights)].join('/')}kg`;
+            if (commonWeight != null) detail += ` @ ${displayLoadKg(commonWeight, exName, choice)}kg`;
+            else if (positiveWeights.length) detail += ` @ ${[...new Set(positiveWeights.map(w => displayLoadKg(w, exName, choice)))].join('/')}kg`;
             return detail;
         }
         if (numericReps.length) {
@@ -806,7 +833,7 @@ export function generateDailyExerciseLog() {
                 const reps = Number(s.reps) || 0;
                 const w = Number(s.weight) || 0;
                 if (!reps) return typeof s.reps === 'string' ? s.reps : null;
-                return w > 0 ? `${reps}@${w}kg` : String(reps);
+                return w > 0 ? `${reps}@${displayLoadKg(w, exName, choice)}kg` : String(reps);
             }).filter(Boolean);
             return parts.length ? `${rows.length} sets (${parts.join(', ')})` : `${rows.length} sets`;
         }
@@ -815,7 +842,7 @@ export function generateDailyExerciseLog() {
         return `${rows.length} sets`;
     };
 
-    const snapshotItemSummary = (item) => {
+    const snapshotItemSummary = (item, sessKind) => {
         const name = item?.exercise?.name || item?.name || '';
         if (item?.isWarmupGroup || /warmup/i.test(name)) {
             const n = (item.sets || []).filter(s => s && s.completed).length;
@@ -825,7 +852,11 @@ export function generateDailyExerciseLog() {
             const n = (item.sets || []).filter(s => s && s.completed).length;
             return n ? `${n} holds` : 'Done';
         }
-        return summarizeSnapshotSets(item?.sets || []);
+        return summarizeSnapshotSets(item?.sets || [], {
+            weightOnly: usesHypertrophyProgramming(sessKind),
+            exName: name,
+            choice: item?.equipmentChoice || item?.exercise?.equipmentChoice || null
+        });
     };
 
     const workoutLogBelongsToSessionItems = (log, items) => {
@@ -886,7 +917,7 @@ export function generateDailyExerciseLog() {
                     const isWarm = !!(item?.isWarmupGroup || /warmup/i.test(name));
                     const isStretch = !!(item?.isStretchGroup || item?.isCustomStretch || /stretch/i.test(name));
                     const summary = (isWarm || isStretch)
-                        ? snapshotItemSummary(item)
+                        ? snapshotItemSummary(item, sess.kind)
                         : summarizeLactateSnapshotSets(item.sets || []);
                     const label = isStretch ? 'Stretching' : name;
                     return exerciseRowHtml(label, summary, formatExerciseDurationLabel(item));
@@ -894,13 +925,13 @@ export function generateDailyExerciseLog() {
             } else if (Array.isArray(sess.items) && sess.items.length) {
                 bodyHtml = sess.items.map(item => {
                     const name = item.exercise?.name || item.name || 'Exercise';
-                    const summary = snapshotItemSummary(item);
+                    const summary = snapshotItemSummary(item, sess.kind);
                     return exerciseRowHtml(name, summary, formatExerciseDurationLabel(item));
                 }).join('');
                 const leftover = extraLogs.filter(l => !workoutLogBelongsToSessionItems(l, sess.items));
-                if (leftover.length) bodyHtml += renderExerciseLines(leftover, sess.items);
+                if (leftover.length) bodyHtml += renderExerciseLines(leftover, sess.items, sess.kind);
             } else {
-                bodyHtml = renderExerciseLines([...sessionLogs, ...extraLogs], sess.items);
+                bodyHtml = renderExerciseLines([...sessionLogs, ...extraLogs], sess.items, sess.kind);
             }
             const durMin = Number(sess.durationMinutes) || 0;
             html += `<div class="card" style="padding:16px; margin-bottom:12px;">

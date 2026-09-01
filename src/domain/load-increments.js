@@ -53,6 +53,26 @@ export function roundConvertedKg(kg) {
     return Math.round((Number(kg) || 0) * 10) / 10;
 }
 
+/** Machine (M) and Custom (C) stacks show whole kilograms on screen only. */
+export function isWholeKgDisplayProfile(profileOrCode) {
+    const code = profileOrCode && typeof profileOrCode === 'object' ? profileOrCode.code : profileOrCode;
+    return code === 'M' || code === 'C';
+}
+
+/** Display-only load: M/C round to nearest kg; stored values are unchanged. */
+export function displayLoadKg(kg, exName, choice = null) {
+    const n = Number(kg);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    const profile = resolveLoadProfile(exName, choice, { weight: n });
+    if (isWholeKgDisplayProfile(profile)) return Math.round(n);
+    return n;
+}
+
+export function formatDisplayLoadKg(kg, exName, choice = null) {
+    const n = displayLoadKg(kg, exName, choice);
+    return n > 0 ? `${n}kg` : 'BW';
+}
+
 const LEGACY_TO_CODE = {
     barbell: 'B',
     dumbbell: 'D',
