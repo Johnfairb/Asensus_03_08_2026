@@ -34,7 +34,7 @@ import {
     cloneWarmupPartChildren
 } from './session-prep.js';
 import { formatCoreRepLabel, formatMuscleList, getExerciseMeta, isAlwaysBodyweightExercise, isUnilateralCompound } from './exercise-catalog.js';
-import { hasCoreStrengthRating } from './core-programming.js';
+import { hasCoreStrengthRating, orderCoreExercisesByEquipment, resolveCoreExerciseName } from './core-programming.js';
 import {
     applyPowerExerciseToItem,
     buildPowerSessionRoutine,
@@ -1371,7 +1371,11 @@ export async function generateWorkoutTemplate(opts = {}) {
 
         // Strength core circuit — Set 1 / Set 2 expand to 5 exercises with advised reps
         if (item.isCoreBlock) {
-            const coreEx = Array.isArray(item.coreExercises) ? item.coreExercises : [];
+            const coreEx = orderCoreExercisesByEquipment(
+                (Array.isArray(item.coreExercises) ? item.coreExercises : [])
+                    .map((n) => resolveCoreExerciseName(n) || n)
+                    .filter(Boolean)
+            );
             const circuitCount = typeof item.sets === 'number' ? item.sets
                 : (typeof item.setsOverride === 'number' ? item.setsOverride : 2);
             const setsArray = [];

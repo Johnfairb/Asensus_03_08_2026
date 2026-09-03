@@ -1267,8 +1267,20 @@ export function progressHypertrophyWeight(exName, hist, currentWeight, targetRep
         return r >= 8 && r <= 12;
     });
     if (allInRange && recent.length >= 2) {
+        const lastDisplayed = Number(recent[recent.length - 1]?.weight_kg) || tWeight;
+        const nextDisplayed = increaseLoadOneStep(lastDisplayed > 0 ? lastDisplayed : tWeight, exName);
+        const bw = (getExerciseMeta(exName)?.bodyweight && Number(store.userConfig?.weight) > 0)
+            ? Number(store.userConfig.weight) : 0;
+        let factor = 1;
+        if (lastDisplayed > 0 && tWeight > 0) {
+            factor = (lastDisplayed + bw) / (tWeight + bw);
+            if (!(factor > 0) || factor > 1) factor = 1;
+        }
+        const nextBase = (!(factor < 1))
+            ? nextDisplayed
+            : roundUpLoad(Math.max(0, ((nextDisplayed + bw) / factor) - bw), exName);
         return {
-            weight: increaseLoadOneStep(tWeight, exName),
+            weight: nextBase,
             note: 'PROGRESSION: All sets in 8–12. Load increased.'
         };
     }

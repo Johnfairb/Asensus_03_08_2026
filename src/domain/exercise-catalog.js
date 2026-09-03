@@ -626,8 +626,8 @@ export const EXERCISE_CATALOG = {
     // —— Core (strength circuit via coreLevel; excluded from hypertrophy pools) ——
     'Crunch': ex({
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
-    'Knees Bench Crunch': ex({
-        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
+    'Knees Bent Crunch': ex({
+        loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, bodyweight: true, coreLevel: 'B', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Feet Up Crunch': ex({
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '30', primary: ['Core'], secondary: [] }),
     'Cable Crunch': ex({
@@ -648,10 +648,6 @@ export const EXERCISE_CATALOG = {
         loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20 each side', primary: ['Core'], secondary: [] }),
     'Wood-chop': ex({
         loadOptions: ['Ca'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '15 each side', primary: ['Core'], secondary: [] }),
-    'Knee Raise Machine': ex({
-        loadOptions: ['M'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
-    'Knee Raise Machine Leg Raise': ex({
-        loadOptions: ['M'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '20', primary: ['Core'], secondary: [] }),
     'Hanging Knee Raise': ex({
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'I', coreTarget: '20', primary: ['Core'], secondary: [] }),
     'Hanging Leg Raise': ex({
@@ -665,7 +661,7 @@ export const EXERCISE_CATALOG = {
     'Standing Side Bend': ex({
         loadOptions: ['D'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, dumbbell: true, coreLevel: 'B', coreTarget: '20 each hand', primary: ['Core'], secondary: [] }),
     'Halo': ex({
-        loadOptions: ['H'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, loadMax: 25, coreLevel: 'I', coreTarget: '15 each way', primary: ['Core'], secondary: [] }),
+        loadOptions: ['D'], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, dumbbell: true, loadMax: 25, coreLevel: 'I', coreTarget: '15 each way', primary: ['Core'], secondary: [] }),
     'Bulgarian Bag Circles': ex({
         loadOptions: [], domain: 'lifting', movement: 'core', role: 'isolation', muscle_group: 'core', ppl: 'Core', inProgramming: false, coreLevel: 'B', coreTarget: '15', primary: ['Core'], secondary: [] }),
     'Standing Cable Rotation': ex({
@@ -1080,16 +1076,19 @@ export function resolveCatalogName(name) {
         'walk lunge': 'Walk Lunge',
         'walking lunge': 'Walk Lunge',
         'walking lunges': 'Walk Lunge',
-        'knees on bench crunch': 'Knees Bench Crunch',
-        'knees bench crunch': 'Knees Bench Crunch',
+        'knees on bench crunch': 'Knees Bent Crunch',
+        'knees bench crunch': 'Knees Bent Crunch',
+        'knees bent crunch': 'Knees Bent Crunch',
         'farmer carry': 'Suitcase Carry',
         'farmer carries': 'Suitcase Carry',
         'farmer carrys': 'Suitcase Carry',
         'knee raises': 'Hanging Knee Raise',
         'goblet squat': 'Goblet Squat',
-        'roman chair': 'Knee Raise Machine',
-        'roman chair knee raise': 'Knee Raise Machine',
-        'roman chair leg raise': 'Knee Raise Machine Leg Raise'
+        'roman chair': 'Hanging Knee Raise',
+        'roman chair knee raise': 'Hanging Knee Raise',
+        'roman chair leg raise': 'Hanging Leg Raise',
+        'knee raise machine': 'Hanging Knee Raise',
+        'knee raise machine leg raise': 'Hanging Leg Raise'
     };
     return aliases[key] || null;
 }

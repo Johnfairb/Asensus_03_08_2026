@@ -18,7 +18,15 @@ import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog,
 import { populateSportSelects } from '../domain/sports-matrix.js';
 import { applyPowerExerciseToItem } from '../domain/power-engine.js';
 import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, defaultWorkSetRir, hypertrophyRestSeconds, isHypertrophyPhase, sessionAppliesMuscleLockout, sessionUsesHypertrophyProgramming } from '../domain/hypertrophy-engine.js';
-import { inferStrengthLetterFromItems } from '../domain/strength-engine.js';
+import { inferStrengthLetterFromItems, pinCoreExercisesInMonthPlan } from '../domain/strength-engine.js';
+import {
+    coreSwapCandidates,
+    formatCoreRepLabel,
+    loadSavedCoreCircuits,
+    orderCoreExercisesByEquipment,
+    resolveCoreExerciseName,
+    saveNamedCoreCircuit
+} from '../domain/core-programming.js';
 import {
     displayLoadKg,
     allowsWeightInput,
@@ -37,7 +45,8 @@ import { maybePromptWeightFinder } from './weight-finder-ui.js';
 import { maybeRetirePressUpsFromSet } from '../domain/bodyweight-lifts.js';
 import { isAlwaysBodyweightExercise } from '../domain/exercise-catalog.js';
 import { getPrepVideos } from '../domain/session-prep.js';
-import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, exerciseLogNamesMatch, applyPriorExerciseLoadReduction, priorLoggedLiftNames, itemHasLoggedWorkSet } from '../domain/periodization-logs.js';
+import { periodizationBucketForSession, rememberLogPhases, rememberLogPhasesByFingerprint, filterLogsForProgressChart, exerciseLogNamesMatch, applyPriorExerciseLoadReduction, invertPriorExerciseLoadReduction, priorLoggedLiftNames, itemHasLoggedWorkSet } from '../domain/periodization-logs.js';
+import { formatPlatesPerSide } from '../domain/plate-math.js';
 import { recordHydrationMl } from '../lib/food-parse.js';
 import { syncAuthThemeUI } from './auth-onboarding.js';
 import { loadHistory, persistPendingJournalMedia, renderAdherenceCalendar, renderJournalMediaPreview, resetJournalMedia, saveGymJournalEntry, saveExerciseDiariesForDate, idbPutJournalMedia, escapeHtml, buildJournalMediaGalleryHtml } from './journey.js';
@@ -219,26 +228,34 @@ import { buildDiaryEntryFromForm, closeDiarySchemaEditor, renderDiaryFields } fr
 import { collectDiaryFieldValues, journalModeToSchemaMode } from '../domain/diary-schema.js';
 import { upsertTodayBodyFat, upsertTodayWeight } from '../domain/body-metrics.js';
 
-export function calculatePlates(targetWeight = null) {
+export function calculatePlates(targetWeight = null, preferFromWeight = null) {
     let isUI = false;
     if (targetWeight === null || typeof targetWeight === 'object') {
         const inputEl = document.getElementById('plate-calc-target');
         if (!inputEl) return;
         targetWeight = parseFloat(inputEl.value) || 0;
         isUI = true;
+        preferFromWeight = null;
     }
-    if (targetWeight < 20) {
-        if (isUI) document.getElementById('plate-visuals').innerText = "BAR ONLY";
-        return "BAR ONLY";
+    const result = formatPlatesPerSide(targetWeight, preferFromWeight);
+    if (isUI) {
+        const vis = document.getElementById('plate-visuals');
+        if (vis) vis.innerText = result;
     }
-    // ≥20 kg always uses a 20 kg bar
-    let sideWeight = Math.round(((targetWeight - 20) / 2) * 100) / 100; 
-    const plates = [25, 20, 15, 10, 5, 2.5, 1.25]; let loaded = [];
-    for (let plate of plates) { while (sideWeight >= plate - 0.01) { loaded.push(plate); sideWeight = Math.round((sideWeight - plate) * 100) / 100; } }
-    
-    let result = loaded.length > 0 ? loaded.join(' | ') : "BAR ONLY";
-    if (isUI) document.getElementById('plate-visuals').innerText = result;
     return result;
+}
+
+function preferPlateWeightForSet(item, setIdx) {
+    const sets = item?.sets || [];
+    const side = sets[setIdx]?.side;
+    for (let i = setIdx - 1; i >= 0; i--) {
+        const s = sets[i];
+        if (!s || !s.isWarmup) continue;
+        if (side && s.side && s.side !== side) continue;
+        const w = Number(s.weight);
+        if (w >= 20) return w;
+    }
+    return null;
 }
 
 
@@ -643,6 +660,132 @@ export function updateCoreChildWeight(exIdx, setIdx, childIdx, value) {
     }
 }
 
+function coreLoadsFromItem(item) {
+    const loads = {};
+    (item?.sets || []).forEach((set) => {
+        (set?.children || []).forEach((ch) => {
+            const n = ch?.name;
+            const w = Number(ch?.weight);
+            if (n && Number.isFinite(w) && w > 0) loads[n] = w;
+        });
+    });
+    return loads;
+}
+
+function applyCoreExercisesToItem(item, names, loads = {}) {
+    const ordered = orderCoreExercisesByEquipment(
+        (names || []).map((n) => resolveCoreExerciseName(n) || n).filter(Boolean)
+    );
+    item.coreExercises = ordered;
+    const loadFor = (n) => {
+        if (loads && loads[n] != null) return Number(loads[n]) || 0;
+        const map = store.userConfig?.coreExerciseLoads || {};
+        if (map[n] != null) return Number(map[n]) || 0;
+        return 0;
+    };
+    (item.sets || []).forEach((set) => {
+        const prevByName = new Map((set.children || []).map((ch) => [String(ch.name || ''), ch]));
+        set.children = ordered.map((n) => {
+            const prev = prevByName.get(n);
+            return {
+                name: n,
+                reps: formatCoreRepLabel(n),
+                weight: prev && Number(prev.weight) > 0 ? prev.weight : loadFor(n),
+                _uiExpanded: false
+            };
+        });
+    });
+    pinCoreExercisesInMonthPlan(ordered);
+}
+
+export function swapCoreCircuitExercise(exIdx, childIdx, newName) {
+    if (!newName) return;
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item?.isCoreBlock) return;
+    const resolved = resolveCoreExerciseName(newName);
+    if (!resolved) return;
+    const current = (item.coreExercises || []).slice();
+    if (!current.length) {
+        const first = item.sets?.[0]?.children || [];
+        first.forEach((ch) => current.push(ch.name));
+    }
+    if (childIdx < 0 || childIdx >= current.length) return;
+    const old = current[childIdx];
+    if (String(old) === resolved) return;
+    const allowed = coreSwapCandidates(old, current);
+    if (!allowed.includes(resolved)) return;
+    current[childIdx] = resolved;
+    applyCoreExercisesToItem(item, current);
+    if (window.currentModalExIdx != null) renderExerciseSets();
+    renderWorkoutLog();
+    if (window._workoutSessionConfirmed) {
+        try { saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() }); } catch (e) { /* ignore */ }
+    }
+}
+
+export function saveCoreCircuitFromLog(exIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item?.isCoreBlock) return;
+    const names = (item.coreExercises || []).length
+        ? item.coreExercises
+        : (item.sets?.[0]?.children || []).map((ch) => ch.name);
+    const title = prompt('Name this core circuit:');
+    if (!title || !String(title).trim()) return;
+    const row = saveNamedCoreCircuit({
+        name: String(title).trim(),
+        exercises: names,
+        loads: coreLoadsFromItem(item)
+    });
+    if (row) alert(`Saved “${row.name}”.`);
+}
+
+export function openLoadCoreCircuitPicker(exIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item?.isCoreBlock) return;
+    const saved = loadSavedCoreCircuits();
+    if (!saved.length) {
+        alert('No saved core circuits yet.');
+        return;
+    }
+    document.getElementById('core-circuit-load-picker')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'core-circuit-load-picker';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML = `<div style="width:min(420px,100%);background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:12px;padding:16px;">
+        <div style="font-size:13px;font-weight:800;margin-bottom:12px;">Load core circuit</div>
+        <div style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow:auto;">
+            ${saved.map((r) => `<button type="button" data-core-id="${String(r.id).replace(/"/g, '&quot;')}" class="btn-primary is-secondary" style="margin:0;text-align:left;">
+                ${String(r.name || '').replace(/</g, '&lt;')}<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">${(r.exercises || []).map((n) => String(n).replace(/</g, '&lt;')).join(' · ')}</div>
+            </button>`).join('')}
+        </div>
+        <button type="button" data-core-cancel="1" style="margin:12px 0 0;background:none;border:none;color:var(--text-stealth);font-size:12px;cursor:pointer;font-family:'Roboto Mono';">Cancel</button>
+    </div>`;
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('[data-core-cancel]')?.addEventListener('click', close);
+    overlay.querySelectorAll('[data-core-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const row = saved.find((r) => String(r.id) === btn.getAttribute('data-core-id'));
+            close();
+            if (row) loadCoreCircuitIntoLog(exIdx, row);
+        });
+    });
+    document.body.appendChild(overlay);
+}
+
+function loadCoreCircuitIntoLog(exIdx, row) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item?.isCoreBlock || !row) return;
+    const loads = row.loads && typeof row.loads === 'object' ? row.loads : {};
+    Object.entries(loads).forEach(([name, kg]) => persistCoreExerciseLoad(name, kg));
+    applyCoreExercisesToItem(item, row.exercises, loads);
+    if (window.currentModalExIdx != null) renderExerciseSets();
+    renderWorkoutLog();
+    if (window._workoutSessionConfirmed) {
+        try { saveWorkoutDraft({ elapsedMs: getWorkoutElapsedMs() }); } catch (e) { /* ignore */ }
+    }
+}
+
 function persistUserConfigMaps() {
     try { localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig)); } catch (e) { /* ignore */ }
 }
@@ -653,6 +796,21 @@ function persistWorkingWeight(exName, kg, choice = null) {
     if (!name || !Number.isFinite(w) || w < 0) return;
     setExerciseWorkingWeight(name, w, choice);
     persistUserConfigMaps();
+}
+
+function persistDisplayedWorkWeight(item, displayedKg, exName, choice = null, sideKey = null) {
+    const items = store.activeLog?.items || [];
+    const idx = items.indexOf(item);
+    const priors = priorLoggedLiftNames(items, idx);
+    const base = invertPriorExerciseLoadReduction(displayedKg, exName, priors, choice);
+    if (sideKey && item?.isSuperset) {
+        const sideMeta = (item.sides || []).find((s) => s.key === sideKey);
+        if (sideMeta) sideMeta.baseWorkWeightKg = base;
+    } else if (item) {
+        item.baseWorkWeightKg = base;
+    }
+    persistWorkingWeight(exName, base, choice);
+    return base;
 }
 
 function persistCoreExerciseLoad(exName, kg) {
@@ -667,7 +825,7 @@ function persistCoreExerciseLoad(exName, kg) {
 }
 
 function persistSessionLoads(items) {
-    (items || []).forEach((item) => {
+    (items || []).forEach((item, idx) => {
         if (!item) return;
         if (item.isCoreBlock) {
             (item.sets || []).forEach((set) => {
@@ -685,9 +843,17 @@ function persistSessionLoads(items) {
                     .filter(s => s && s.side === side.key && s.completed && !s.isWarmup && !s.isText && !s.isDropSet)
                     .pop();
                 const sideDropped = item._firstSetLoadDropped?.[side.key] && Number(side?.workWeightKg) >= 0;
-                const kg = sideDropped ? Number(side.workWeightKg) : (last ? Number(last.weight) : null);
-                if (name && kg != null && Number.isFinite(kg) && (sideDropped ? kg >= 0 : kg > 0)) {
-                    persistWorkingWeight(name, kg, equipmentChoiceFromItem(item) || side?.equipmentChoice);
+                const displayed = sideDropped ? Number(side.workWeightKg) : (last ? Number(last.weight) : null);
+                const base = Number.isFinite(Number(side?.baseWorkWeightKg))
+                    ? Number(side.baseWorkWeightKg)
+                    : (displayed != null ? invertPriorExerciseLoadReduction(
+                        displayed,
+                        name,
+                        priorLoggedLiftNames(items, idx),
+                        equipmentChoiceFromItem(item) || side?.equipmentChoice
+                    ) : null);
+                if (name && base != null && Number.isFinite(base) && (sideDropped ? base >= 0 : base > 0)) {
+                    persistWorkingWeight(name, base, equipmentChoiceFromItem(item) || side?.equipmentChoice);
                 }
             });
             return;
@@ -697,7 +863,15 @@ function persistSessionLoads(items) {
             .pop();
         const name = item.exercise?.name || item.name;
         const dropped = item._firstSetLoadDropped === true && Number(item.workWeightKg) >= 0;
-        const persistKg = dropped ? Number(item.workWeightKg) : (last ? Number(last.weight) : null);
+        const displayed = dropped ? Number(item.workWeightKg) : (last ? Number(last.weight) : null);
+        const persistKg = Number.isFinite(Number(item.baseWorkWeightKg))
+            ? Number(item.baseWorkWeightKg)
+            : (displayed != null ? invertPriorExerciseLoadReduction(
+                displayed,
+                name,
+                priorLoggedLiftNames(items, idx),
+                equipmentChoiceFromItem(item)
+            ) : null);
         if (name && persistKg != null && Number.isFinite(persistKg) && (dropped ? persistKg >= 0 : persistKg > 0)) {
             persistWorkingWeight(name, persistKg, equipmentChoiceFromItem(item));
         }
@@ -817,7 +991,7 @@ function maybeDropLoadAfterShortFirstSet(exIdx, setIdx) {
         item._firstSetLoadDropped = true;
         item.workWeightKg = nextW;
     }
-    persistWorkingWeight(exName, nextW, choice);
+    persistDisplayedWorkWeight(item, nextW, exName, choice, side);
     return dropped;
 }
 
@@ -2425,8 +2599,12 @@ export function renderExerciseSets() {
     // Strength core circuit: Set 1 / Set 2 → expand to 5 exercises with form videos
     if (item.isCoreBlock) {
         let html = exerciseTimerBannerHtml(item, exIdx);
-        html += `<div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:16px; line-height:1.45;">
+        html += `<div style="font-size:11px; color:var(--text-muted); font-family:'Roboto Mono'; margin-bottom:12px; line-height:1.45;">
             5 exercises with advised reps. No rest between exercises. 1 minute rest between sets.
+        </div>
+        <div style="display:flex; gap:8px; margin-bottom:16px;">
+            <button type="button" onclick="saveCoreCircuitFromLog(${exIdx})" style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid var(--border-subtle); background:var(--bg-surface-elevated); color:var(--gold-accent); font-size:10px; font-family:'Roboto Mono'; font-weight:800; cursor:pointer;">SAVE CORE</button>
+            <button type="button" onclick="openLoadCoreCircuitPicker(${exIdx})" style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid var(--border-subtle); background:var(--bg-surface-elevated); color:var(--gold-accent); font-size:10px; font-family:'Roboto Mono'; font-weight:800; cursor:pointer;">LOAD CORE</button>
         </div>`;
         item.sets.forEach((set, setIdx) => {
             const kids = Array.isArray(set.children) ? set.children : [];
@@ -2455,6 +2633,7 @@ export function renderExerciseSets() {
                     const childOpen = !!child._uiExpanded;
                     const canLoad = allowsWeightInput(child.name);
                     const wVal = Number(child.weight) > 0 ? child.weight : '';
+                    const swapOpts = coreSwapCandidates(child.name, item.coreExercises || []);
                     html += `<div style="border:1px solid var(--border-subtle); border-radius:8px; padding:10px; background:transparent;">
                         <button type="button" style="width:100%; text-align:left; cursor:pointer; background:transparent; border:none; padding:0; color:inherit;" onclick="togglePrepChildExpand(${exIdx}, ${setIdx}, ${cIdx})">
                             <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
@@ -2465,6 +2644,15 @@ export function renderExerciseSets() {
                                 </span>
                             </div>
                         </button>`;
+                    if (swapOpts.length) {
+                        html += `<div style="margin-top:8px;" onclick="event.stopPropagation()">
+                            <select onchange="swapCoreCircuitExercise(${exIdx}, ${cIdx}, this.value)"
+                                style="width:100%; padding:6px 8px; border-radius:6px; border:1px solid var(--border-subtle); background:var(--bg-surface-elevated); color:var(--text-main); font-family:'Roboto Mono'; font-size:11px;">
+                                <option value="">Swap: ${String(child.name || '').replace(/</g, '&lt;')}</option>
+                                ${swapOpts.map((n) => `<option value="${String(n).replace(/"/g, '&quot;')}">${String(n).replace(/</g, '&lt;')}</option>`).join('')}
+                            </select>
+                        </div>`;
+                    }
                     if (canLoad) {
                         html += `<div style="display:flex; align-items:center; gap:8px; margin-top:8px;" onclick="event.stopPropagation()">
                             <label style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; margin:0;">Load (optional)</label>
@@ -2911,7 +3099,7 @@ export function renderExerciseSets() {
             else if (set.weight < (set.prevWeight || 0) && (set.prevWeight || 0) > 0) borderClass = 'prog-down';
         }
 
-        let plateMath = (!isCardio && showWeight && isBarbell && set.weight > 20) ? `<div style="width:100%; text-align:center; font-size:10px; color:var(--text-silver); margin-top:6px; font-family:'Roboto Mono', monospace; font-weight: bold; letter-spacing: 0.5px;">└ LOAD: [ ${calculatePlates(set.weight)} ] PER SIDE</div>` : '';
+        let plateMath = (!isCardio && showWeight && isBarbell && set.weight > 20) ? `<div style="width:100%; text-align:center; font-size:10px; color:var(--text-silver); margin-top:6px; font-family:'Roboto Mono', monospace; font-weight: bold; letter-spacing: 0.5px;">└ LOAD: [ ${calculatePlates(set.weight, preferPlateWeightForSet(item, setIdx))} ] PER SIDE</div>` : '';
 
         const weightCell = isCardio
             ? `<input type="number" step="0.1" class="set-input ${borderClass}" value="${set.distance_km||0}" onchange="updateWorkoutSet(${exIdx}, ${setIdx}, 'distance_km', this.value)">`
@@ -3388,7 +3576,13 @@ export function updateWorkoutSet(exIdx, setIdx, field, val) {
         const persistName = item.isSuperset
             ? ((item.sides || []).find(s => s.key === setObj.side)?.exercise?.name || item.exercise?.name || '')
             : (item.exercise?.name || item.name || '');
-        persistWorkingWeight(persistName, num, equipmentChoiceFromItem(item));
+        if (item.isSuperset && setObj.side) {
+            const sideMeta = (item.sides || []).find(s => s.key === setObj.side);
+            if (sideMeta) sideMeta.workWeightKg = num;
+        } else {
+            item.workWeightKg = num;
+        }
+        persistDisplayedWorkWeight(item, num, persistName, equipmentChoiceFromItem(item), setObj.side || null);
     }
     if (field === 'reps' && setObj && !setObj.isWarmup && !setObj.isText) {
         const exName = item.isSuperset
@@ -3533,7 +3727,7 @@ function maybeAdjustFollowingSetsFromRir(exIdx, setIdx) {
     });
     if (changed && applyWeight != null) {
         item.workWeightKg = applyWeight;
-        persistWorkingWeight(exName, applyWeight, choice);
+        persistDisplayedWorkWeight(item, applyWeight, exName, choice, setObj.side || null);
     }
     return changed;
 }

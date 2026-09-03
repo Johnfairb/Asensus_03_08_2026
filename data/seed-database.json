@@ -1393,7 +1393,7 @@
                           "muscle_group":  "core"
                       },
                       {
-                          "name":  "Knees on Bench Crunch",
+                          "name":  "Knees Bent Crunch",
                           "domain":  "lifting",
                           "muscle_group":  "core"
                       },
@@ -1444,16 +1444,6 @@
                       },
                       {
                           "name":  "Wood-chop",
-                          "domain":  "lifting",
-                          "muscle_group":  "core"
-                      },
-                      {
-                          "name":  "Knee Raise Machine",
-                          "domain":  "lifting",
-                          "muscle_group":  "core"
-                      },
-                      {
-                          "name":  "Knee Raise Machine Leg Raise",
                           "domain":  "lifting",
                           "muscle_group":  "core"
                       },

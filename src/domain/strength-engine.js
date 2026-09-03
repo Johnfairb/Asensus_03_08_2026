@@ -5,8 +5,8 @@ import { AUXILIARY_DICTIONARY, BAND_AUXILIARY_DICTIONARY, getSportData } from '.
 import { HYPERTROPHY_POOLS, isHypertrophyPhase } from './hypertrophy-engine.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
 import { buildStrengthMetaMap, EXERCISE_CATALOG, getExerciseMeta, isUnilateralCompound, resolveCatalogName } from './exercise-catalog.js';
-import { pickCoreExercisesForLevel } from './core-programming.js';
-import { decreaseLoadOneStep, increaseLoadOneStep, skipsWeightProgression } from './load-increments.js';
+import { orderCoreExercisesByEquipment, pickCoreExercisesForLevel, resolveCoreExerciseName } from './core-programming.js';
+import { decreaseLoadOneStep, increaseLoadOneStep, roundUpLoad, skipsWeightProgression } from './load-increments.js';
 import { loadExercises } from '../ui/fuel.js';
 import { getBillingMonthKey } from './billing-month.js';
 import { weeklyPowerGymSlots } from './power-engine.js';
@@ -253,6 +253,35 @@ export function refreshCoreExercisesInMonthPlan(sportData) {
     return plan;
 }
 
+/** Pin a 5-exercise core list on the month plan and unconfirmed cycle snapshots. */
+export function pinCoreExercisesInMonthPlan(names, sportData) {
+    const ordered = orderCoreExercisesByEquipment(
+        (Array.isArray(names) ? names : [])
+            .map((n) => resolveCoreExerciseName(n) || String(n || '').trim())
+            .filter(Boolean)
+    );
+    if (!ordered.length) return loadStrengthMonthPlan(sportData);
+    const plan = loadStrengthMonthPlan(sportData);
+    plan.coreExercises = ordered.slice(0, 5);
+    plan.coreStrength = store.userConfig?.coreStrength || plan.coreStrength || null;
+    saveStrengthMonthPlan(plan);
+    try {
+        const raw = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}') || {};
+        let changed = false;
+        for (const key of Object.keys(raw)) {
+            const snap = raw[key];
+            if (!snap || snap.family !== 'strength') continue;
+            if (Array.isArray(snap.coreExercises) || snap.coreSession) {
+                snap.coreExercises = plan.coreExercises.slice();
+                snap.strengthPlan = plan;
+                changed = true;
+            }
+        }
+        if (changed) localStorage.setItem('ascensus_cycle_session_plans_v1', JSON.stringify(raw));
+    } catch (e) { /* ignore */ }
+    return plan;
+}
+
 export function getStrengthTimeTier(maxTime) {
     const t = parseInt(maxTime, 10) || 90;
     if (t <= 60) return 60;
@@ -403,6 +432,15 @@ function stabilizeMonthPlan(plan) {
     if (!plan.compoundPicks || typeof plan.compoundPicks !== 'object') {
         plan.compoundPicks = {};
         changed = true;
+    }
+    if (Array.isArray(plan.coreExercises) && plan.coreExercises.length) {
+        const cleaned = orderCoreExercisesByEquipment(plan.coreExercises);
+        const same = cleaned.length === plan.coreExercises.length
+            && cleaned.every((n, i) => n === plan.coreExercises[i]);
+        if (!same && cleaned.length) {
+            plan.coreExercises = cleaned;
+            changed = true;
+        }
     }
     const isos = Array.isArray(plan.isolations) ? plan.isolations : [];
     const missingSession = isos.filter((iso) => iso && iso.session !== 'A' && iso.session !== 'B');
@@ -734,9 +772,11 @@ export function buildStrengthSessionRoutine(focus, sportData, setBudget) {
 
     const coreOnThis = includeCore && plan.coreSession === session && coreSets > 0;
     if (coreOnThis) {
-        const coreExercises = (plan.coreExercises && plan.coreExercises.length)
-            ? plan.coreExercises.slice(0, 5)
-            : getCoreCatalogNames().slice(0, 5);
+        const coreExercises = orderCoreExercisesByEquipment(
+            (plan.coreExercises && plan.coreExercises.length)
+                ? plan.coreExercises.slice(0, 5)
+                : getCoreCatalogNames().slice(0, 5)
+        );
         items.push({
             name: 'Core Circuit',
             slotLabel: 'Core',
@@ -840,6 +880,21 @@ function applyProgressedLoad(next, equipmentRound) {
     return typeof equipmentRound === 'function' ? equipmentRound(next) : next;
 }
 
+function invertDisplayedToSavedBase(nextDisplayed, lastDisplayed, savedBase, exName, choice) {
+    const next = Number(nextDisplayed) || 0;
+    const logged = Number(lastDisplayed);
+    const base = Number(savedBase);
+    const meta = getExerciseMeta(exName);
+    const bw = (meta?.bodyweight && Number(store.userConfig?.weight) > 0) ? Number(store.userConfig.weight) : 0;
+    let factor = 1;
+    if (Number.isFinite(logged) && logged > 0 && Number.isFinite(base) && base > 0) {
+        factor = (logged + bw) / (base + bw);
+        if (!(factor > 0) || factor > 1) factor = 1;
+    }
+    if (!(next > 0) || !(factor < 1)) return next > 0 ? roundUpLoad(next, exName, choice) : Math.max(0, next);
+    return roundUpLoad(Math.max(0, ((next + bw) / factor) - bw), exName, choice);
+}
+
 /**
  * Strength load progression from the last session:
  * - ≥2 work sets hit target reps → +1 increment
@@ -858,10 +913,15 @@ export function progressStrengthWeight(exName, hist, currentWeight, opts = {}) {
     const daySets = lastSessionWorkSets(hist, exName);
     if (!daySets.length) return { weight: tWeight, note: '' };
 
-    const atLoad = daySets.filter((l) => Math.abs((Number(l.weight_kg) || 0) - tWeight) < 0.051);
+    const lastDisplayed = Number(daySets[daySets.length - 1]?.weight_kg) || 0;
+    const atLoad = daySets.filter((l) => {
+        const w = Number(l.weight_kg) || 0;
+        return Math.abs(w - tWeight) < 0.051 || (lastDisplayed > 0 && Math.abs(w - lastDisplayed) < 0.051);
+    });
     const sets = atLoad.length ? atLoad : daySets;
     const targetReps = Math.max(1, Number(opts.targetReps) || 5);
     const hitCount = sets.filter((l) => (Number(l.reps) || 0) >= targetReps).length;
+    const fromDisplayed = lastDisplayed > 0 ? lastDisplayed : tWeight;
 
     const lightWeighted = tWeight < 10 && !isBodyweightExercise(exName);
     let direction = 0;
@@ -886,11 +946,13 @@ export function progressStrengthWeight(exName, hist, currentWeight, opts = {}) {
     }
 
     if (direction > 0) {
-        const next = increaseLoadOneStep(tWeight, exName, choice);
+        const nextDisplayed = increaseLoadOneStep(fromDisplayed, exName, choice);
+        const next = invertDisplayedToSavedBase(nextDisplayed, fromDisplayed, tWeight, exName, choice);
         return { weight: applyProgressedLoad(next, opts.equipmentRound), note };
     }
     if (direction < 0) {
-        const next = decreaseLoadOneStep(tWeight, exName, choice);
+        const nextDisplayed = decreaseLoadOneStep(fromDisplayed, exName, choice);
+        const next = invertDisplayedToSavedBase(nextDisplayed, fromDisplayed, tWeight, exName, choice);
         return { weight: applyProgressedLoad(next, opts.equipmentRound), note };
     }
     return { weight: tWeight, note: '' };
@@ -1147,9 +1209,13 @@ export async function migrateStrengthExerciseLabels() {
             'lateral raises': 'Lateral Raise',
             'pec flyes': 'Flye',
             'db pullovers': 'Pullover',
-            'roman chair': 'Knee Raise Machine',
-            'roman chair knee raise': 'Knee Raise Machine',
-            'roman chair leg raise': 'Knee Raise Machine Leg Raise'
+            'roman chair': 'Hanging Knee Raise',
+            'roman chair knee raise': 'Hanging Knee Raise',
+            'roman chair leg raise': 'Hanging Leg Raise',
+            'knee raise machine': 'Hanging Knee Raise',
+            'knee raise machine leg raise': 'Hanging Leg Raise',
+            'knees bench crunch': 'Knees Bent Crunch',
+            'knees on bench crunch': 'Knees Bent Crunch'
         };
 
         for (const ex of (existing || [])) {

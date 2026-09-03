@@ -290,6 +290,40 @@ export function applyPriorExerciseLoadReduction(addedKg, exName, priorNames, cho
     return scaleLoadWithBodyweight(addedKg, exName, factor, choice);
 }
 
+/** Inverse of scaleLoadWithBodyweight. */
+export function invertLoadFactor(displayedKg, exName, factor, choice = null) {
+    const shown = Number(displayedKg) || 0;
+    const f = Number(factor);
+    if (!(shown > 0)) return Math.max(0, shown);
+    if (!(f > 0) || !(f < 1)) return roundUpLoad(shown, exName, choice);
+    const bw = isBodyweightLoadExercise(exName) ? latestAthleteWeightKg() : 0;
+    const added = ((shown + bw) / f) - bw;
+    return roundUpLoad(Math.max(0, added), exName, choice);
+}
+
+/** Convert a session-reduced (on-bar) load back to the undiminished saved base. */
+export function invertPriorExerciseLoadReduction(displayedKg, exName, priorNames, choice = null) {
+    const factor = overlapLoadFactor(exName, Array.isArray(priorNames) ? priorNames : []);
+    return invertLoadFactor(displayedKg, exName, factor, choice);
+}
+
+/**
+ * Recover base from a target displayed load using last session's logged
+ * displayed weight vs the saved (undiminished) base.
+ */
+export function invertDisplayedToBaseKg(nextDisplayedKg, lastDisplayedKg, savedBaseKg, exName, choice = null) {
+    const next = Number(nextDisplayedKg) || 0;
+    const logged = Number(lastDisplayedKg);
+    const base = Number(savedBaseKg);
+    const bw = isBodyweightLoadExercise(exName) ? latestAthleteWeightKg() : 0;
+    let factor = 1;
+    if (Number.isFinite(logged) && logged > 0 && Number.isFinite(base) && base > 0) {
+        factor = (logged + bw) / (base + bw);
+        if (!(factor > 0) || factor > 1) factor = 1;
+    }
+    return invertLoadFactor(next, exName, factor, choice);
+}
+
 function isPositionLoadLiftItem(item) {
     if (!item || item.isWarmupGroup || item.isStretchGroup || item.isCustomStretch) return false;
     if (item.isSteadyCardio || item.isCoreBlock || item.isLactateHit || item.isSportSessionBlock) return false;
