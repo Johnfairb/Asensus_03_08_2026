@@ -136,6 +136,48 @@ export function captureSyncedLocalState() {
     };
 }
 
+function isSparseSyncedValue(val) {
+    if (val == null) return true;
+    if (typeof val === 'string' && !String(val).trim()) return true;
+    if (Array.isArray(val) && val.length === 0) return true;
+    if (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0) return true;
+    return false;
+}
+
+/** Keep richer cloud fields when this origin's local capture is empty/null. */
+function mergeSyncedLocalForPersist(localCapture, previous) {
+    const prev = previous && typeof previous === 'object' ? previous : {};
+    const loc = localCapture && typeof localCapture === 'object' ? localCapture : {};
+    const keys = new Set([...Object.keys(prev), ...Object.keys(loc)]);
+    const out = {};
+    keys.forEach((key) => {
+        const l = loc[key];
+        const r = prev[key];
+        if (isSparseSyncedValue(l) && !isSparseSyncedValue(r)) {
+            out[key] = r;
+            return;
+        }
+        if (key === 'loggedSessions') {
+            out[key] = mergeLoggedSessions(l || {}, r || {});
+            return;
+        }
+        if (key === 'completedPlanSlots') {
+            out[key] = mergeCompletedPlanSlots(l || {}, r || {});
+            return;
+        }
+        if (key === 'hypertrophyFatigue') {
+            out[key] = mergeHypertrophyFatigue(l || {}, r || {});
+            return;
+        }
+        if (l && r && typeof l === 'object' && typeof r === 'object' && !Array.isArray(l) && !Array.isArray(r)) {
+            out[key] = { ...r, ...l };
+            return;
+        }
+        out[key] = isSparseSyncedValue(l) ? r : l;
+    });
+    return out;
+}
+
 export function restoreSyncedLocalState(sync) {
     if (!sync || typeof sync !== 'object') return;
     writeSyncedJson('ascensus_fixed_schedules', sync.fixedSchedules);
@@ -292,7 +334,8 @@ export function applyUserConfigToDom() {
 
 export async function persistUserConfigToCloud(statusElId) {
     try { await refreshCloudPlanCredits(); } catch (e) { /* still persist local */ }
-    store.userConfig.syncedLocal = captureSyncedLocalState();
+    const captured = captureSyncedLocalState();
+    store.userConfig.syncedLocal = mergeSyncedLocalForPersist(captured, store.userConfig.syncedLocal);
     localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig));
     if (!store.currentUser || !store.supabaseClient) return;
     try {

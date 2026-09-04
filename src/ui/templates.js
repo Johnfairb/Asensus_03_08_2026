@@ -67,6 +67,7 @@ export function updateSaveTemplateButtonLabel() {
         if (loadRecipeBtn) loadRecipeBtn.classList.toggle('hidden', !isMeal);
         if (loadWorkoutBtn) loadWorkoutBtn.classList.add('hidden');
     }
+    try { window.syncWorkoutBuilderButton?.(); } catch (e) { /* ignore */ }
 }
 
 export function switchFoodsSubTab(panel, btn) {
@@ -421,6 +422,7 @@ export function updateExecutionAuxBlocks(type) {
     const exSel = document.getElementById('select-exercise');
     if (foodSel) foodSel.style.display = 'none';
     if (exSel) exSel.style.display = 'none';
+    try { window.syncWorkoutBuilderButton?.(); } catch (e) { /* ignore */ }
 }
 
 export function loadGhostTemplate() {
@@ -476,7 +478,7 @@ export function loadGhostTemplate() {
             } else {
                 content.innerHTML = `
                 <div style="text-align:center;">
-                    <p style="font-size:12px; color:var(--text-muted); font-weight:600; line-height:1.5; margin:0;">Manual workout — no GPS template. Use <strong style="color:var(--gold-accent);">Load Workout</strong> below, or tap <strong style="color:var(--gold-accent);">+</strong> to add exercises, then Complete Log.</p>
+                    <p style="font-size:12px; color:var(--text-muted); font-weight:600; line-height:1.5; margin:0;">Manual workout — no GPS template. Use <strong style="color:var(--gold-accent);">Workout Builder</strong> or <strong style="color:var(--gold-accent);">Load Workout</strong> below, or tap <strong style="color:var(--gold-accent);">+</strong> to add exercises, then Complete Log.</p>
                 </div>`;
                 container.classList.remove('hidden');
             }
@@ -665,6 +667,7 @@ export function setConfirmRouteButtons(confirmed) {
         if (loadRecipeBtn) loadRecipeBtn.classList.toggle('hidden', !isMeal);
         if (loadWorkoutBtn) loadWorkoutBtn.classList.toggle('hidden', !isWorkout);
     }
+    try { window.syncWorkoutBuilderButton?.(); } catch (e) { /* ignore */ }
 }
 
 export function acceptGhostTemplate() {

@@ -46,6 +46,7 @@ import {
 
 import { renderActiveLog } from '../ui/templates.js';
 import { syncExerciseTimer } from '../ui/workout-timer.js';
+import { saveWorkoutDraft } from './workout-draft.js';
 import { ensureCycleStarted, ensureCyclePlansForProgramme, confirmSessionExercises } from './workout-cycle.js';
 import { getEquivalentExercises } from './exercise-slots.js';
 import { latestPhaseWeight, lastCompletedWorkingWeight, latestWorkingLog, strengthLoadFromHypertrophy, hypertrophyLoadFromStrength, resolveLogPeriodization, exerciseLogNamesMatch, applyPriorExerciseLoadReduction, priorLoggedLiftNames } from './periodization-logs.js';
@@ -558,9 +559,81 @@ export function addSetToExercise(exIdx) {
         restTime: isPower ? 0 : (lastWork.restTime != null ? lastWork.restTime : 90),
         prevWeight: lastWork.prevWeight || lastWork.weight || 0
     });
-    try { syncExerciseTimer(exItem, { editing: !!(window.editingSessionId || window._editingPreservedDuration) }); } catch (e) { /* ignore */ }
+    afterSetCountChange(exItem);
+}
+
+function afterSetCountChange(item) {
+    try { syncExerciseTimer(item, { editing: !!(window.editingSessionId || window._editingPreservedDuration) }); } catch (e) { /* ignore */ }
+    try { if (window._workoutSessionConfirmed) saveWorkoutDraft(); } catch (e) { /* ignore */ }
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
     else renderActiveLog();
+}
+
+function isFixedProtocolItem(item) {
+    if (!item) return true;
+    if (item.isLactateHit || (item.sets || []).some(s => s.isLactateHit)) return true;
+    const domain = (item.exercise?.domain || '').toLowerCase();
+    const name = item.exercise?.name || '';
+    if (domain === 'cardio' && !/sprint|lactate|interval|30s\s*on/i.test(name)) return true;
+    if (/static\s*stretch/i.test(name)) return true;
+    if (item.isWarmupGroup || item.isStretchGroup || item.isCoreBlock) return true;
+    return false;
+}
+
+function lastRemovableSetIndex(item) {
+    const sets = item?.sets || [];
+    for (let i = sets.length - 1; i >= 0; i--) {
+        const s = sets[i];
+        if (!s || s.isWarmup || s.isText) continue;
+        return i;
+    }
+    return -1;
+}
+
+function workSetCount(item) {
+    return (item?.sets || []).filter(s => s && !s.isWarmup && !s.isText && !s.isDropSet).length;
+}
+
+function supersetWorkRoundCount(item) {
+    const aWork = (item?.sets || []).filter(s => s && s.side === 'A' && !s.isWarmup && !s.isDropSet && !s.isText);
+    const bWork = (item?.sets || []).filter(s => s && s.side === 'B' && !s.isWarmup && !s.isDropSet && !s.isText);
+    return Math.max(aWork.length, bWork.length);
+}
+
+export function canRemoveSetFromExercise(exIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item || isFixedProtocolItem(item)) return false;
+    if (item.isSuperset) {
+        const hasDrop = (item.sets || []).some(s => s && s.isDropSet && !s.isWarmup);
+        return hasDrop || supersetWorkRoundCount(item) > 1;
+    }
+    const idx = lastRemovableSetIndex(item);
+    if (idx < 0) return false;
+    if (item.sets[idx]?.isDropSet) return true;
+    return workSetCount(item) > 1;
+}
+
+/** Remove the last work set (or last drop set if that is last). Keeps at least one work set. */
+export function removeSetFromExercise(exIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item) return;
+    if (item.isSuperset) {
+        removeSupersetRound(exIdx);
+        return;
+    }
+    if (!canRemoveSetFromExercise(exIdx)) return;
+    const idx = lastRemovableSetIndex(item);
+    if (idx < 0) return;
+    const removed = item.sets[idx];
+    if (removed?.locked) {
+        removed.locked = false;
+        removed.lockTimeLeft = 0;
+        removed.lockEndsAt = null;
+    }
+    item.sets.splice(idx, 1);
+    const remainingWork = workSetCount(item);
+    if (typeof item.plannedSets === 'number') item.plannedSets = Math.max(1, remainingWork);
+    afterSetCountChange(item);
 }
 
 /** Drop set at 80% of previous working set weight (rounded up). */
@@ -932,6 +1005,53 @@ export function addSupersetRound(exIdx) {
     try { syncExerciseTimer(item, { editing: !!(window.editingSessionId || window._editingPreservedDuration) }); } catch (e) { /* ignore */ }
     if (window.currentModalExIdx !== null && window.currentModalExIdx !== undefined) window.renderExerciseSets();
     else renderActiveLog();
+}
+
+/** Remove last drop set, or the last A+B work round. Keeps at least one work round. */
+export function removeSupersetRound(exIdx) {
+    const item = store.activeLog?.items?.[exIdx];
+    if (!item?.isSuperset) return;
+    const sets = item.sets || [];
+    const lastDropIdx = (() => {
+        for (let i = sets.length - 1; i >= 0; i--) {
+            if (sets[i] && sets[i].isDropSet && !sets[i].isWarmup) return i;
+        }
+        return -1;
+    })();
+    if (lastDropIdx >= 0) {
+        const drop = sets[lastDropIdx];
+        if (drop?.locked) {
+            drop.locked = false;
+            drop.lockTimeLeft = 0;
+            drop.lockEndsAt = null;
+        }
+        item.sets.splice(lastDropIdx, 1);
+        afterSetCountChange(item);
+        return;
+    }
+    const aWorkIdx = [];
+    const bWorkIdx = [];
+    sets.forEach((s, i) => {
+        if (!s || s.isWarmup || s.isDropSet || s.isText) return;
+        if (s.side === 'A') aWorkIdx.push(i);
+        if (s.side === 'B') bWorkIdx.push(i);
+    });
+    if (aWorkIdx.length <= 1 && bWorkIdx.length <= 1) return;
+    const removeIdx = new Set();
+    if (aWorkIdx.length > 1) removeIdx.add(aWorkIdx[aWorkIdx.length - 1]);
+    if (bWorkIdx.length > 1) removeIdx.add(bWorkIdx[bWorkIdx.length - 1]);
+    if (!removeIdx.size) return;
+    removeIdx.forEach((i) => {
+        const s = sets[i];
+        if (s?.locked) {
+            s.locked = false;
+            s.lockTimeLeft = 0;
+            s.lockEndsAt = null;
+        }
+    });
+    item.sets = sets.filter((_, i) => !removeIdx.has(i));
+    item.plannedSets = Math.max(1, item.sets.filter(s => s && s.side === 'A' && !s.isWarmup && !s.isDropSet && !s.isText).length);
+    afterSetCountChange(item);
 }
 
 /** Drop set on one side of a superset (80% of that side's last work weight). */

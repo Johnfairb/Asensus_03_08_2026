@@ -161,8 +161,27 @@ export function updateLiveDashboard(todayFoods) {
 }
 
 export async function loadHistory() {
-    const { data: workouts } = await store.supabaseClient.from('workout_logs').select('*');
-    const { data: foods } = await store.supabaseClient.from('food_logs').select('*');
+    if (!store.supabaseClient) {
+        try { renderAdherenceCalendar(); } catch (e) { /* ignore */ }
+        return;
+    }
+    let workoutRes;
+    let foodRes;
+    try {
+        workoutRes = await store.supabaseClient.from('workout_logs').select('*');
+        foodRes = await store.supabaseClient.from('food_logs').select('*');
+    } catch (e) {
+        console.warn('loadHistory failed; keeping previous calendar history', e);
+        try { renderAdherenceCalendar(); } catch (err) { /* ignore */ }
+        return;
+    }
+    if (workoutRes?.error || foodRes?.error) {
+        console.warn('loadHistory failed; keeping previous calendar history', workoutRes?.error || foodRes?.error);
+        try { renderAdherenceCalendar(); } catch (e) { /* ignore */ }
+        return;
+    }
+    const workouts = workoutRes?.data;
+    const foods = foodRes?.data;
     
     store.fatigueLockouts = {}; 
     const fortyEightHoursAgo = new Date(Date.now() - (48 * 60 * 60 * 1000));

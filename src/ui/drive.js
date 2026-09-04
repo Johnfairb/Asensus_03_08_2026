@@ -14,7 +14,7 @@ const HIT_TYPE_LABELS_RE = new RegExp(
     'i'
 );
 import { saveSettings } from '../domain/thermodynamics.js';
-import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, applySwappedLiftToItem, canSupersetPair, createSupersetFromIndices, mergeLocalWorkoutHistory, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
+import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, applySwappedLiftToItem, canRemoveSetFromExercise, canSupersetPair, createSupersetFromIndices, mergeLocalWorkoutHistory, repairSupersetWarmups, supersetRestAfterB, supersetTitleFromItem, unmergeSuperset } from '../domain/workout-generator.js';
 import { populateSportSelects } from '../domain/sports-matrix.js';
 import { applyPowerExerciseToItem } from '../domain/power-engine.js';
 import { applyHypertrophyFatigueFromSession, buildHypertrophyWarmupSets, defaultWorkSetRir, hypertrophyRestSeconds, isHypertrophyPhase, sessionAppliesMuscleLockout, sessionUsesHypertrophyProgramming } from '../domain/hypertrophy-engine.js';
@@ -434,7 +434,7 @@ export function renderWorkoutLog() {
     const itemCount = (store.activeLog.items || []).length;
     if (filter === 'todo' && todoCount === 0) {
         if (itemCount === 0) {
-            html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px; line-height:1.5;">Empty workout — tap <strong style="color:var(--gold-accent);">+ Add exercise</strong> to log lifts, or Load Workout.</div>`;
+            html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px; line-height:1.5;">Empty workout — ${window.manualWorkoutMode && !isCustomWorkoutKind(window.manualSessionKind) && !isLactateEvent(window.manualSessionKind) && !isSteadyCardio(window.manualSessionKind) && !isPowerEvent(window.manualSessionKind) ? 'use <strong style="color:var(--gold-accent);">Workout Builder</strong>, ' : ''}tap <strong style="color:var(--gold-accent);">+ Add exercise</strong> to log lifts, or Load Workout.</div>`;
         } else {
             html += `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:18px 8px;">All exercises logged. Switch to Logged to review.</div>`;
         }
@@ -3197,6 +3197,7 @@ export function renderExerciseSets() {
             ${dropA ? `<button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'A')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · A</button>` : ''}
             ${dropB ? `<button type="button" onclick="addDropSetToSupersetSide(${exIdx}, 'B')" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET · B</button>` : ''}
             <button type="button" onclick="addSupersetRound(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD ROUND (A+B)</button>
+            ${canRemoveSetFromExercise(exIdx) ? `<button type="button" onclick="removeSupersetRound(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">− REMOVE ROUND</button>` : ''}
             <button type="button" onclick="unmergeSuperset(${exIdx})" style="width:100%; margin-top:8px; background:transparent; color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-family:'Roboto Mono';">Unmerge into two exercises</button>
         </div>`;
     } else {
@@ -3204,6 +3205,7 @@ export function renderExerciseSets() {
             ${hypFixed ? `<div style="font-size:10px; color:var(--text-muted); font-family:'Roboto Mono'; text-align:center;">Hypertrophy · 3 working sets prescribed</div>` : ''}
             ${isPowerLogItem(item) ? '' : `<button type="button" onclick="addDropSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:bold;">+ DROP SET (80%)</button>`}
             <button type="button" onclick="addSetToExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--gold-accent); border:1px dashed var(--border-highlight); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">+ ADD SET</button>
+            ${canRemoveSetFromExercise(exIdx) ? `<button type="button" onclick="removeSetFromExercise(${exIdx})" style="width:100%; background:var(--bg-surface-elevated); color:var(--text-silver); border:1px dashed var(--border-subtle); padding:12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:bold;">− REMOVE SET</button>` : ''}
         </div>`;
     }
 

@@ -35,8 +35,20 @@ import { exportData, injectPitchData } from './demos.js';
 import { drawExerciseChart, drawMacroChart, drawUnifiedChart, executeSundayForecast, filterExerciseChartList, onProgressRangeChange, selectExerciseForChart } from './charts.js';
 import { completeOnboarding, nextObStep, selectAuthTheme, selectObCard, triggerBootSequence } from './auth-onboarding.js';
 import { handleAuth, handleSignOut, quickLogin } from '../services/auth.js';
-import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, removeGhostExercise, swapGhostExercise, unmergeSuperset } from '../domain/workout-generator.js';
+import { addDropSetToExercise, addDropSetToSupersetSide, addExerciseToActiveLog, addSetToExercise, addSupersetRound, addSupersetWithNext, removeGhostExercise, removeSetFromExercise, removeSupersetRound, swapGhostExercise, unmergeSuperset } from '../domain/workout-generator.js';
 import { openAddExercisesModal, closeAddExercisesModal, confirmAddExercisesModal } from './add-exercises-modal.js';
+import {
+  closeWorkoutBuilder,
+  openWorkoutBuilder,
+  syncWorkoutBuilderButton,
+  workoutBuilderBack,
+  workoutBuilderChooseCustom,
+  workoutBuilderContinue,
+  workoutBuilderFinish,
+  workoutBuilderOnRepsInput,
+  workoutBuilderSelectType,
+  workoutBuilderSkipIsolations
+} from './workout-builder.js';
 import { calculateAchievability, handleFocusChange, handleSportChange, onSexOrSportUiChange, onGymDaysOrPhaseUiChange, onHybridSplitChange, onSeasonPhaseChange, roundToEquipment, saveSettings, toggleRestStop } from '../domain/thermodynamics.js';
 import { addFixedSchedule, closeFixedScheduleModal, closeSleepModal, closeVideoModal, commitMatchSession, commitPracticeSession, deleteFixedSchedule, deleteSportDiaryFromLog, editSportDiaryFromLog, exchangePlanSessions, generateFutureTimeline, getTeachingPoints, getVideoDirectives, openFixedScheduleModal, openFuturePlan, openMatchLogModal, openPlanSessionSwapPicker, openPracticeLogModal, openSleepModal, openVideoModal, selectFormVideoClip, selectTeachingPointVideo, submitSleepLog, syncSleepHoursWarning, switchDayPlanSubTab, toggleSchedTimeVisibility } from '../domain/route-planner.js';
 import { openFlexibleRecipe } from '../domain/recipes.js';
@@ -92,12 +104,24 @@ export function bindUi() {
   window.openAddExercisesModal = openAddExercisesModal;
   window.closeAddExercisesModal = closeAddExercisesModal;
   window.confirmAddExercisesModal = confirmAddExercisesModal;
+  window.openWorkoutBuilder = openWorkoutBuilder;
+  window.closeWorkoutBuilder = closeWorkoutBuilder;
+  window.syncWorkoutBuilderButton = syncWorkoutBuilderButton;
+  window.workoutBuilderSelectType = workoutBuilderSelectType;
+  window.workoutBuilderOnRepsInput = workoutBuilderOnRepsInput;
+  window.workoutBuilderChooseCustom = workoutBuilderChooseCustom;
+  window.workoutBuilderSkipIsolations = workoutBuilderSkipIsolations;
+  window.workoutBuilderBack = workoutBuilderBack;
+  window.workoutBuilderContinue = workoutBuilderContinue;
+  window.workoutBuilderFinish = workoutBuilderFinish;
   window.addFixedSchedule = addFixedSchedule;
   window.addFoodToActiveLog = addFoodToActiveLog;
   window.addSetToExercise = addSetToExercise;
+  window.removeSetFromExercise = removeSetFromExercise;
   window.addDropSetToExercise = addDropSetToExercise;
   window.addDropSetToSupersetSide = addDropSetToSupersetSide;
   window.addSupersetRound = addSupersetRound;
+  window.removeSupersetRound = removeSupersetRound;
   window.addSupersetWithNext = addSupersetWithNext;
   window.unmergeSuperset = unmergeSuperset;
   window.workoutCardDragStart = workoutCardDragStart;
@@ -455,4 +479,5 @@ export function bindUi() {
   try { populateSportSelects(); } catch (e) { /* ignore */ }
 
   window._journalPendingMedia = [];
+  try { syncWorkoutBuilderButton(); } catch (e) { /* ignore */ }
 }
