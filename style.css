@@ -1761,6 +1761,28 @@ div[id$="-modal"] .modal-content {
     background: var(--bg-surface, #0a0a0a) !important;
 }
 
+/* Workout Builder: same sheet treatment; keep number fields above the Custom button */
+#workout-builder-modal {
+    z-index: 21120 !important;
+    background: rgba(0, 0, 0, 0.55) !important;
+    pointer-events: auto !important;
+}
+#workout-builder-modal .modal-content {
+    background: var(--bg-surface, #0a0a0a) !important;
+    pointer-events: auto !important;
+}
+#workout-builder-modal .input-field {
+    pointer-events: auto !important;
+    -webkit-user-select: text;
+    user-select: text;
+    position: relative;
+    z-index: 2;
+}
+#workout-builder-modal .wb-sets-row .btn-primary {
+    width: auto !important;
+    flex: 0 0 auto;
+}
+
 /* Fixed Schedule: centre in the viewport above the nav (not clipped under the dock) */
 #schedule-modal {
     top: 0 !important;

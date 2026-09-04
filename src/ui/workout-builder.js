@@ -4,7 +4,7 @@
  */
 import { store } from '../state/store.js';
 import { excludeBannedExercises } from '../domain/bans.js';
-import { getLibraryMuscleGroup, LIBRARY_MUSCLE_ORDER } from '../domain/bodyweight-lifts.js';
+import { getLibraryMuscleGroup } from '../domain/bodyweight-lifts.js';
 import { getExerciseMeta } from '../domain/exercise-catalog.js';
 import { isExerciseMuscleLocked } from '../domain/hypertrophy-engine.js';
 import { isPowerEvent, powerMovementForName } from '../domain/power-engine.js';
@@ -17,7 +17,21 @@ const TYPE_HEADINGS = {
     lower: ['Legs'],
     upper: ['Pecs', 'Lats', 'Shoulders', 'Biceps', 'Triceps']
 };
-const PARAM_STYLE = "width:42px;margin:0;padding:6px 2px;font-size:10px;text-align:center;font-family:'Roboto Mono',monospace;";
+const PRIMARY_MUSCLE_ORDER = [
+    'Quads', 'Hamstrings', 'Glute max', 'Glute medius', 'Glute minimus',
+    'Adductors', 'Calves', 'Lower back',
+    'Pecs', 'Upper pecs', 'Lats',
+    'Front delts', 'Side delts', 'Rear delts', 'Rotator cuff',
+    'Biceps', 'Brachialis', 'Brachioradialis', 'Triceps', 'Core'
+];
+const PRIMARY_ALIASES = {
+    'front delt': 'Front delts',
+    'rear delt': 'Rear delts',
+    'side delt': 'Side delts',
+    'upper pec': 'Upper pecs'
+};
+const INPUT_FOCUS_STYLE = "margin:0;pointer-events:auto;-webkit-user-select:text;user-select:text;position:relative;z-index:2;";
+const PARAM_STYLE = "width:48px;margin:0;padding:8px 4px;font-size:12px;text-align:center;font-family:'Roboto Mono',monospace;pointer-events:auto;-webkit-user-select:text;user-select:text;";
 
 const builderState = {
     step: 'type',
@@ -122,6 +136,18 @@ function headingForType(type) {
     return TYPE_HEADINGS[type] || TYPE_HEADINGS.full;
 }
 
+function normalizePrimaryMuscle(name) {
+    const raw = String(name || '').trim();
+    if (!raw) return '';
+    const alias = PRIMARY_ALIASES[raw.toLowerCase()];
+    return alias || raw;
+}
+
+function primaryMuscleHeading(meta, displayName) {
+    const first = Array.isArray(meta?.primary) ? meta.primary.find((m) => String(m || '').trim()) : '';
+    return normalizePrimaryMuscle(first) || getLibraryMuscleGroup(displayName || meta?.name) || 'Other';
+}
+
 function typeLabel(type) {
     if (type === 'lower') return 'Lower body';
     if (type === 'upper') return 'Upper body';
@@ -145,24 +171,25 @@ function groupExercises(role) {
         if (isExerciseMuscleLocked(ex.name)) return false;
         const meta = getExerciseMeta(ex.name);
         if (!meta || meta.role !== role) return false;
-        const heading = getLibraryMuscleGroup(meta.name || ex.name);
-        return heading && allowed.has(heading);
+        const region = getLibraryMuscleGroup(meta.name || ex.name);
+        return region && allowed.has(region);
     });
     const grouped = new Map();
     exercises.forEach((ex) => {
-        const displayName = getExerciseMeta(ex.name)?.name || ex.name;
-        const heading = getLibraryMuscleGroup(displayName);
-        if (!heading || !allowed.has(heading)) return;
+        const meta = getExerciseMeta(ex.name);
+        const displayName = meta?.name || ex.name;
+        const heading = primaryMuscleHeading(meta, displayName);
+        if (!heading) return;
         if (!grouped.has(heading)) grouped.set(heading, []);
         grouped.get(heading).push({ ex, displayName });
     });
     grouped.forEach((list) => list.sort((a, b) =>
         String(a.displayName || '').localeCompare(String(b.displayName || ''))
     ));
-    const order = LIBRARY_MUSCLE_ORDER.filter((h) => allowed.has(h));
     const headings = [
-        ...order.filter((h) => (grouped.get(h) || []).length > 0),
-        ...[...grouped.keys()].filter((h) => !order.includes(h))
+        ...PRIMARY_MUSCLE_ORDER.filter((h) => (grouped.get(h) || []).length > 0),
+        ...[...grouped.keys()].filter((h) => !PRIMARY_MUSCLE_ORDER.includes(h))
+            .sort((a, b) => String(a).localeCompare(String(b)))
     ];
     return { grouped, headings };
 }
@@ -178,8 +205,8 @@ function pickerHtml(role, custom) {
             const id = String(ex.id).replace(/"/g, '&quot;');
             const params = custom
                 ? `<div class="wb-ex-params" style="display:none;align-items:center;gap:4px;flex-shrink:0;">
-                    <input type="number" min="1" step="1" inputmode="numeric" class="input-field wb-ex-sets" placeholder="Sets" aria-label="Sets" style="${PARAM_STYLE}" onclick="event.stopPropagation()">
-                    <input type="number" min="1" step="1" inputmode="numeric" class="input-field wb-ex-reps" placeholder="Reps" aria-label="Reps" style="${PARAM_STYLE}" onclick="event.stopPropagation()">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="input-field wb-ex-sets" placeholder="Sets" aria-label="Sets" style="${PARAM_STYLE}">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="input-field wb-ex-reps" placeholder="Reps" aria-label="Reps" style="${PARAM_STYLE}">
                 </div>`
                 : '';
             return `<div data-wb-ex-row style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--border-subtle);">
@@ -190,11 +217,20 @@ function pickerHtml(role, custom) {
                 </label>
             </div>`;
         }).join('');
-        return `<details open style="margin-bottom:12px;">
-            <summary style="font-family:'Roboto Mono';font-size:11px;font-weight:800;color:var(--gold-accent);text-transform:uppercase;letter-spacing:0.5px;cursor:pointer;padding:6px 0;">${heading}</summary>
+        return `<details style="margin-bottom:12px;">
+            <summary style="font-family:'Roboto Mono';font-size:11px;font-weight:800;color:var(--gold-accent);text-transform:uppercase;letter-spacing:0.5px;cursor:pointer;padding:6px 0;list-style:disclosure-closed;">${heading}</summary>
             <div>${rows}</div>
         </details>`;
     }).join('');
+}
+
+function protectInputFocus(el) {
+    if (!el) return;
+    const stop = (e) => e.stopPropagation();
+    ['pointerdown', 'mousedown', 'touchstart', 'click'].forEach((ev) => {
+        el.addEventListener(ev, stop);
+    });
+    el.addEventListener('click', () => el.focus());
 }
 
 function wirePickerChecks() {
@@ -203,6 +239,29 @@ function wirePickerChecks() {
             const params = cb.closest('[data-wb-ex-row]')?.querySelector('.wb-ex-params');
             if (params) params.style.display = cb.checked ? 'flex' : 'none';
         });
+    });
+    document.querySelectorAll('#workout-builder-list .wb-ex-sets, #workout-builder-list .wb-ex-reps').forEach(protectInputFocus);
+}
+
+function wireSetsRepsInputs(prefix) {
+    const setsEl = document.getElementById(`wb-${prefix}-sets`);
+    const repsEl = document.getElementById(`wb-${prefix}-reps`);
+    const hintEl = document.getElementById(`wb-${prefix}-hint`);
+    const sync = () => {
+        const { sets, reps } = readSetsReps(prefix);
+        if (prefix === 'iso') {
+            if (sets != null) builderState.isoSets = sets;
+            if (reps != null) builderState.isoReps = reps;
+        } else {
+            if (sets != null) builderState.compoundSets = sets;
+            if (reps != null) builderState.compoundReps = reps;
+        }
+        if (hintEl) hintEl.textContent = repRangeHint(repsEl?.value);
+    };
+    [setsEl, repsEl].forEach((el) => {
+        protectInputFocus(el);
+        el?.addEventListener('input', sync);
+        el?.addEventListener('change', sync);
     });
 }
 
@@ -239,16 +298,16 @@ function setsRepsStepHtml(prefix, title, customLabel) {
     const reps = prefix === 'iso' ? builderState.isoReps : builderState.compoundReps;
     return `
         <p style="font-size:12px;color:var(--text-muted);line-height:1.45;margin:0 0 14px;">${title} Choose shared sets and reps, or Custom to set them per exercise.</p>
-        <div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:10px;">
-            <div style="flex:1;">
-                <label style="display:block;font-size:10px;color:var(--text-muted);font-family:'Roboto Mono';text-transform:uppercase;margin-bottom:6px;">Sets</label>
-                <input type="number" min="1" step="1" inputmode="numeric" id="wb-${prefix}-sets" class="input-field" value="${sets}" style="margin:0;">
+        <div class="wb-sets-row" style="display:flex;align-items:flex-end;gap:10px;margin-bottom:10px;">
+            <div style="flex:1;min-width:0;">
+                <label for="wb-${prefix}-sets" style="display:block;font-size:10px;color:var(--text-muted);font-family:'Roboto Mono';text-transform:uppercase;margin:0 0 6px;">Sets</label>
+                <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="wb-${prefix}-sets" class="input-field" value="${sets}" style="${INPUT_FOCUS_STYLE}">
             </div>
-            <div style="flex:1;">
-                <label style="display:block;font-size:10px;color:var(--text-muted);font-family:'Roboto Mono';text-transform:uppercase;margin-bottom:6px;">Reps</label>
-                <input type="number" min="1" step="1" inputmode="numeric" id="wb-${prefix}-reps" class="input-field" value="${reps}" style="margin:0;" oninput="workoutBuilderOnRepsInput('${prefix}')">
+            <div style="flex:1;min-width:0;">
+                <label for="wb-${prefix}-reps" style="display:block;font-size:10px;color:var(--text-muted);font-family:'Roboto Mono';text-transform:uppercase;margin:0 0 6px;">Reps</label>
+                <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="wb-${prefix}-reps" class="input-field" value="${reps}" style="${INPUT_FOCUS_STYLE}">
             </div>
-            <button type="button" class="btn-primary is-secondary" style="margin:0;flex:0 0 auto;padding:12px 14px;font-size:11px;" onclick="workoutBuilderChooseCustom('${prefix}')">${customLabel}</button>
+            <button type="button" class="btn-primary is-secondary" style="margin:0;width:auto;flex:0 0 auto;padding:12px 14px;font-size:11px;" onclick="workoutBuilderChooseCustom('${prefix}')">${customLabel}</button>
         </div>
         <div id="wb-${prefix}-hint" style="font-size:12px;color:var(--gold-accent);font-family:'Roboto Mono';line-height:1.4;min-height:1.4em;">${repRangeHint(reps)}</div>
     `;
@@ -287,7 +346,7 @@ function renderWorkoutBuilder() {
         if (subEl) subEl.textContent = builderState.compoundCustom
             ? 'Compounds · pick exercises (custom sets/reps)'
             : 'Compounds · pick exercises';
-        html = `<p style="font-size:12px;color:var(--text-muted);line-height:1.45;margin:0 0 12px;">Compound lifts whose primary muscle matches ${typeLabel(builderState.type).toLowerCase()}.${builderState.compoundCustom ? ' Enter sets and reps on each selected lift.' : ` Each selected lift gets ${builderState.compoundSets} × ${builderState.compoundReps}.`}</p>
+        html = `<p style="font-size:12px;color:var(--text-muted);line-height:1.45;margin:0 0 12px;">Compound lifts grouped by primary muscle. Open a heading to pick.${builderState.compoundCustom ? ' Enter sets and reps on each selected lift.' : ` Each selected lift gets ${builderState.compoundSets} × ${builderState.compoundReps}.`}</p>
             <div id="workout-builder-list">${pickerHtml('compound', builderState.compoundCustom)}</div>`;
         footerHtml = `${back}${next('Continue', 'workoutBuilderContinue()')}`;
     } else if (builderState.step === 'isoSets') {
@@ -300,13 +359,15 @@ function renderWorkoutBuilder() {
         if (subEl) subEl.textContent = builderState.isoCustom
             ? 'Isolations · pick exercises (custom sets/reps)'
             : 'Isolations · pick exercises';
-        html = `<p style="font-size:12px;color:var(--text-muted);line-height:1.45;margin:0 0 12px;">Isolation movements whose primary muscle matches ${typeLabel(builderState.type).toLowerCase()}.${builderState.isoCustom ? ' Enter sets and reps on each selected lift.' : ` Each selected lift gets ${builderState.isoSets} × ${builderState.isoReps}.`}</p>
+        html = `<p style="font-size:12px;color:var(--text-muted);line-height:1.45;margin:0 0 12px;">Isolation movements grouped by primary muscle. Open a heading to pick.${builderState.isoCustom ? ' Enter sets and reps on each selected lift.' : ` Each selected lift gets ${builderState.isoSets} × ${builderState.isoReps}.`}</p>
             <div id="workout-builder-list">${pickerHtml('isolation', builderState.isoCustom)}</div>`;
         footerHtml = `${back}${next('Add to workout', 'workoutBuilderFinish()')}`;
     }
 
     body.innerHTML = html;
     footer.innerHTML = `<div style="display:flex;gap:8px;">${footerHtml}</div>`;
+    if (builderState.step === 'compoundSets') wireSetsRepsInputs('compound');
+    if (builderState.step === 'isoSets') wireSetsRepsInputs('iso');
     if (builderState.step === 'compoundPicks' || builderState.step === 'isoPicks') wirePickerChecks();
 }
 
