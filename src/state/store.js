@@ -8,7 +8,7 @@ export const store = {
   currentRefund: { cals: 0, carbs: 0 },
   globalGroupedHistory: {},
   userConfig: {
-    weight: 84, targetWeight: 75, height: 180, age: 25, bodyFat: 0, sex: 'Male', activity: 1.55, goal: 'Fat_Loss',
+    weight: 84, targetWeight: 75, targetWeeks: 8, height: 180, age: 25, bodyFat: 0, sex: 'Male', activity: 1.55, goal: 'Fat_Loss',
     mealsPerDay: 3, budget: 15.00, trainingFreq: 4,
     gymWillingness: 4, maxGymTime: 90, bandAuxiliary: false, dumbbellIncrement: 2,
     dbIncrements: { low: 1, mid: 2, high: 2 },

@@ -1702,7 +1702,9 @@ export async function generateWorkoutTemplate(opts = {}) {
         }
 
         if (latestLog && !item.isText && (useHypertrophy || phaseStr === 'OffSeason_Hypertrophy') && !item.isStrengthIsolation) {
-            const prog = progressHypertrophyWeight(exObj.name, hist, tWeight, 10);
+            const prog = progressHypertrophyWeight(exObj.name, hist, tWeight, 10, {
+                equipmentChoice: item.equipmentChoice || null
+            });
             tWeight = prog.weight;
             if (prog.note) itemNoteExtra = (itemNoteExtra ? itemNoteExtra + ' ' : '') + prog.note;
         }

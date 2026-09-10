@@ -11,7 +11,8 @@ import {
     buildHypertrophyMetaMap,
     getExerciseMeta,
     isAlwaysBodyweightExercise,
-    isUnilateralCompound
+    isUnilateralCompound,
+    resolveCatalogName
 } from './exercise-catalog.js';
 import { resolveProgrammedBwName } from './bodyweight-lifts.js';
 import {
@@ -600,6 +601,40 @@ export function clearHypertrophyDayPlanCache() {
     try { localStorage.removeItem(HYPERTROPHY_DAY_CACHE_KEY); } catch (e) { /* ignore */ }
 }
 
+function cyclePlanShouldStay(locked) {
+    if (!locked) return false;
+    return locked.source === 'kept' || locked.source === 'custom' || locked.source === 'confirmed'
+        || !!locked.exercisesConfirmed;
+}
+
+function hypPlanFromLockedItems(locked, kind, prefs) {
+    const rows = Array.isArray(locked.lockedItems) && locked.lockedItems.length
+        ? locked.lockedItems
+        : (Array.isArray(locked.items) ? locked.items : []);
+    return {
+        kind,
+        label: HYPERTROPHY_DISPLAY_LABELS[HYPERTROPHY_EVENT_TYPES[kind]] || kind,
+        tier: prefs.maxTime,
+        maxTime: prefs.maxTime,
+        split: prefs.split,
+        items: rows
+            .filter((it) => it && (it.exercise?.name || it.name) && !it.isWarmupGroup && !it.isStretchGroup)
+            .map((it) => ({
+                name: it.exercise?.name || it.name,
+                slotLabel: it.slotLabel || null,
+                notes: it.note || it.notes || (locked.source === 'custom' ? 'Custom cycle workout' : ''),
+                sets: (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText).length || it.plannedSets || 3,
+                isIsolation: !!it.isIsolation,
+                isExtra: !!it.isExtra,
+                isSuperset: !!it.isSuperset,
+                equipmentChoice: it.equipmentChoice || it.exercise?.equipmentChoice || null,
+                sides: it.sides
+            })),
+        note: locked.source === 'custom' ? 'Hypertrophy · custom workout' : 'Hypertrophy · confirmed',
+        source: locked.source === 'custom' ? 'custom' : 'confirmed'
+    };
+}
+
 /**
  * Stable hypertrophy routine for the monthly cycle — same picks until cycle decision.
  */
@@ -613,61 +648,18 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
     try {
         const plans = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}');
         const locked = plans && plans[sessionTypeId];
+        const prefs = getHypertrophyPlanPrefs();
         if (locked?.exercisesConfirmed && Array.isArray(locked.lockedItems) && locked.lockedItems.length) {
-            const prefs = getHypertrophyPlanPrefs();
-            const plan = {
-                kind,
-                label: HYPERTROPHY_DISPLAY_LABELS[HYPERTROPHY_EVENT_TYPES[kind]] || kind,
-                tier: prefs.maxTime,
-                maxTime: prefs.maxTime,
-                split: prefs.split,
-                items: locked.lockedItems
-                    .filter((it) => it && (it.exercise?.name || it.name) && !it.isWarmupGroup && !it.isStretchGroup)
-                    .map((it) => ({
-                        name: it.exercise?.name || it.name,
-                        slotLabel: it.slotLabel || null,
-                        notes: it.note || it.notes || '',
-                        sets: (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText).length || it.plannedSets || 3,
-                        isIsolation: !!it.isIsolation,
-                        isExtra: !!it.isExtra,
-                        isSuperset: !!it.isSuperset,
-                        equipmentChoice: it.equipmentChoice || it.exercise?.equipmentChoice || null,
-                        sides: it.sides
-                    })),
-                note: locked.source === 'custom' ? 'Hypertrophy · custom workout' : 'Hypertrophy · confirmed',
-                source: locked.source === 'custom' ? 'custom' : 'confirmed'
-            };
+            const plan = hypPlanFromLockedItems(locked, kind, prefs);
             window.currentHypertrophySession = plan;
             return finalizeHypPlan(plan);
         }
         if (locked?.source === 'custom' && Array.isArray(locked.items) && locked.items.length) {
-            const prefs = getHypertrophyPlanPrefs();
-            const plan = {
-                kind,
-                label: HYPERTROPHY_DISPLAY_LABELS[HYPERTROPHY_EVENT_TYPES[kind]] || kind,
-                tier: prefs.maxTime,
-                maxTime: prefs.maxTime,
-                split: prefs.split,
-                items: locked.items
-                    .filter((it) => it && (it.exercise?.name || it.name) && !it.isWarmupGroup && !it.isStretchGroup)
-                    .map((it) => ({
-                        name: it.exercise?.name || it.name,
-                        slotLabel: it.slotLabel || null,
-                        notes: it.notes || 'Custom cycle workout',
-                        sets: (it.sets || []).filter((s) => s && !s.isWarmup && !s.isText).length || it.plannedSets || 3,
-                        isIsolation: !!(it.isIsolation),
-                        isExtra: !!it.isExtra,
-                        isSuperset: !!it.isSuperset,
-                        equipmentChoice: it.equipmentChoice || it.exercise?.equipmentChoice || null,
-                        sides: it.sides
-                    })),
-                note: 'Hypertrophy · custom workout',
-                source: 'custom'
-            };
+            const plan = hypPlanFromLockedItems(locked, kind, prefs);
             window.currentHypertrophySession = plan;
             return finalizeHypPlan(plan);
         }
-        if (locked?.plan && Array.isArray(locked.plan.items)) {
+        if (locked?.plan && Array.isArray(locked.plan.items) && locked.plan.items.length) {
             return finalizeHypPlan(locked.plan);
         }
     } catch (e) { /* fall through */ }
@@ -685,12 +677,27 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
     const tier = timeTier(prefs.maxTime, prefs.split);
     const key = `${cycleStart || hypertrophyCacheDateKey(date)}|${kind}|${prefs.split}|${tier}|${prefs.maxTime}`;
 
+    let locked = null;
+    try {
+        const plans = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}');
+        locked = plans && plans[sessionTypeId];
+    } catch (e) { /* ignore */ }
+
     try {
         const raw = localStorage.getItem(HYPERTROPHY_DAY_CACHE_KEY);
         if (raw) {
             const cached = JSON.parse(raw);
-            if (cached && cached.key === key && cached.plan && Array.isArray(cached.plan.items)) {
-                return finalizeHypPlan(cached.plan);
+            if (cached?.plan && Array.isArray(cached.plan.items) && cached.plan.items.length) {
+                const keyMatch = cached.key === key;
+                const keepStale = !keyMatch && cyclePlanShouldStay(locked);
+                const kindOk = !cached.plan.kind || cached.plan.kind === kind
+                    || String(cached.key || '').includes(`|${kind}|`);
+                if ((keyMatch || keepStale) && kindOk) {
+                    if (keepStale) {
+                        try { localStorage.setItem(HYPERTROPHY_DAY_CACHE_KEY, JSON.stringify({ key, plan: cached.plan })); } catch (e) { /* ignore */ }
+                    }
+                    return finalizeHypPlan(cached.plan);
+                }
             }
         }
     } catch (e) { /* rebuild */ }
@@ -699,8 +706,10 @@ export function getHypertrophySessionRoutine(focus, date = new Date()) {
     try {
         localStorage.setItem(HYPERTROPHY_DAY_CACHE_KEY, JSON.stringify({ key, plan }));
         const plans = JSON.parse(localStorage.getItem('ascensus_cycle_session_plans_v1') || '{}');
-        plans[sessionTypeId] = { source: 'generated', family: 'hypertrophy', hypKind: kind, plan };
-        localStorage.setItem('ascensus_cycle_session_plans_v1', JSON.stringify(plans));
+        if (!cyclePlanShouldStay(plans[sessionTypeId])) {
+            plans[sessionTypeId] = { source: 'generated', family: 'hypertrophy', hypKind: kind, plan };
+            localStorage.setItem('ascensus_cycle_session_plans_v1', JSON.stringify(plans));
+        }
     } catch (e) { /* ignore */ }
     window.currentHypertrophySession = plan;
     return finalizeHypPlan(plan);
@@ -1219,12 +1228,13 @@ export function buildHypertrophyWarmupSets(exName, workWeight, workReps, isIsola
     return sets;
 }
 
-/** Hypertrophy load progression: all sets 8–12 → increase; plateau → −15%. */
-export function progressHypertrophyWeight(exName, hist, currentWeight, targetReps = 10) {
-    if (skipsWeightProgression(exName)) {
+/** Hypertrophy load progression: ≥2 work sets in 8–12 → +1 increment; plateau → −15%. */
+export function progressHypertrophyWeight(exName, hist, currentWeight, targetReps = 10, opts = {}) {
+    const choice = opts.equipmentChoice || null;
+    if (skipsWeightProgression(exName, choice)) {
         return { weight: Number(currentWeight) || 0, note: null };
     }
-    const profile = resolveLoadProfile(exName, null, { weight: currentWeight });
+    const profile = resolveLoadProfile(exName, choice, { weight: currentWeight });
     let tWeight = Number(currentWeight) || 0;
     if (!hist || !hist.length || tWeight <= 0) return { weight: tWeight, note: null };
 
@@ -1233,8 +1243,13 @@ export function progressHypertrophyWeight(exName, hist, currentWeight, targetRep
         if (!raw) return '';
         return String(raw).includes('T') ? String(raw).split('T')[0] : String(raw).slice(0, 10);
     };
+    const namesMatch = (logged) => {
+        const a = String(resolveCatalogName(logged) || logged || '').trim().toLowerCase();
+        const b = String(resolveCatalogName(exName) || exName || '').trim().toLowerCase();
+        return !!a && a === b;
+    };
 
-    const allExLogs = hist.filter(l => String(l.exercise || '').toLowerCase() === String(exName || '').toLowerCase());
+    const allExLogs = hist.filter(l => namesMatch(l.exercise));
     const uniqueDays = [...new Set(allExLogs.map(logDayKey).filter(Boolean))].sort().reverse().slice(0, 3);
 
     // Plateau: stuck same weight across last 3 sessions without progressing
@@ -1245,7 +1260,7 @@ export function progressHypertrophyWeight(exName, hist, currentWeight, targetRep
         });
         const allSame = dayWeights.every(w => Math.abs(w - dayWeights[0]) < 0.01);
         const failedOften = uniqueDays.filter(day => {
-            const sets = allExLogs.filter(l => logDayKey(l) === day && !l.is_warmup);
+            const sets = allExLogs.filter(l => logDayKey(l) === day && !l.is_warmup && !l.isWarmup);
             const bad = sets.filter(l => (Number(l.reps) || 0) < 8);
             return sets.length && bad.length > sets.length / 2;
         }).length;
@@ -1259,16 +1274,16 @@ export function progressHypertrophyWeight(exName, hist, currentWeight, targetRep
 
     const latestDay = uniqueDays[0];
     if (!latestDay) return { weight: tWeight, note: null };
-    const recent = allExLogs.filter(l => logDayKey(l) === latestDay && !l.is_warmup);
+    const recent = allExLogs.filter(l => logDayKey(l) === latestDay && !l.is_warmup && !l.isWarmup && (Number(l.reps) || 0) > 0);
     if (!recent.length) return { weight: tWeight, note: null };
 
-    const allInRange = recent.every(l => {
+    const inRange = recent.filter((l) => {
         const r = Number(l.reps) || 0;
         return r >= 8 && r <= 12;
     });
-    if (allInRange && recent.length >= 2) {
+    if (inRange.length >= 2) {
         const lastDisplayed = Number(recent[recent.length - 1]?.weight_kg) || tWeight;
-        const nextDisplayed = increaseLoadOneStep(lastDisplayed > 0 ? lastDisplayed : tWeight, exName);
+        const nextDisplayed = increaseLoadOneStep(lastDisplayed > 0 ? lastDisplayed : tWeight, exName, choice);
         const bw = (getExerciseMeta(exName)?.bodyweight && Number(store.userConfig?.weight) > 0)
             ? Number(store.userConfig.weight) : 0;
         let factor = 1;
@@ -1278,10 +1293,10 @@ export function progressHypertrophyWeight(exName, hist, currentWeight, targetRep
         }
         const nextBase = (!(factor < 1))
             ? nextDisplayed
-            : roundUpLoad(Math.max(0, ((nextDisplayed + bw) / factor) - bw), exName);
+            : roundUpLoad(Math.max(0, ((nextDisplayed + bw) / factor) - bw), exName, choice);
         return {
             weight: nextBase,
-            note: 'PROGRESSION: All sets in 8–12. Load increased.'
+            note: 'PROGRESSION: Hit 8–12 on at least 2 sets. Load increased.'
         };
     }
     return { weight: tWeight, note: null };

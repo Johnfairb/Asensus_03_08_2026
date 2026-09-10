@@ -143,9 +143,20 @@ function normalizePrimaryMuscle(name) {
     return alias || raw;
 }
 
-function primaryMuscleHeading(meta, displayName) {
-    const first = Array.isArray(meta?.primary) ? meta.primary.find((m) => String(m || '').trim()) : '';
-    return normalizePrimaryMuscle(first) || getLibraryMuscleGroup(displayName || meta?.name) || 'Other';
+function primaryMuscleHeadings(meta, displayName) {
+    const seen = new Set();
+    const headings = [];
+    (Array.isArray(meta?.primary) ? meta.primary : []).forEach((name) => {
+        const heading = normalizePrimaryMuscle(name);
+        if (!heading || seen.has(heading)) return;
+        seen.add(heading);
+        headings.push(heading);
+    });
+    if (!headings.length) {
+        const fallback = getLibraryMuscleGroup(displayName || meta?.name) || 'Other';
+        headings.push(fallback);
+    }
+    return headings;
 }
 
 function typeLabel(type) {
@@ -178,10 +189,12 @@ function groupExercises(role) {
     exercises.forEach((ex) => {
         const meta = getExerciseMeta(ex.name);
         const displayName = meta?.name || ex.name;
-        const heading = primaryMuscleHeading(meta, displayName);
-        if (!heading) return;
-        if (!grouped.has(heading)) grouped.set(heading, []);
-        grouped.get(heading).push({ ex, displayName });
+        primaryMuscleHeadings(meta, displayName).forEach((heading) => {
+            if (!grouped.has(heading)) grouped.set(heading, []);
+            const list = grouped.get(heading);
+            if (list.some((row) => String(row.ex.id) === String(ex.id))) return;
+            list.push({ ex, displayName });
+        });
     });
     grouped.forEach((list) => list.sort((a, b) =>
         String(a.displayName || '').localeCompare(String(b.displayName || ''))
@@ -233,14 +246,45 @@ function protectInputFocus(el) {
     el.addEventListener('click', () => el.focus());
 }
 
+function pickerRowsForId(id) {
+    return [...document.querySelectorAll('#workout-builder-list .wb-ex-check')]
+        .filter((cb) => String(cb.value) === String(id))
+        .map((cb) => cb.closest('[data-wb-ex-row]'))
+        .filter(Boolean);
+}
+
+function syncPickerRowState(sourceCheck) {
+    const id = sourceCheck?.value;
+    if (!id) return;
+    const checked = !!sourceCheck.checked;
+    const sourceRow = sourceCheck.closest('[data-wb-ex-row]');
+    const sourceSets = sourceRow?.querySelector('.wb-ex-sets')?.value ?? '';
+    const sourceReps = sourceRow?.querySelector('.wb-ex-reps')?.value ?? '';
+    pickerRowsForId(id).forEach((row) => {
+        const cb = row.querySelector('.wb-ex-check');
+        if (cb && cb !== sourceCheck) cb.checked = checked;
+        const params = row.querySelector('.wb-ex-params');
+        if (params) params.style.display = checked ? 'flex' : 'none';
+        const setsEl = row.querySelector('.wb-ex-sets');
+        const repsEl = row.querySelector('.wb-ex-reps');
+        if (setsEl && setsEl !== sourceRow?.querySelector('.wb-ex-sets')) setsEl.value = sourceSets;
+        if (repsEl && repsEl !== sourceRow?.querySelector('.wb-ex-reps')) repsEl.value = sourceReps;
+    });
+}
+
 function wirePickerChecks() {
     document.querySelectorAll('#workout-builder-list .wb-ex-check').forEach((cb) => {
-        cb.addEventListener('change', () => {
-            const params = cb.closest('[data-wb-ex-row]')?.querySelector('.wb-ex-params');
-            if (params) params.style.display = cb.checked ? 'flex' : 'none';
-        });
+        cb.addEventListener('change', () => syncPickerRowState(cb));
     });
-    document.querySelectorAll('#workout-builder-list .wb-ex-sets, #workout-builder-list .wb-ex-reps').forEach(protectInputFocus);
+    document.querySelectorAll('#workout-builder-list .wb-ex-sets, #workout-builder-list .wb-ex-reps').forEach((el) => {
+        protectInputFocus(el);
+        const copy = () => {
+            const cb = el.closest('[data-wb-ex-row]')?.querySelector('.wb-ex-check');
+            if (cb) syncPickerRowState(cb);
+        };
+        el.addEventListener('input', copy);
+        el.addEventListener('change', copy);
+    });
 }
 
 function wireSetsRepsInputs(prefix) {
@@ -268,14 +312,20 @@ function wireSetsRepsInputs(prefix) {
 function collectPickerSelection(requireCustomParams) {
     const checks = [...document.querySelectorAll('#workout-builder-list .wb-ex-check:checked')];
     const ids = [];
+    const seen = new Set();
     const specsById = {};
     for (const c of checks) {
         const id = c.value;
-        if (!id) continue;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
         if (requireCustomParams) {
-            const row = c.closest('[data-wb-ex-row]');
-            const sets = parsePositiveInt(row?.querySelector('.wb-ex-sets')?.value, null);
-            const reps = parsePositiveInt(row?.querySelector('.wb-ex-reps')?.value, null);
+            const filled = pickerRowsForId(id).find((row) => {
+                const sets = parsePositiveInt(row.querySelector('.wb-ex-sets')?.value, null);
+                const reps = parsePositiveInt(row.querySelector('.wb-ex-reps')?.value, null);
+                return sets != null && reps != null;
+            });
+            const sets = parsePositiveInt(filled?.querySelector('.wb-ex-sets')?.value, null);
+            const reps = parsePositiveInt(filled?.querySelector('.wb-ex-reps')?.value, null);
             if (sets == null || reps == null) {
                 window.alert('Enter sets and reps for each selected exercise.');
                 return null;
@@ -346,7 +396,7 @@ function renderWorkoutBuilder() {
         if (subEl) subEl.textContent = builderState.compoundCustom
             ? 'Compounds · pick exercises (custom sets/reps)'
             : 'Compounds · pick exercises';
-        html = `<p style="font-size:12px;color:var(--text-muted);line-height:1.45;margin:0 0 12px;">Compound lifts grouped by primary muscle. Open a heading to pick.${builderState.compoundCustom ? ' Enter sets and reps on each selected lift.' : ` Each selected lift gets ${builderState.compoundSets} × ${builderState.compoundReps}.`}</p>
+        html = `<p style="font-size:12px;color:var(--text-muted);line-height:1.45;margin:0 0 12px;">Compound lifts appear under every primary muscle they train. Open a heading to pick.${builderState.compoundCustom ? ' Enter sets and reps on each selected lift.' : ` Each selected lift gets ${builderState.compoundSets} × ${builderState.compoundReps}.`}</p>
             <div id="workout-builder-list">${pickerHtml('compound', builderState.compoundCustom)}</div>`;
         footerHtml = `${back}${next('Continue', 'workoutBuilderContinue()')}`;
     } else if (builderState.step === 'isoSets') {
@@ -359,7 +409,7 @@ function renderWorkoutBuilder() {
         if (subEl) subEl.textContent = builderState.isoCustom
             ? 'Isolations · pick exercises (custom sets/reps)'
             : 'Isolations · pick exercises';
-        html = `<p style="font-size:12px;color:var(--text-muted);line-height:1.45;margin:0 0 12px;">Isolation movements grouped by primary muscle. Open a heading to pick.${builderState.isoCustom ? ' Enter sets and reps on each selected lift.' : ` Each selected lift gets ${builderState.isoSets} × ${builderState.isoReps}.`}</p>
+        html = `<p style="font-size:12px;color:var(--text-muted);line-height:1.45;margin:0 0 12px;">Isolation movements appear under every primary muscle they train. Open a heading to pick.${builderState.isoCustom ? ' Enter sets and reps on each selected lift.' : ` Each selected lift gets ${builderState.isoSets} × ${builderState.isoReps}.`}</p>
             <div id="workout-builder-list">${pickerHtml('isolation', builderState.isoCustom)}</div>`;
         footerHtml = `${back}${next('Add to workout', 'workoutBuilderFinish()')}`;
     }

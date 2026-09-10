@@ -2,7 +2,7 @@ import { store } from '../state/store.js';
 import { syncTrackerPillUI } from '../domain/fitness-hud.js';
 import { generateGroceryList } from '../domain/grocery.js';
 import { updateInjuryStatusPanel } from '../domain/periodization.js';
-import { applyUserConfigToDom, calculateTDEE, restoreSyncedLocalState } from '../domain/thermodynamics.js';
+import { applyUserConfigToDom, calculateTDEE, refreshWeightAdaptAndRecalc, restoreSyncedLocalState } from '../domain/thermodynamics.js';
 import { setMonthAnchorISO, ensureMonthAnchor } from '../domain/billing-month.js';
 import { ensureCycleStarted } from '../domain/workout-cycle.js';
 import { nextObStep, syncAuthThemeUI } from '../ui/auth-onboarding.js';
@@ -152,6 +152,7 @@ export async function bootOperatorProfile() {
             if (typeof updateInjuryStatusPanel === 'function') updateInjuryStatusPanel();
 
             calculateTDEE();
+            refreshWeightAdaptAndRecalc({ force: true }).catch(() => {});
 
             // Hide Auth/Onboarding, Show Main App
             document.getElementById('auth-layer').classList.add('hidden');

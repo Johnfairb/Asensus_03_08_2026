@@ -10,7 +10,8 @@ import {
     loadCycleState,
     needsCycleDecisions,
     allCycleDecisionsComplete,
-    focusForSessionType
+    focusForSessionType,
+    seedKeepDecisionsIfNeeded
 } from '../domain/workout-cycle.js';
 import { parseTemplateDetails, parseTemplateMeta } from './templates.js';
 import { prettyWorkoutTypeLabel } from '../domain/route-planner.js';
@@ -23,9 +24,8 @@ function ensureModal() {
     modal = document.createElement('div');
     modal.id = 'workout-cycle-modal';
     modal.className = 'hidden';
-    modal.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:transparent;z-index:2100;display:flex;justify-content:center;align-items:center;padding:20px;';
     modal.innerHTML = `
-        <div class="modal-content stealth-panel" style="width:100%;max-width:390px;background:var(--bg-surface);max-height:90vh;overflow-y:auto;">
+        <div class="modal-content stealth-panel">
             <div style="font-family:'Roboto Mono',monospace;font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase;margin-bottom:5px;letter-spacing:1px;">Training month</div>
             <h2 style="color:var(--text-main);margin-bottom:5px;font-family:'Roboto Mono',monospace;letter-spacing:1px;text-transform:uppercase;">Next month</h2>
             <p id="workout-cycle-modal-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:15px;line-height:1.5;font-family:'Roboto Mono',monospace;">
@@ -34,12 +34,14 @@ function ensureModal() {
             <div id="workout-cycle-session-list" style="display:flex;flex-direction:column;gap:14px;margin-bottom:16px;"></div>
             <button type="button" class="btn-primary is-primary" style="margin-top:0;" onclick="confirmWorkoutCycleDecisions()">Lock next month</button>
         </div>`;
-    document.body.appendChild(modal);
+    const root = document.querySelector('.iphone-screen') || document.body;
+    root.appendChild(modal);
     return modal;
 }
 
 export function maybeOpenWorkoutCycleModal() {
     try { ensureCycleStarted(new Date()); } catch (e) { /* still try */ }
+    try { seedKeepDecisionsIfNeeded(new Date()); } catch (e) { /* still try */ }
     if (!needsCycleDecisions()) return false;
     const types = getSessionTypesForCurrentProgramme();
     if (!types.length) return false;
@@ -71,10 +73,10 @@ export function renderWorkoutCycleModal() {
                 <div style="font-size:13px;font-weight:700;color:var(--text-main);">${t.label}</div>
                 ${badge}
             </div>
-            <div style="display:flex;flex-direction:column;gap:6px;">
-                <button type="button" class="btn-primary is-secondary" style="margin:0;font-size:12px;" onclick="chooseWorkoutCycleOption('${t.id}','change')">Change workout</button>
-                <button type="button" class="btn-primary is-secondary" style="margin:0;font-size:12px;" onclick="chooseWorkoutCycleOption('${t.id}','keep')">Keep the same</button>
-                <button type="button" class="btn-primary is-secondary" style="margin:0;font-size:12px;" onclick="chooseWorkoutCycleOption('${t.id}','custom')">Custom (Load Workout)</button>
+            <div class="workout-cycle-choices" style="display:flex;flex-direction:row;flex-wrap:wrap;gap:6px;align-items:center;">
+                <button type="button" class="btn-primary ${chosen === 'change' ? 'is-primary' : 'is-secondary'}" style="width:auto;flex:0 0 auto;margin:0;padding:8px 12px;font-size:11px;" onclick="chooseWorkoutCycleOption('${t.id}','change')">Change</button>
+                <button type="button" class="btn-primary ${chosen === 'keep' ? 'is-primary' : 'is-secondary'}" style="width:auto;flex:0 0 auto;margin:0;padding:8px 12px;font-size:11px;" onclick="chooseWorkoutCycleOption('${t.id}','keep')">Keep</button>
+                <button type="button" class="btn-primary ${chosen === 'custom' ? 'is-primary' : 'is-secondary'}" style="width:auto;flex:0 0 auto;margin:0;padding:8px 12px;font-size:11px;" onclick="chooseWorkoutCycleOption('${t.id}','custom')">Custom</button>
             </div>
         </div>`;
     }).join('');

@@ -5,6 +5,7 @@ import { getExerciseMeta, normalizeExerciseName, resolveCatalogName } from './ex
 import { setExerciseBanned } from './bans.js';
 import { store } from '../state/store.js';
 import { getBillingMonthKey } from './billing-month.js';
+import { hasSavedExerciseWorkingWeight } from './load-increments.js';
 
 const TRICEP_ISO_SWAP_POOL = [
     'Rope Push Down', 'Bar Push Down', 'Single Push Down', 'Cable French Press',
@@ -152,9 +153,34 @@ export function resolveProgrammedBwName(name) {
     return canon;
 }
 
+function hasLoggedWorkingSet(name) {
+    const canon = canonicalBwName(name);
+    if (!canon) return false;
+    const grouped = store.globalGroupedHistory || {};
+    for (const day of Object.values(grouped)) {
+        for (const row of (day?.items || [])) {
+            if (!row?.exercise || row.is_warmup || row.isWarmup) continue;
+            if (canonicalBwName(row.exercise) !== canon) continue;
+            if ((Number(row.reps) || 0) > 0) return true;
+            if ((Number(row.weight_kg) || 0) > 0) return true;
+        }
+    }
+    return false;
+}
+
+/** Saved work weight (including 0 kg) or any logged working set — never ask the BW gate again. */
+export function hasDoneBwLiftBefore(name) {
+    const canon = canonicalBwName(name);
+    try {
+        if (hasSavedExerciseWorkingWeight(name) || (canon && hasSavedExerciseWorkingWeight(canon))) return true;
+    } catch (e) { /* ignore */ }
+    return hasLoggedWorkingSet(name) || (canon && canon !== name && hasLoggedWorkingSet(canon));
+}
+
 export function needsBwCompetencyAsk(name) {
     const canon = canonicalBwName(name);
     if (!BW_GATE_EXERCISES.has(canon)) return false;
+    if (hasDoneBwLiftBefore(canon) || hasDoneBwLiftBefore(name)) return false;
     const state = loadState();
     if (isPressUpVariant(canon) && state.pressUpsRetired) return false;
     if (state.cant[canon]) return false;

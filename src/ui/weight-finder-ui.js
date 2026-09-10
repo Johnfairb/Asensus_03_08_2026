@@ -18,7 +18,8 @@ import {
     recordBwCanDo,
     recordBwCannotDo,
     swapTargetFor,
-    usesPressUpWeightFinder
+    usesPressUpWeightFinder,
+    hasDoneBwLiftBefore
 } from '../domain/bodyweight-lifts.js';
 import { excludeBannedExercises } from '../domain/bans.js';
 import { isStrengthPhase } from '../domain/strength-engine.js';
@@ -116,8 +117,9 @@ function sideNeedsBw(side) {
     if (!side) return false;
     const name = side.exercise?.name || '';
     // Never ask BW competency for weighted swaps (e.g. French Press after Reverse Dips)
-    if (!isBwGateExercise(name)) {
+    if (!isBwGateExercise(name) || hasDoneBwLiftBefore(name)) {
         if (side.needsBwGate) side.needsBwGate = false;
+        side.bwGateResolved = true;
         return false;
     }
     return !side.bwGateResolved && (side.needsBwGate || needsBwCompetencyAsk(name));
@@ -305,6 +307,10 @@ function openPromptForCurrentTarget(exIdx) {
     const name = item.exercise?.name || '';
     const isBwLift = isBwGateExercise(name);
     if (!isBwLift && item.needsBwGate) item.needsBwGate = false;
+    if (isBwLift && hasDoneBwLiftBefore(name)) {
+        item.needsBwGate = false;
+        item.bwGateResolved = true;
+    }
     const needsBw = isBwLift && !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
     if (itemHasWorkWeight(item) && !item.needsWeightFind) markItemWeightResolved(item);
     const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;
@@ -348,6 +354,10 @@ export function maybePromptWeightFinder(exIdx, opts = {}) {
     }
     const isBwLift = isBwGateExercise(name);
     if (!isBwLift && item.needsBwGate) item.needsBwGate = false;
+    if (isBwLift && hasDoneBwLiftBefore(name)) {
+        item.needsBwGate = false;
+        item.bwGateResolved = true;
+    }
     const needsBw = isBwLift && !item.bwGateResolved && (item.needsBwGate || needsBwCompetencyAsk(name));
     if (itemHasWorkWeight(item) && !item.needsWeightFind) markItemWeightResolved(item);
     const needsWeight = !item.weightFinderResolved && !!item.needsWeightFind;

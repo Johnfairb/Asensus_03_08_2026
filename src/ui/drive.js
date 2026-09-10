@@ -227,6 +227,7 @@ function captureSessionTimerAtLog() {
 import { buildDiaryEntryFromForm, closeDiarySchemaEditor, renderDiaryFields } from './diary-ui.js';
 import { collectDiaryFieldValues, journalModeToSchemaMode } from '../domain/diary-schema.js';
 import { upsertTodayBodyFat, upsertTodayWeight } from '../domain/body-metrics.js';
+import { loadWeightLogCache } from '../domain/weight-calorie-adapt.js';
 
 export function calculatePlates(targetWeight = null, preferFromWeight = null) {
     let isUI = false;
@@ -4868,6 +4869,7 @@ export async function submitWeightLog() {
     const { error } = await upsertTodayWeight(w);
     if (error) console.warn('body_metrics weight upsert', error);
     store.userConfig.weight = w;
+    try { await loadWeightLogCache(); } catch (e) { /* ignore */ }
     saveSettings();
     document.getElementById('status-badge-weight')?.classList.add('completed');
     window.weightLoggedToday = true;
@@ -4922,6 +4924,7 @@ export async function submitLog() {
         const { error } = await upsertTodayWeight(w);
         if (error) console.warn('body_metrics weight upsert', error);
         store.userConfig.weight = w;
+        try { await loadWeightLogCache(); } catch (e) { /* ignore */ }
         saveSettings();
         document.getElementById('status-badge-weight')?.classList.add('completed');
         window.weightLoggedToday = true;

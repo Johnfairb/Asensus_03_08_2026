@@ -514,6 +514,17 @@ export function getExerciseWorkingWeightsByBar(exName) {
     return out;
 }
 
+/** True when any saved working load exists, including 0 kg (pure bodyweight). */
+export function hasSavedExerciseWorkingWeight(exName) {
+    const raw = lookupWorkingWeightEntry(exName);
+    if (raw == null) return false;
+    if (typeof raw === 'number') return Number.isFinite(raw) && raw >= 0;
+    if (typeof raw === 'object') {
+        return Object.values(raw).some((v) => Number.isFinite(Number(v)) && Number(v) >= 0);
+    }
+    return false;
+}
+
 export function setExerciseWorkingWeight(exName, kg, choice = null) {
     if (!store.userConfig.exerciseWorkingWeights || typeof store.userConfig.exerciseWorkingWeights !== 'object') {
         store.userConfig.exerciseWorkingWeights = {};

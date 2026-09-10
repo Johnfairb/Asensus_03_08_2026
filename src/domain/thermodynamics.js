@@ -22,6 +22,20 @@ import { applyNetworkKillSwitch, hydrateNetworkProfileDom } from '../ui/network.
 import { roundUpLoad } from './load-increments.js';
 import { hydrateStretchSettingsDom } from './session-prep.js';
 import { migrateUserSport, populateSportSelects } from './sports-matrix.js';
+import {
+    WEIGHT_ADAPT_MIN_LOGS,
+    getAppliedAdaptiveMultiplier,
+    getCachedWeightLogs,
+    getDailyIntakeCals,
+    intakeCacheIsReady,
+    loadWeightLogCache,
+    peekWeightAdapt,
+    pendingAdherence,
+    renderWeightAdaptUi,
+    summarizeCalorieAdherence,
+    syncWeightAdaptState,
+    weightLogsCacheLoaded
+} from './weight-calorie-adapt.js';
 
 const DEFAULT_EVENT_RPE = 7;
 
@@ -248,6 +262,7 @@ export async function refreshCloudPlanCredits() {
 }
 
 export async function onAppBecameVisible() {
+    try { await refreshWeightAdaptAndRecalc(); } catch (e) { /* ignore */ }
     const pulled = await refreshCloudPlanCredits();
     if (!pulled) return;
     try { generateFutureTimeline(); } catch (e) { /* ignore */ }
@@ -278,6 +293,7 @@ export function applyUserConfigToDom() {
     }
     setVal('set-weight', store.userConfig.weight);
     setVal('set-target-weight', store.userConfig.targetWeight);
+    setVal('set-target-weeks', store.userConfig.targetWeeks || 8);
     setVal('set-height', store.userConfig.height);
     setVal('set-age', store.userConfig.age);
     setVal('set-sex', store.userConfig.sex);
@@ -366,6 +382,7 @@ export async function persistUserConfigToCloud(statusElId) {
 export function saveSettings() {
     store.userConfig.weight = parseFloat(document.getElementById('set-weight').value) || 80;
     store.userConfig.targetWeight = parseFloat(document.getElementById('set-target-weight').value) || 75;
+    store.userConfig.targetWeeks = parseFloat(document.getElementById('set-target-weeks').value) || 8;
     store.userConfig.height = parseFloat(document.getElementById('set-height').value) || 180;
     store.userConfig.age = parseInt(document.getElementById('set-age').value) || 25;
     store.userConfig.sex = document.getElementById('set-sex').value;
@@ -654,6 +671,10 @@ export function explainDayNutritionTargets(dateObj = new Date(), config = store.
         }
     }
 
+    // Persistent adaptive factor (locked 14 days). Applied to this day's formula, not last week's total.
+    const adaptMult = getAppliedAdaptiveMultiplier(config);
+    if (adaptMult !== 1) targetCals *= adaptMult;
+
     const macros = macrosFromCalories(targetCals, config);
     return {
         bmr: Math.round(BMR),
@@ -667,12 +688,62 @@ export function explainDayNutritionTargets(dateObj = new Date(), config = store.
     };
 }
 
+function buildCalorieAdherence(logs = getCachedWeightLogs(), config = store.userConfig) {
+    if (!intakeCacheIsReady()) return pendingAdherence();
+    const window = (logs || []).slice(-WEIGHT_ADAPT_MIN_LOGS);
+    const days = window.map((row) => {
+        const day = new Date(`${row.iso}T12:00:00`);
+        const aim = computeDayNutritionTargets(day, config).cals;
+        return { iso: row.iso, eaten: getDailyIntakeCals(row.iso), aim };
+    });
+    return summarizeCalorieAdherence(days);
+}
+
+function syncAdaptWithAdherence(logs, now) {
+    const adherence = buildCalorieAdherence(logs);
+    return {
+        changed: syncWeightAdaptState(logs, store.userConfig, now, { adherence }),
+        adherence,
+        evaluation: peekWeightAdapt(logs, store.userConfig, now, { adherence })
+    };
+}
+
 export function calculateTDEE() {
+    const { evaluation } = syncAdaptWithAdherence();
     const targets = computeDayNutritionTargets(new Date());
     store.userConfig.baselineTargets = { ...targets };
     store.userConfig.targets = { ...targets };
     localStorage.setItem('ascensus_settings', JSON.stringify(store.userConfig));
     applyDailyModifiers();
+    try { renderWeightAdaptUi(evaluation); } catch (e) { /* ignore */ }
+}
+
+export async function refreshWeightAdaptAndRecalc(opts = {}) {
+    const now = new Date();
+    const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    const lockedUntil = store.userConfig?.weightAdapt?.lockedUntilIso;
+    const stillLocked = !!(lockedUntil && today < lockedUntil);
+    if (!opts.force && weightLogsCacheLoaded() && (!lockedUntil || stillLocked)) {
+        const { changed, evaluation } = syncAdaptWithAdherence();
+        if (changed) {
+            calculateTDEE();
+            try { await persistUserConfigToCloud(); } catch (e) { /* ignore */ }
+            return;
+        }
+        try { renderWeightAdaptUi(evaluation); } catch (e) { /* ignore */ }
+        return;
+    }
+    await loadWeightLogCache();
+    const before = JSON.stringify(store.userConfig.weightAdapt || null);
+    const { changed, evaluation } = syncAdaptWithAdherence();
+    if (opts.force || changed) {
+        calculateTDEE();
+        if (changed || before !== JSON.stringify(store.userConfig.weightAdapt || null)) {
+            try { await persistUserConfigToCloud(); } catch (e) { /* ignore */ }
+        }
+        return;
+    }
+    try { renderWeightAdaptUi(evaluation); } catch (e) { /* ignore */ }
 }
 
 export function applyDailyModifiers() {

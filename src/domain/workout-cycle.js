@@ -150,7 +150,7 @@ export function ensureCycleStarted(date = new Date()) {
         if (!state.lastDecidedStart && state.startDate === period.startDate && today < state.endDate && today !== period.startDate) {
             state = { ...state, lastDecidedStart: state.startDate };
             saveCycleState(state);
-            return state;
+            return finishCycleEnsure(state, date);
         }
         // Login stamped today's new billing period without keep/change/custom — rewind.
         if (!state.lastDecidedStart && state.startDate === period.startDate && today >= period.startDate && priorStart) {
@@ -162,15 +162,15 @@ export function ensureCycleStarted(date = new Date()) {
                 pendingDecisions: state.pendingDecisions || {}
             };
             saveCycleState(state);
-            return state;
+            return finishCycleEnsure(state, date);
         }
-        return state;
+        return finishCycleEnsure(state, date);
     }
 
     if (state?.startDate && state?.endDate && state.decisionsResolved) {
         state = { ...state, decisionsResolved: false };
         saveCycleState(state);
-        return state;
+        return finishCycleEnsure(state, date);
     }
 
     if (priorStart) {
@@ -178,13 +178,13 @@ export function ensureCycleStarted(date = new Date()) {
         state.endDate = period.startDate;
         state.lastDecidedStart = priorStart;
         saveCycleState(state);
-        return state;
+        return finishCycleEnsure(state, date);
     }
 
     // First training month — not a renewal.
     state = cycleFromPeriod(period, period.startDate, { decided: true });
     saveCycleState(state);
-    return state;
+    return finishCycleEnsure(state, date);
 }
 
 /** True when the monthly anniversary has arrived and keep/change/custom is still outstanding. */
@@ -309,6 +309,103 @@ function snapshotHypertrophyKind(hypKind) {
         plan: built,
         exercisesConfirmed: false
     };
+}
+
+function peekCachedHypertrophyPlan(hypKind) {
+    try {
+        const raw = localStorage.getItem('ascensus_hypertrophy_day_plan_v1');
+        const cached = raw ? JSON.parse(raw) : null;
+        if (!cached?.plan?.items?.length) return null;
+        const key = String(cached.key || '');
+        if (hypKind && cached.plan.kind && cached.plan.kind !== hypKind && key && !key.includes(`|${hypKind}|`)) {
+            return null;
+        }
+        return cached.plan;
+    } catch (e) {
+        return null;
+    }
+}
+
+function reuseHypertrophyKind(hypKind) {
+    const id = `hyp_${hypKind}`;
+    const existing = loadCyclePlans()[id];
+    if (existing && (existing.plan?.items?.length || existing.lockedItems?.length || existing.items?.length)) {
+        return {
+            ...existing,
+            source: existing.source === 'custom' ? 'custom' : 'kept',
+            family: 'hypertrophy',
+            hypKind,
+            exercisesConfirmed: true
+        };
+    }
+    const cached = peekCachedHypertrophyPlan(hypKind);
+    if (cached) {
+        return {
+            source: 'kept',
+            family: 'hypertrophy',
+            hypKind,
+            plan: cached,
+            exercisesConfirmed: true
+        };
+    }
+    return null;
+}
+
+function finishCycleEnsure(state, date) {
+    try { seedKeepDecisionsIfNeeded(date); } catch (e) { /* ignore */ }
+    return loadCycleState() || state;
+}
+
+/**
+ * Month rollover keeps last month's workouts until the user picks Change in the modal.
+ */
+export function seedKeepDecisionsIfNeeded(date = new Date()) {
+    if (!needsCycleDecisions(date)) return;
+    const types = getSessionTypesForCurrentProgramme();
+    if (!types.length) return;
+    const state = loadCycleState();
+    if (!state) return;
+    const pending = { ...(state.pendingDecisions || {}) };
+    const plans = loadCyclePlans();
+    let changed = false;
+
+    types.forEach((t) => {
+        if (pending[t.id] && pending[t.id] !== 'keep') return;
+        if (!pending[t.id]) {
+            pending[t.id] = 'keep';
+            changed = true;
+        }
+        const prev = plans[t.id];
+        if (prev) {
+            if (prev.source !== 'custom' && prev.source !== 'kept') {
+                plans[t.id] = { ...prev, source: 'kept', exercisesConfirmed: true };
+                changed = true;
+            }
+            return;
+        }
+        if (t.family === 'strength') {
+            const snap = snapshotStrengthSession(t.session);
+            if (snap) {
+                plans[t.id] = { ...snap, source: 'kept', exercisesConfirmed: true };
+                changed = true;
+            }
+        } else if (t.family === 'hypertrophy') {
+            const reused = reuseHypertrophyKind(t.hypKind);
+            plans[t.id] = reused || {
+                source: 'kept',
+                family: 'hypertrophy',
+                hypKind: t.hypKind,
+                exercisesConfirmed: true
+            };
+            changed = true;
+        }
+    });
+
+    if (changed) {
+        state.pendingDecisions = pending;
+        saveCycleState(state);
+        saveCyclePlans(plans);
+    }
 }
 
 /** True when this session type can swap/remove exercises on the confirm screen. */
@@ -491,6 +588,14 @@ export function ensureCyclePlansForProgramme() {
             plans[t.id] = snapshotStrengthSession(t.session);
             changed = true;
         } else if (t.family === 'hypertrophy') {
+            const reused = reuseHypertrophyKind(t.hypKind);
+            if (reused) {
+                plans[t.id] = reused;
+                changed = true;
+                return;
+            }
+            const pending = loadCycleState()?.pendingDecisions || {};
+            if (pending[t.id] === 'keep') return;
             plans[t.id] = snapshotHypertrophyKind(t.hypKind);
             changed = true;
         }

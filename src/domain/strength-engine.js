@@ -900,8 +900,9 @@ function invertDisplayedToSavedBase(nextDisplayed, lastDisplayed, savedBase, exN
  * - ≥2 work sets hit target reps → +1 increment
  * - 1 work set hit target reps → stay
  * - 0 work sets hit target reps → −1 increment
- * Weighted (non-bodyweight) loads under 10 kg only go up when every work set
- * at that load is ≥8 reps with ≥5 RIR (and at least 2 such sets).
+ * Weighted (non-bodyweight) loads under 10 kg with an 8+ rep target only go up
+ * when every work set at that load is ≥8 reps with ≥5 RIR (and at least 2 such sets).
+ * Compound 5-rep work uses the 2-hit rule even under 10 kg.
  */
 export function progressStrengthWeight(exName, hist, currentWeight, opts = {}) {
     const tWeight = Number(currentWeight) || 0;
@@ -923,7 +924,7 @@ export function progressStrengthWeight(exName, hist, currentWeight, opts = {}) {
     const hitCount = sets.filter((l) => (Number(l.reps) || 0) >= targetReps).length;
     const fromDisplayed = lastDisplayed > 0 ? lastDisplayed : tWeight;
 
-    const lightWeighted = tWeight < 10 && !isBodyweightExercise(exName);
+    const lightWeighted = tWeight < 10 && !isBodyweightExercise(exName) && targetReps >= 8;
     let direction = 0;
     let note = '';
 

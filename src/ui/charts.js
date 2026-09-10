@@ -1,6 +1,7 @@
 import { store } from '../state/store.js';
 import { generateGroceryList } from '../domain/grocery.js';
-import { calculateTDEE } from '../domain/thermodynamics.js';
+import { calculateTDEE, refreshWeightAdaptAndRecalc } from '../domain/thermodynamics.js';
+import { ingestBodyMetricRows, peekWeightAdapt, renderWeightAdaptUi, trendYsForDayMs } from '../domain/weight-calorie-adapt.js';
 import {
     clearSleepForLocaleDay,
     deleteBodyMetricsForLocalDay,
@@ -220,6 +221,13 @@ export async function drawUnifiedChart() {
     }
     if (etaValue) etaValue.innerText = etaText;
 
+    if (Array.isArray(bodyData)) ingestBodyMetricRows(bodyData);
+    const adaptEv = peekWeightAdapt();
+    renderWeightAdaptUi(adaptEv);
+    const trendYs = adaptEv.fit
+        ? trendYsForDayMs(_unifiedPointMeta.map(p => p?.dayMs ?? null), adaptEv.fit)
+        : [];
+
     const canvas = document.getElementById('unifiedChart');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -259,6 +267,19 @@ export async function drawUnifiedChart() {
             tension: 0.3,
             spanGaps: false,
             yAxisID: 'bf'
+        });
+    }
+    if (trendYs.some(v => v != null)) {
+        datasets.push({
+            label: 'Trend',
+            data: trendYs,
+            borderColor: 'rgba(255,255,255,0.55)',
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: false,
+            tension: 0,
+            spanGaps: true,
+            yAxisID: 'y'
         });
     }
     if (routeYs.length) {
@@ -306,6 +327,7 @@ export async function drawUnifiedChart() {
                     document.getElementById('status-badge-weight')?.classList.remove('completed');
                     document.getElementById('status-badge-bodyfat')?.classList.remove('completed');
                 }
+                try { await refreshWeightAdaptAndRecalc(); } catch (e) { /* ignore */ }
                 drawUnifiedChart();
             },
             scales: {

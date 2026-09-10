@@ -11,6 +11,57 @@ function toISODate(d = new Date()) {
     return `${y}-${m}-${day}`;
 }
 
+function parseLocalWeightKey(key) {
+    if (!key || !key.startsWith('weight_')) return null;
+    const suffix = key.slice(7);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(suffix)) {
+        const d = new Date(`${suffix}T12:00:00`);
+        return Number.isNaN(d.getTime()) ? null : d;
+    }
+    const d = new Date(suffix);
+    return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** One weight point per local calendar day (latest cloud row wins, then local keys). */
+export async function fetchAllDailyWeights() {
+    const byIso = new Map();
+    const put = (dayDate, kg) => {
+        const w = Number(kg);
+        if (!Number.isFinite(w) || w <= 0) return;
+        const day = new Date(dayDate);
+        if (Number.isNaN(day.getTime())) return;
+        day.setHours(0, 0, 0, 0);
+        byIso.set(toISODate(day), { iso: toISODate(day), dayMs: day.getTime(), kg: w });
+    };
+
+    if (store.supabaseClient) {
+        try {
+            const { data, error } = await store.supabaseClient
+                .from('body_metrics')
+                .select('weight_kg, created_at')
+                .not('weight_kg', 'is', null)
+                .order('created_at', { ascending: true });
+            if (error) console.warn('body_metrics weight history', error);
+            (data || []).forEach((row) => put(row.created_at, row.weight_kg));
+        } catch (e) {
+            console.warn(e);
+        }
+    }
+
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            const day = parseLocalWeightKey(key);
+            if (!day) continue;
+            const iso = toISODate(new Date(new Date(day).setHours(0, 0, 0, 0)));
+            if (byIso.has(iso)) continue;
+            put(day, localStorage.getItem(key));
+        }
+    } catch (e) { /* ignore */ }
+
+    return [...byIso.values()].sort((a, b) => a.dayMs - b.dayMs);
+}
+
 function dayBounds(dayDate = new Date()) {
     const start = new Date(dayDate);
     start.setHours(0, 0, 0, 0);

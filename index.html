@@ -381,6 +381,7 @@
                 <div id="status-badge-snack" class="status-badge exe-btn" onclick="startExecution('snack', this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" y1="2" x2="6" y2="4"/><line x1="10" y1="2" x2="10" y2="4"/><line x1="14" y1="2" x2="14" y2="4"/></svg> Snack</div>
                 <div class="status-badge" style="border-style: dashed; justify-content: center;" onclick="document.getElementById('quick-add-modal').classList.remove('hidden')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Something else</div>
             </div>
+            <div id="weight-adapt-hint-fuel" class="hidden" style="font-size:11px; color:var(--gold-accent); text-align:center; margin:-8px 0 16px; line-height:1.4;"></div>
             <div id="daily-food-log"></div>
         </div>
     </div>
@@ -603,6 +604,8 @@
                 <div id="unified-eta-readout" style="background: var(--bg-surface-elevated); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 15px; text-align: center; border: 1px solid var(--border-subtle);">
                     <div class="hud-label" id="unified-eta-label" style="color: var(--gold-accent);">Destination ETA</div>
                     <div id="unified-eta-value" style="font-size: 16px; color: var(--text-main); font-weight: 800; font-family: 'Roboto Mono'; margin: 4px 0;">Calculating...</div>
+                    <div id="weight-trend-rate" style="font-size:13px; color:var(--text-main); font-weight:700; font-family:'Roboto Mono', monospace; margin-top:6px;"></div>
+                    <div id="weight-adapt-hint" class="hidden" style="font-size:11px; color:var(--gold-accent); margin-top:8px; line-height:1.4;"></div>
                 </div>
                 <div style="position: relative; height: 180px; width: 100%;"><canvas id="unifiedChart"></canvas></div>
                 <div style="font-size:10px; color:var(--text-muted); text-align:center; margin-top:8px;">Tap a point to delete that day’s log</div>

@@ -1761,6 +1761,39 @@ div[id$="-modal"] .modal-content {
     background: var(--bg-surface, #0a0a0a) !important;
 }
 
+#workout-cycle-modal {
+    z-index: 22000 !important;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+}
+#workout-cycle-modal .modal-content {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box;
+    padding: 18px 16px 20px;
+}
+.workout-cycle-choices {
+    display: flex !important;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+#workout-cycle-modal .workout-cycle-choices .btn-primary {
+    width: auto !important;
+    max-width: max-content;
+    flex: 0 0 auto !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 8px 12px;
+    font-size: 11px;
+    letter-spacing: 0.2px;
+    border-radius: 8px;
+}
+
 /* Workout Builder: same sheet treatment; keep number fields above the Custom button */
 #workout-builder-modal {
     z-index: 21120 !important;
