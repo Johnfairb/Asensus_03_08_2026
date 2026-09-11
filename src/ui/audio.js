@@ -33,6 +33,12 @@ let _lockScreen = null;
 let _cuePlaying = false;
 let _cueGen = 0;
 let _mediaHandlersInstalled = false;
+let _graphDead = false;
+let _pausingKeep = false;
+let _htmlPlayRetrying = false;
+let _ctxStateHooked = false;
+let _keepPauseHooked = false;
+let _recoveryInstalled = false;
 
 function pcmWavUrl(samples, sampleRate) {
     const n = samples.length;
@@ -221,11 +227,81 @@ export function clearLockScreenTimer() {
     }
 }
 
+function markGraphDead() {
+    _graphDead = true;
+    _htmlUnlocked = false;
+}
+
+function contextIsDead(ctx = _ctx) {
+    if (!ctx) return _graphDead;
+    return ctx.state === 'interrupted' || ctx.state === 'closed';
+}
+
+function hookAudioContextState(ctx) {
+    if (!ctx || _ctxStateHooked) return;
+    _ctxStateHooked = true;
+    const onState = () => {
+        if (ctx.state === 'interrupted' || ctx.state === 'closed') markGraphDead();
+        else if (ctx.state === 'running' && (_holdCount > 0 || lockScreenRemainingSec() > 0)) {
+            _graphDead = false;
+            startKeepAlive();
+        }
+    };
+    try { ctx.addEventListener('statechange', onState); } catch (e) {
+        try { ctx.onstatechange = onState; } catch (e2) { /* ignore */ }
+    }
+}
+
+function hookKeepElPause(el) {
+    if (!el || _keepPauseHooked) return;
+    _keepPauseHooked = true;
+    el.addEventListener('pause', () => {
+        if (_pausingKeep || _cuePlaying) return;
+        if (_holdCount > 0 || lockScreenRemainingSec() > 0) markGraphDead();
+    });
+}
+
+function discardAudioGraph() {
+    _pausingKeep = true;
+    if (_keepOsc) {
+        try { _keepOsc.stop(); } catch (e) { /* ignore */ }
+        try { _keepOsc.disconnect(); } catch (e) { /* ignore */ }
+        try { _keepGain?.disconnect(); } catch (e) { /* ignore */ }
+        _keepOsc = null;
+        _keepGain = null;
+    }
+    if (_ctx) {
+        try { _ctx.close(); } catch (e) { /* ignore */ }
+        _ctx = null;
+        window._ascensusAudioCtx = null;
+    }
+    _ctxStateHooked = false;
+    _pausingKeep = false;
+    _graphDead = false;
+}
+
+function recreateHtmlElements() {
+    _pausingKeep = true;
+    [_keepEl, _beepEl].forEach((el) => {
+        if (!el) return;
+        try { el.pause(); } catch (e) { /* ignore */ }
+        try { el.removeAttribute('src'); el.load(); } catch (e) { /* ignore */ }
+    });
+    _keepEl = null;
+    _beepEl = null;
+    _keepPauseHooked = false;
+    _htmlUnlocked = false;
+    _pausingKeep = false;
+}
+
 function getAudioContext() {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return null;
-    if (!_ctx) _ctx = new AudioCtx();
-    window._ascensusAudioCtx = _ctx;
+    if (!_ctx) {
+        _ctx = new AudioCtx();
+        window._ascensusAudioCtx = _ctx;
+        hookAudioContextState(_ctx);
+    }
     return _ctx;
 }
 
@@ -247,6 +323,7 @@ function getKeepEl() {
         _keepEl.volume = 0.01;
         _keepEl.setAttribute('playsinline', '');
         _keepEl.setAttribute('webkit-playsinline', '');
+        hookKeepElPause(_keepEl);
     }
     return _keepEl;
 }
@@ -260,7 +337,7 @@ function onCueEnded() {
     }
 }
 
-function playHtmlWav(url) {
+function playHtmlWav(url, isRetry = false) {
     try {
         const keepPlaying = _keepEl && !_keepEl.paused;
         const holdActive = _holdCount > 0 || !!_lockScreen || keepPlaying;
@@ -268,12 +345,28 @@ function playHtmlWav(url) {
         const gen = ++_cueGen;
         _cuePlaying = true;
         el.loop = false;
-        el.pause();
+        _pausingKeep = true;
+        try { el.pause(); } catch (e) { /* ignore */ }
+        _pausingKeep = false;
         el.volume = 1;
         el.src = url;
-        el.currentTime = 0;
+        try { el.load(); } catch (e) { /* ignore */ }
+        try { el.currentTime = 0; } catch (e) { /* ignore */ }
         const p = el.play();
-        if (p && p.catch) p.catch(() => { if (gen === _cueGen) _cuePlaying = false; });
+        if (p && p.catch) {
+            p.catch(() => {
+                if (gen !== _cueGen) return;
+                _cuePlaying = false;
+                markGraphDead();
+                if (!isRetry && !_htmlPlayRetrying) {
+                    _htmlPlayRetrying = true;
+                    recreateHtmlElements();
+                    const ok = playHtmlWav(url, true);
+                    _htmlPlayRetrying = false;
+                    if (!ok) _cuePlaying = false;
+                }
+            });
+        }
         el.addEventListener('ended', () => {
             if (gen !== _cueGen) return;
             onCueEnded();
@@ -281,6 +374,7 @@ function playHtmlWav(url) {
         return true;
     } catch (e) {
         _cuePlaying = false;
+        markGraphDead();
         return false;
     }
 }
@@ -300,12 +394,13 @@ function startKeepAlive() {
                 _keepOsc.start();
             }
         } catch (e) { /* ignore */ }
-        ctx.resume?.().catch?.(() => {});
+        ctx.resume?.().catch?.(() => { markGraphDead(); });
     }
     try {
         const el = getKeepEl();
         el.volume = 0.01;
         const left = lockScreenRemainingSec();
+        _pausingKeep = true;
         if (left > 0 && _lockScreen) {
             _lockScreen.durationSec = left;
             _lockScreen.startedAt = Date.now();
@@ -317,13 +412,18 @@ function startKeepAlive() {
             el.loop = true;
             if (el.src !== silentUrl()) el.src = silentUrl();
         }
+        _pausingKeep = false;
         const p = el.play();
-        if (p && p.catch) p.catch(() => {});
+        if (p && p.then) {
+            p.then(() => { _graphDead = false; }).catch(() => { markGraphDead(); });
+        }
         el.onended = () => {
             if (_cuePlaying) return;
             if (lockScreenRemainingSec() > 1 || _holdCount > 0) startKeepAlive();
         };
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        _pausingKeep = false;
+    }
 }
 
 function stopKeepAlive() {
@@ -336,7 +436,9 @@ function stopKeepAlive() {
         _keepGain = null;
     }
     if (_keepEl) {
+        _pausingKeep = true;
         try { _keepEl.pause(); } catch (e) { /* ignore */ }
+        _pausingKeep = false;
     }
 }
 
@@ -365,12 +467,32 @@ function scheduleWebAudio(notes, { type = 'square', peak = 0.55, now } = {}) {
     }
 }
 
-/** Resume/create audio during a user gesture so later timer beeps are allowed. */
-export function unlockAudio() {
-    installAudioUnlock();
+function resumeContext() {
     const ctx = getAudioContext();
-    if (ctx && ctx.state !== 'running') {
-        try { ctx.resume(); } catch (e) { /* ignore */ }
+    if (!ctx) return null;
+    if (ctx.state !== 'running') {
+        try { ctx.resume()?.catch?.(() => markGraphDead()); } catch (e) { /* ignore */ }
+    }
+    return ctx;
+}
+
+/**
+ * Safari/iOS kills PWA audio when WhatsApp (or another app) takes the session.
+ * Recreate the graph only from a user gesture — visibilitychange is not enough.
+ */
+export function unlockAudio(fromGesture = false) {
+    installAudioUnlock();
+    installAudioRecovery();
+    if (fromGesture && (_graphDead || contextIsDead())) {
+        discardAudioGraph();
+        recreateHtmlElements();
+    }
+    const ctx = resumeContext();
+    if (ctx && ctx.state === 'running') _graphDead = false;
+    if (_holdCount > 0 || lockScreenRemainingSec() > 0) {
+        startKeepAlive();
+        _htmlUnlocked = true;
+        return;
     }
     if (!_htmlUnlocked) {
         try {
@@ -380,20 +502,54 @@ export function unlockAudio() {
             if (p && p.then) {
                 p.then(() => {
                     _htmlUnlocked = true;
+                    _pausingKeep = true;
                     try { el.pause(); el.currentTime = 0; } catch (e) { /* ignore */ }
-                }).catch(() => {});
+                    _pausingKeep = false;
+                }).catch(() => { markGraphDead(); });
             }
         } catch (e) { /* ignore */ }
     }
 }
 
+/** Best-effort resume after backgrounding. Full rebuild waits for the next tap. */
+export function recoverAudioFromInterruption() {
+    installAudioRecovery();
+    const ctx = _ctx;
+    if (ctx && (ctx.state === 'interrupted' || ctx.state === 'suspended' || ctx.state === 'closed')) {
+        if (ctx.state === 'interrupted' || ctx.state === 'closed') markGraphDead();
+        try {
+            ctx.resume?.().then(() => {
+                if (ctx.state === 'running') {
+                    _graphDead = false;
+                    if (_holdCount > 0 || lockScreenRemainingSec() > 0) startKeepAlive();
+                } else {
+                    markGraphDead();
+                }
+            }).catch(() => markGraphDead());
+        } catch (e) { markGraphDead(); }
+        return;
+    }
+    if (_holdCount > 0 || lockScreenRemainingSec() > 0) startKeepAlive();
+}
+
+function installAudioRecovery() {
+    if (_recoveryInstalled || typeof window === 'undefined') return;
+    _recoveryInstalled = true;
+    const recover = () => {
+        try { recoverAudioFromInterruption(); } catch (e) { /* ignore */ }
+    };
+    window.addEventListener('pageshow', recover);
+    window.addEventListener('focus', recover);
+}
+
 export function installAudioUnlock() {
     if (_unlockInstalled || typeof document === 'undefined') return;
     _unlockInstalled = true;
-    const unlock = () => { unlockAudio(); };
+    const unlock = () => { unlockAudio(true); };
     ['pointerdown', 'touchstart', 'keydown'].forEach(ev => {
         document.addEventListener(ev, unlock, { capture: true, passive: true });
     });
+    installAudioRecovery();
 }
 
 /** Keep the audio graph alive for the duration of a rest/stretch timer. */
@@ -439,6 +595,7 @@ async function playSequence(notes, { type, peak, fallbackUrl }) {
                 }
             } catch (e) { /* ignore */ }
             if (ctx.state === 'running' && scheduleWebAudio(notes, { type, peak })) return;
+            if (ctx.state === 'interrupted') markGraphDead();
         }
     }
     playHtmlWav(fallbackUrl());

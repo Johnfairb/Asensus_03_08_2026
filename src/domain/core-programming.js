@@ -1,5 +1,5 @@
 /**
- * Strength core circuit: level pools, monthly picks, advised targets.
+ * Strength core circuit: 1 exercise from each category, still mixed by level.
  * Beginner → 5×B · Intermediate → 3×B + 2×I · Advanced → A, I∪A, I, I∪B, B.
  */
 import { store } from '../state/store.js';
@@ -36,6 +36,9 @@ const CORE_EQUIPMENT_GROUP = {
 
 export const CORE_STRENGTH_LEVELS = ['Beginner', 'Intermediate', 'Advanced'];
 
+/** Circuit always takes one exercise from each of these. */
+export const CORE_CATEGORIES = ['upper-abs', 'lower-abs', 'rotation', 'anti-rotation', 'ql'];
+
 export function normalizeCoreStrength(level) {
     const s = String(level || '').trim();
     if (/^adv/i.test(s)) return 'Advanced';
@@ -60,62 +63,84 @@ function shuffleInPlace(arr) {
     return arr;
 }
 
-function namesAtLevels(levels, exclude = []) {
-    const want = new Set(levels);
-    const ex = new Set(exclude);
-    return getCoreProgrammingEntries()
-        .filter((e) => want.has(e.level) && !ex.has(e.name))
-        .map((e) => e.name);
+export function coreCategoryOf(name) {
+    const resolved = resolveCoreExerciseName(name) || String(name || '').trim();
+    if (!resolved) return null;
+    const meta = getExerciseMeta(resolved);
+    if (meta?.coreCategory && CORE_CATEGORIES.includes(meta.coreCategory)) return meta.coreCategory;
+    const entry = getCoreProgrammingEntries().find((e) => e.name === resolved);
+    return (entry?.category && CORE_CATEGORIES.includes(entry.category)) ? entry.category : null;
 }
 
-function pickOne(pool, used) {
-    const available = (pool || []).filter((n) => !used.includes(n));
-    if (!available.length) return null;
-    const pick = available[Math.floor(Math.random() * available.length)];
-    used.push(pick);
-    return pick;
+function levelSlotsForTier(tier) {
+    if (tier === 'Beginner') return [['B'], ['B'], ['B'], ['B'], ['B']];
+    if (tier === 'Intermediate') return shuffleInPlace([['B'], ['B'], ['B'], ['I'], ['I']]);
+    // Tightest pools first so Advanced can still land 1 A / 1 I / 1 B plus the unions.
+    return [['A'], ['I'], ['B'], ['I', 'A'], ['I', 'B']];
+}
+
+function entriesForCategory(category, levels, usedNames) {
+    const want = new Set(levels);
+    return getCoreProgrammingEntries().filter((e) => (
+        e.category === category
+        && want.has(e.level)
+        && !usedNames.has(e.name)
+    ));
+}
+
+function pickOneFrom(entries) {
+    if (!entries.length) return null;
+    return entries[Math.floor(Math.random() * entries.length)];
 }
 
 /**
- * Pick 5 core exercises for the user's rated core strength.
+ * Pick 5 core exercises: one per category, mixed by the user's core strength rating.
  * Returns canonical catalog names (unique when pools allow).
  */
 export function pickCoreExercisesForLevel(level = getCoreStrengthLevel()) {
     const tier = normalizeCoreStrength(level) || 'Beginner';
-    const used = [];
-    const out = [];
+    const slots = levelSlotsForTier(tier);
+    const cats = shuffleInPlace(CORE_CATEGORIES.slice());
 
-    const take = (pool) => {
-        const pick = pickOne(pool, used);
-        if (pick) out.push(pick);
+    const search = (slotIdx, usedCats, usedNames, out) => {
+        if (slotIdx >= slots.length) return true;
+        const remaining = cats.filter((c) => !usedCats.has(c));
+        const tryPools = (levels) => remaining
+            .map((c) => ({ c, pool: entriesForCategory(c, levels, usedNames) }))
+            .filter((row) => row.pool.length)
+            .sort((a, b) => cats.indexOf(a.c) - cats.indexOf(b.c));
+
+        const attempts = [
+            ...tryPools(slots[slotIdx]),
+            ...tryPools(['B', 'I', 'A'])
+        ];
+        const seen = new Set();
+        for (const { c, pool } of attempts) {
+            const key = `${c}:${pool.map((e) => e.name).join(',')}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const pick = pickOneFrom(pool);
+            if (!pick) continue;
+            usedCats.add(c);
+            usedNames.add(pick.name);
+            out.push(pick.name);
+            if (search(slotIdx + 1, usedCats, usedNames, out)) return true;
+            out.pop();
+            usedCats.delete(c);
+            usedNames.delete(pick.name);
+        }
+        return false;
     };
 
-    if (tier === 'Beginner') {
-        const b = shuffleInPlace(namesAtLevels(['B']));
-        for (let i = 0; i < 5; i++) take(b);
-    } else if (tier === 'Intermediate') {
-        const b = shuffleInPlace(namesAtLevels(['B']));
-        const iPool = shuffleInPlace(namesAtLevels(['I']));
-        for (let i = 0; i < 3; i++) take(b);
-        for (let i = 0; i < 2; i++) take(iPool);
-    } else {
-        // Advanced: 1 A · 1 I∪A · 1 I · 1 I∪B · 1 B
-        take(shuffleInPlace(namesAtLevels(['A'])));
-        take(shuffleInPlace(namesAtLevels(['I', 'A'], used)));
-        take(shuffleInPlace(namesAtLevels(['I'], used)));
-        take(shuffleInPlace(namesAtLevels(['I', 'B'], used)));
-        take(shuffleInPlace(namesAtLevels(['B'], used)));
-    }
-
-    // Fallback fill if a pool was empty
-    if (out.length < 5) {
-        const all = shuffleInPlace(namesAtLevels(['B', 'I', 'A'], used));
-        while (out.length < 5 && all.length) {
-            const n = all.shift();
-            if (!used.includes(n)) {
-                used.push(n);
-                out.push(n);
-            }
+    const out = [];
+    if (!search(0, new Set(), new Set(), out)) {
+        const used = new Set(out);
+        for (const c of CORE_CATEGORIES) {
+            if (out.length >= 5) break;
+            const fallback = pickOneFrom(entriesForCategory(c, ['B', 'I', 'A'], used));
+            if (!fallback) continue;
+            used.add(fallback.name);
+            out.push(fallback.name);
         }
     }
 
@@ -176,17 +201,22 @@ export function orderCoreExercisesByEquipment(names) {
 
 export function coreSwapCandidates(currentName, circuitNames) {
     const current = resolveCoreExerciseName(currentName);
-    const level = getExerciseMeta(current)?.coreLevel;
-    if (!current || !level) return [];
+    if (!current) return [];
     const used = new Set(
         (Array.isArray(circuitNames) ? circuitNames : [])
             .map((n) => resolveCoreExerciseName(n) || String(n || '').trim())
             .filter((n) => n && n !== current)
     );
+    const currentCat = coreCategoryOf(current);
     return getCoreProgrammingEntries()
-        .filter((e) => e.level === level && e.name !== current && !used.has(e.name))
-        .map((e) => e.name)
-        .sort((a, b) => a.localeCompare(b));
+        .filter((e) => e.name !== current && !used.has(e.name))
+        .sort((a, b) => {
+            const aSame = coreCategoryOf(a.name) === currentCat ? 0 : 1;
+            const bSame = coreCategoryOf(b.name) === currentCat ? 0 : 1;
+            if (aSame !== bSame) return aSame - bSame;
+            return a.name.localeCompare(b.name);
+        })
+        .map((e) => e.name);
 }
 
 export function loadSavedCoreCircuits() {

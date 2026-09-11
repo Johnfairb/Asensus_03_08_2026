@@ -251,7 +251,7 @@ function preferPlateWeightForSet(item, setIdx) {
     const side = sets[setIdx]?.side;
     for (let i = setIdx - 1; i >= 0; i--) {
         const s = sets[i];
-        if (!s || !s.isWarmup) continue;
+        if (!s || s.isText || s.isLactateHit) continue;
         if (side && s.side && s.side !== side) continue;
         const w = Number(s.weight);
         if (w >= 20) return w;

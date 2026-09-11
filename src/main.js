@@ -7,7 +7,7 @@ import { bindUi } from './ui/bind.js';
 import { applyThemeChoice } from './ui/auth-onboarding.js';
 import { startNotificationScheduler } from './ui/notifications.js';
 import { syncRestTimersFromWallClock, syncStretchTimersFromWallClock, syncHitTimersFromWallClock } from './ui/drive.js';
-import { unlockAudio } from './ui/audio.js';
+import { recoverAudioFromInterruption, unlockAudio } from './ui/audio.js';
 import { onAppBecameVisible } from './domain/thermodynamics.js';
 import { ensureFormVideos } from './domain/form-videos.js';
 
@@ -41,6 +41,7 @@ setTimeout(seedDefaultDatabase, 2000);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     checkMidnightRollover();
+    try { recoverAudioFromInterruption(); } catch (e) { /* ignore */ }
     try { unlockAudio(); } catch (e) { /* ignore */ }
     try { syncRestTimersFromWallClock(); } catch (e) { /* ignore */ }
     try { syncStretchTimersFromWallClock(); } catch (e) { /* ignore */ }

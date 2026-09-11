@@ -1,6 +1,8 @@
 /**
  * Barbell plate combinations (per side), preferring warmup plates
  * and never stacking equal plates unless they are 20 kg or 25 kg.
+ * No previous load → prefer 25s. Previous load used a 20 → keep 20s
+ * (so 100 kg is 20|20 instead of 25|15).
  */
 const PLATE_SIZES = [25, 20, 15, 10, 5, 2.5, 1.25];
 
@@ -65,7 +67,9 @@ function scoreCombo(combo, prefer) {
             pref.splice(i, 1);
         }
     });
-    return { kept, removed: pref.length, count: combo.length, first: combo[0] || 0 };
+    const preferHas20 = (prefer || []).includes(20);
+    const twentyCount = combo.filter((p) => p === 20).length;
+    return { kept, removed: pref.length, count: combo.length, first: combo[0] || 0, preferHas20, twentyCount };
 }
 
 export function choosePlatesForSide(sideKg, preferPlates = []) {
@@ -78,6 +82,9 @@ export function choosePlatesForSide(sideKg, preferPlates = []) {
         if (sb.kept !== sa.kept) return sb.kept - sa.kept;
         if (sa.removed !== sb.removed) return sa.removed - sb.removed;
         if (sa.count !== sb.count) return sa.count - sb.count;
+        if (sa.preferHas20 || sb.preferHas20) {
+            if (sb.twentyCount !== sa.twentyCount) return sb.twentyCount - sa.twentyCount;
+        }
         return (sb.first || 0) - (sa.first || 0);
     });
     return combos[0];
